@@ -1,7 +1,7 @@
 # MoonBit Project Commands
 
-# Default target (native supports async)
-target := "native"
+# Default target (js for browser compatibility)
+target := "js"
 
 # Default task: check and test
 default: check test

@@ -68,6 +68,78 @@ just mnist-train --backend gpu --bench --bench-no-readback # GPU training withou
 just mnist-train --epochs 5 --limit 2048 # quick training on a subset
 ```
 
+## Benchmarks (MNIST subset)
+
+Measured on 2026-02-05 with `limit=1024`, `epochs=5`, `batch=128`, `lr=0.1`.
+GPU uses dataset segmentation (`segment_samples=42752`) because of the
+`max_*_buffer_binding_size` (128MB) limit.
+
+MoonBit (this repo):
+
+```
+# CPU
+moon run --target native src/train -- --backend cpu --epochs 5 --limit 1024 --bench
+bench: backend=cpu train_ms=11000
+epoch 5 loss=1.0267586708068848 acc=0.7705078125
+result: backend=cpu split=test loss=1.0727334022521973 acc=0.729200005531311
+
+# GPU
+moon run --target native src/train -- --backend gpu --epochs 5 --limit 1024 --bench
+bench: backend=gpu train_ms=1000
+epoch 5 loss=1.0264246463775635 acc=0.767578125
+result: backend=gpu split=test loss=1.0608453750610352 acc=0.7218000292778015
+
+# GPU (no readback)
+moon run --target native src/train -- --backend gpu --epochs 5 --limit 1024 --bench --bench-no-readback
+bench: backend=gpu train_ms=1000
+result: backend=gpu split=test loss=1.0608453750610352 acc=0.7218000292778015
+```
+
+PyTorch baseline (~/sandbox/torch-mnist):
+
+```
+cd ~/sandbox/torch-mnist
+uv run python main.py --epochs 5 --limit 1024 --device cpu
+bench: backend=pytorch device=cpu train_ms=36
+result: split=test loss=1.196183 acc=0.751400
+
+uv run python main.py --epochs 5 --limit 1024 --device mps
+bench: backend=pytorch device=mps train_ms=140
+result: split=test loss=1.196183 acc=0.751400
+```
+
+Notes:
+- These numbers are for a small subset and are not directly comparable across
+  runtimes; they are included only for rough, local comparison.
+- PyTorch uses the MNIST data from `data/mnist` in this repo by default.
+
+## Benchmarks (MNIST full)
+
+Measured on 2026-02-05 with full dataset, `epochs=20`, `batch=128`, `lr=0.1`.
+GPU uses dataset segmentation (`segment_samples=42752`) because of the
+`max_*_buffer_binding_size` (128MB) limit.
+
+```
+# GPU
+moon run --target native src/train -- --backend gpu --bench
+bench: backend=gpu train_ms=121000
+result: backend=gpu split=test loss=0.15878579020500183 acc=0.953000009059906
+
+# GPU (no readback)
+moon run --target native src/train -- --backend gpu --bench --bench-no-readback
+bench: backend=gpu train_ms=114000
+result: backend=gpu split=test loss=0.15878579020500183 acc=0.953000009059906
+```
+
+PyTorch baseline (~/sandbox/torch-mnist):
+
+```
+cd ~/sandbox/torch-mnist
+uv run python main.py --epochs 20 --device mps
+bench: backend=pytorch device=mps train_ms=10282
+result: split=test loss=0.079558 acc=0.976200
+```
+
 ## Native (wgpu-native)
 
 `mnist-infer` and `mnist-train --backend gpu` use the wgpu-native backend

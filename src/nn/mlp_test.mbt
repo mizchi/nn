@@ -12,13 +12,28 @@ test "mlp_buffer_plan_sizes" {
 }
 
 ///|
-test "mlp_train_buffer_plan_sizes" {
+test "mlp_dataset_buffer_plan_sizes" {
   let spec = mlp_spec_new(4, 3, 2, 2).unwrap()
-  let plan = mlp_plan_train_buffers(spec).unwrap()
-  inspect(plan.grad_weight1_bytes, content="48")
-  inspect(plan.grad_bias1_bytes, content="12")
-  inspect(plan.grad_weight2_bytes, content="24")
-  inspect(plan.grad_bias2_bytes, content="8")
+  let plan = mlp_plan_dataset_buffers(spec, 10).unwrap()
+  inspect(plan.dataset_input_bytes, content="160")
+  inspect(plan.dataset_label_bytes, content="40")
+  inspect(plan.indices_bytes, content="44")
+  inspect(plan.shuffle_params_bytes, content="8")
+}
+
+///|
+test "mlp_loss_buffer_plan_dataset" {
+  let spec = mlp_spec_new(4, 3, 2, 2).unwrap()
+  let plan = mlp_plan_loss_buffers_for_dataset(spec, 10).unwrap()
+  inspect(plan.labels_bytes, content="40")
+  inspect(plan.loss_bytes, content="8")
+  inspect(plan.probs_bytes, content="16")
+  inspect(plan.loss_sum_bytes, content="4")
+  inspect(plan.correct_bytes, content="8")
+  inspect(plan.correct_sum_bytes, content="4")
+  inspect(plan.epoch_loss_bytes, content="4")
+  inspect(plan.epoch_correct_bytes, content="4")
+  inspect(plan.epoch_seen_bytes, content="4")
 }
 
 ///|
@@ -43,13 +58,21 @@ test "mlp_dispatch_plan" {
 }
 
 ///|
+test "mlp_dispatch_plan_tiled_grid" {
+  let spec = mlp_spec_new(4, 9, 2, 1).unwrap()
+  let plan = mlp_dispatch_plan(spec, 4).unwrap()
+  inspect(plan.layer1_dispatch_x, content="5")
+  inspect(plan.layer2_dispatch_x, content="1")
+}
+
+///|
 test "mlp_train_dispatch_plan" {
   let spec = mlp_spec_new(4, 3, 2, 2).unwrap()
   let plan = mlp_train_dispatch_plan(spec, 4).unwrap()
-  inspect(plan.grad_w1_dispatch_x, content="3")
-  inspect(plan.grad_b1_dispatch_x, content="1")
-  inspect(plan.grad_w2_dispatch_x, content="2")
-  inspect(plan.grad_b2_dispatch_x, content="1")
+  inspect(plan.grad_update_w1_dispatch_x, content="3")
+  inspect(plan.grad_update_b1_dispatch_x, content="1")
+  inspect(plan.grad_update_w2_dispatch_x, content="2")
+  inspect(plan.grad_update_b2_dispatch_x, content="1")
 }
 
 ///|
@@ -62,7 +85,15 @@ test "mlp_shader_plan" {
   )
   inspect(plan.layer1_wgsl.contains("@workgroup_size(64)"), content="true")
   inspect(
+    plan.layer1_wgsl.contains("var<workgroup> input_tile"),
+    content="true",
+  )
+  inspect(
     plan.layer2_wgsl.contains("const OUTPUT_SIZE : u32 = 2u;"),
+    content="true",
+  )
+  inspect(
+    plan.layer2_wgsl.contains("var<workgroup> weight_tile"),
     content="true",
   )
 }

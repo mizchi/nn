@@ -1,0 +1,85 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/wgpu/numbt"
+
+// Values
+pub fn cross_entropy_loss(Vec, Int) -> Float
+
+pub fn mat_view(Array[Float], Int, Int) -> Mat
+
+pub fn matmul_vec_bias_into(Mat, Vec, Vec, Vec) -> Unit
+
+pub fn matmul_vec_bias_relu_into(Mat, Vec, Vec, Vec) -> Unit
+
+pub fn matmul_vec_into(Mat, Vec, Vec) -> Unit
+
+pub fn relu(Float) -> Float
+
+pub fn relu_grad(Float) -> Float
+
+pub fn softmax_into(Vec, Vec) -> Unit
+
+pub fn vec_add(Vec, Vec) -> Vec
+
+pub fn vec_add_into(Vec, Vec, Vec) -> Unit
+
+pub fn vec_argmax(Vec) -> Int
+
+pub fn vec_at(Vec, Int) -> Float
+
+pub fn vec_div(Vec, Vec) -> Vec
+
+pub fn vec_div_into(Vec, Vec, Vec) -> Unit
+
+pub fn vec_exp_into(Vec, Vec) -> Unit
+
+pub fn vec_fill(Vec, Float) -> Unit
+
+pub fn vec_from_array(Array[Float]) -> Vec
+
+pub fn vec_len(Vec) -> Int
+
+pub fn vec_max(Vec) -> Float
+
+pub fn vec_mul(Vec, Vec) -> Vec
+
+pub fn vec_mul_into(Vec, Vec, Vec) -> Unit
+
+pub fn vec_new(Int, Float) -> Vec
+
+pub fn vec_scale_inplace(Vec, Float) -> Unit
+
+pub fn vec_set(Vec, Int, Float) -> Unit
+
+pub fn vec_sub(Vec, Vec) -> Vec
+
+pub fn vec_sub_into(Vec, Vec, Vec) -> Unit
+
+pub fn vec_sum(Vec) -> Float
+
+pub fn vec_to_array(Vec) -> Array[Float]
+
+pub fn vec_view(Array[Float], Int, Int) -> Vec
+
+// Errors
+
+// Types and methods
+pub struct Mat {
+  data : Array[Float]
+  rows : Int
+  cols : Int
+}
+
+pub struct Vec {
+  data : Array[Float]
+  offset : Int
+  len : Int
+}
+pub impl Add for Vec
+pub impl Div for Vec
+pub impl Mul for Vec
+pub impl Sub for Vec
+
+// Type aliases
+
+// Traits
+

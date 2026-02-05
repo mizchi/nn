@@ -1,0 +1,344 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/wgpu/nn"
+
+import {
+  "mizchi/wgpu",
+}
+
+// Values
+pub fn mlp_dataset_new(Int, Array[Float], Array[Int]) -> Result[MlpDataset, MlpError]
+
+pub fn mlp_dataset_shader_plan(MlpSpec, Int, Int) -> Result[MlpDatasetShaderPlan, MlpError]
+
+pub fn mlp_dispatch_plan(MlpSpec, Int) -> Result[MlpDispatchPlan, MlpError]
+
+pub fn mlp_error_invalid_shape(String) -> MlpError
+
+pub fn mlp_error_invalid_spec(String) -> MlpError
+
+pub fn mlp_eval(MlpSpec, MlpParams, MlpDataset) -> Result[MlpTrainMetrics, MlpError]
+
+pub fn mlp_eval_from_bytes(MlpSpec, Bytes, MlpDataset) -> Result[MlpTrainMetrics, MlpError]
+
+pub fn mlp_forward(MlpSpec, MlpParams, Array[Float]) -> Result[MlpCpuResult, MlpError]
+
+pub fn mlp_init_params(MlpSpec, Int) -> Result[MlpParams, MlpError]
+
+pub fn mlp_init_params_with_policy(MlpSpec, Int, MlpInitPolicy) -> Result[MlpParams, MlpError]
+
+pub let mlp_init_policy_deterministic : MlpInitPolicy
+
+pub let mlp_init_policy_he_uniform : MlpInitPolicy
+
+pub let mlp_init_policy_xavier_uniform : MlpInitPolicy
+
+pub let mlp_init_policy_zeros : MlpInitPolicy
+
+pub fn mlp_input_bytes_to_array(MlpSpec, Bytes) -> Result[Array[Float], MlpError]
+
+pub fn mlp_input_to_bytes(MlpSpec, Array[Float]) -> Result[Bytes, MlpError]
+
+pub fn mlp_loss_dispatch_x(MlpSpec, Int) -> Result[Int, MlpError]
+
+pub fn mlp_loss_reduce_dispatch_x(MlpSpec, Int) -> Result[Int, MlpError]
+
+pub fn mlp_loss_shader_plan(MlpSpec, Int) -> Result[MlpLossShaderPlan, MlpError]
+
+pub fn mlp_loss_shader_plan_default() -> MlpLossShaderPlan
+
+pub fn mlp_output_bytes_to_array(MlpSpec, Bytes) -> Result[Array[Float], MlpError]
+
+pub fn mlp_output_from_bytes(MlpSpec, Array[Float]) -> Result[Bytes, MlpError]
+
+pub fn mlp_params_bytes_length(MlpSpec) -> Result[Int, MlpError]
+
+pub fn mlp_params_from_bytes(MlpSpec, Bytes) -> Result[MlpParams, MlpError]
+
+pub fn mlp_params_new(MlpSpec, Array[Float], Array[Float], Array[Float], Array[Float]) -> Result[MlpParams, MlpError]
+
+pub fn mlp_params_to_bytes(MlpSpec, MlpParams) -> Result[Bytes, MlpError]
+
+pub fn mlp_plan_buffers(MlpSpec) -> Result[MlpBufferPlan, MlpError]
+
+pub fn mlp_plan_dataset_buffers(MlpSpec, Int) -> Result[MlpDatasetBufferPlan, MlpError]
+
+pub fn mlp_plan_loss_buffers(MlpSpec) -> Result[MlpLossBufferPlan, MlpError]
+
+pub fn mlp_plan_loss_buffers_for_dataset(MlpSpec, Int) -> Result[MlpLossBufferPlan, MlpError]
+
+pub fn mlp_plan_loss_resources(MlpSpec) -> Result[MlpLossResourcePlan, MlpError]
+
+pub fn mlp_plan_loss_resources_for_dataset(MlpSpec, Int) -> Result[MlpLossResourcePlan, MlpError]
+
+pub fn mlp_plan_resources(MlpSpec) -> Result[MlpResourcePlan, MlpError]
+
+pub fn mlp_shader_plan(MlpSpec, Int) -> Result[MlpShaderPlan, MlpError]
+
+pub fn mlp_shader_plan_default() -> MlpShaderPlan
+
+pub fn mlp_spec_new(Int, Int, Int, Int) -> Result[MlpSpec, MlpError]
+
+pub fn mlp_train(MlpSpec, MlpParams, MlpDataset, MlpTrainConfig) -> Result[MlpTrainResult, MlpError]
+
+pub fn mlp_train_config(Int, Int, Float, Bool, Int) -> MlpTrainConfig
+
+pub fn mlp_train_config_default() -> MlpTrainConfig
+
+pub fn mlp_train_dispatch_plan(MlpSpec, Int) -> Result[MlpTrainDispatchPlan, MlpError]
+
+pub fn mlp_train_metrics(Float, Float) -> MlpTrainMetrics
+
+pub fn mlp_train_result(MlpParams, Array[MlpTrainMetrics]) -> MlpTrainResult
+
+pub fn mlp_train_shader_plan(MlpSpec, Int) -> Result[MlpTrainShaderPlan, MlpError]
+
+pub fn mlp_validate_input(MlpSpec, Array[Float]) -> Result[Unit, MlpError]
+
+pub fn mlp_validate_params(MlpSpec, MlpParams) -> Result[Unit, MlpError]
+
+pub fn mlp_validate_spec(MlpSpec) -> Result[Unit, MlpError]
+
+pub fn mnist_error_invalid_dataset(String) -> MnistError
+
+pub fn mnist_error_invalid_label(String) -> MnistError
+
+pub fn mnist_error_invalid_length(String) -> MnistError
+
+pub fn mnist_error_invalid_magic(String) -> MnistError
+
+pub fn mnist_error_io(String) -> MnistError
+
+pub fn mnist_image_size(MnistImages) -> Int
+
+pub fn mnist_images_to_floats(MnistImages, Int?) -> Array[Float]
+
+pub fn mnist_labels_to_array(MnistLabels, Int?) -> Result[Array[Int], MnistError]
+
+pub fn mnist_read_images(Bytes) -> Result[MnistImages, MnistError]
+
+pub fn mnist_read_labels(Bytes) -> Result[MnistLabels, MnistError]
+
+pub fn mnist_to_mlp_dataset(MnistImages, MnistLabels, Int?) -> Result[MlpDataset, MnistError]
+
+// Errors
+
+// Types and methods
+pub struct MlpBufferPlan {
+  input_bytes : Int
+  hidden_bytes : Int
+  output_bytes : Int
+  weight1_bytes : Int
+  bias1_bytes : Int
+  weight2_bytes : Int
+  bias2_bytes : Int
+}
+pub impl Eq for MlpBufferPlan
+pub impl Show for MlpBufferPlan
+
+pub struct MlpCpuResult {
+  hidden : Array[Float]
+  output : Array[Float]
+}
+pub impl Eq for MlpCpuResult
+pub impl Show for MlpCpuResult
+
+pub struct MlpDataset {
+  input_size : Int
+  count : Int
+  inputs : Array[Float]
+  labels : Array[Int]
+}
+pub impl Eq for MlpDataset
+pub impl Show for MlpDataset
+
+pub struct MlpDatasetBufferPlan {
+  dataset_input_bytes : Int
+  dataset_label_bytes : Int
+  indices_bytes : Int
+  shuffle_params_bytes : Int
+}
+pub impl Eq for MlpDatasetBufferPlan
+pub impl Show for MlpDatasetBufferPlan
+
+pub struct MlpDatasetShaderPlan {
+  workgroup_size : Int
+  indices_wgsl : String
+}
+pub impl Eq for MlpDatasetShaderPlan
+pub impl Show for MlpDatasetShaderPlan
+
+pub struct MlpDispatchPlan {
+  workgroup_size : Int
+  layer1_dispatch_x : Int
+  layer2_dispatch_x : Int
+}
+pub impl Eq for MlpDispatchPlan
+pub impl Show for MlpDispatchPlan
+
+pub enum MlpError {
+  InvalidSpec(String)
+  InvalidShape(String)
+}
+pub impl Eq for MlpError
+pub impl Show for MlpError
+
+pub enum MlpInitPolicy {
+  Zeros
+  Deterministic
+  XavierUniform
+  HeUniform
+}
+pub impl Eq for MlpInitPolicy
+pub impl Show for MlpInitPolicy
+
+pub struct MlpLossBufferPlan {
+  labels_bytes : Int
+  loss_bytes : Int
+  probs_bytes : Int
+  loss_sum_bytes : Int
+  correct_bytes : Int
+  correct_sum_bytes : Int
+  epoch_loss_bytes : Int
+  epoch_correct_bytes : Int
+  epoch_seen_bytes : Int
+}
+pub impl Eq for MlpLossBufferPlan
+pub impl Show for MlpLossBufferPlan
+
+pub struct MlpLossResourcePlan {
+  labels : @wgpu.BufferDescriptor
+  loss : @wgpu.BufferDescriptor
+  probs : @wgpu.BufferDescriptor
+  loss_sum : @wgpu.BufferDescriptor
+  correct : @wgpu.BufferDescriptor
+  correct_sum : @wgpu.BufferDescriptor
+  epoch_loss : @wgpu.BufferDescriptor
+  epoch_correct : @wgpu.BufferDescriptor
+  epoch_seen : @wgpu.BufferDescriptor
+}
+pub impl Eq for MlpLossResourcePlan
+pub impl Show for MlpLossResourcePlan
+
+pub struct MlpLossShaderPlan {
+  workgroup_size : Int
+  loss_wgsl : String
+  layer2_loss_wgsl : String
+  loss_reduce_wgsl : String
+  loss_epoch_reduce_wgsl : String
+}
+pub impl Eq for MlpLossShaderPlan
+pub impl Show for MlpLossShaderPlan
+
+pub struct MlpParams {
+  weight1 : Array[Float]
+  bias1 : Array[Float]
+  weight2 : Array[Float]
+  bias2 : Array[Float]
+}
+pub impl Eq for MlpParams
+pub impl Show for MlpParams
+
+pub struct MlpResourcePlan {
+  input : @wgpu.BufferDescriptor
+  hidden : @wgpu.BufferDescriptor
+  output : @wgpu.BufferDescriptor
+  weight1 : @wgpu.BufferDescriptor
+  bias1 : @wgpu.BufferDescriptor
+  weight2 : @wgpu.BufferDescriptor
+  bias2 : @wgpu.BufferDescriptor
+}
+pub impl Eq for MlpResourcePlan
+pub impl Show for MlpResourcePlan
+
+pub struct MlpShaderPlan {
+  workgroup_size : Int
+  layer1_wgsl : String
+  layer2_wgsl : String
+}
+pub impl Eq for MlpShaderPlan
+pub impl Show for MlpShaderPlan
+
+pub struct MlpSpec {
+  input_size : Int
+  hidden_size : Int
+  output_size : Int
+  batch_size : Int
+}
+pub impl Eq for MlpSpec
+pub impl Show for MlpSpec
+
+pub struct MlpTrainConfig {
+  epochs : Int
+  batch_size : Int
+  learning_rate : Float
+  shuffle : Bool
+  seed : Int
+}
+pub impl Eq for MlpTrainConfig
+pub impl Show for MlpTrainConfig
+
+pub struct MlpTrainDispatchPlan {
+  workgroup_size : Int
+  grad_update_w1_dispatch_x : Int
+  grad_update_b1_dispatch_x : Int
+  grad_update_w2_dispatch_x : Int
+  grad_update_b2_dispatch_x : Int
+}
+pub impl Eq for MlpTrainDispatchPlan
+pub impl Show for MlpTrainDispatchPlan
+
+pub struct MlpTrainMetrics {
+  loss : Float
+  accuracy : Float
+}
+pub impl Eq for MlpTrainMetrics
+pub impl Show for MlpTrainMetrics
+
+pub struct MlpTrainResult {
+  params : MlpParams
+  metrics : Array[MlpTrainMetrics]
+}
+pub impl Eq for MlpTrainResult
+pub impl Show for MlpTrainResult
+
+pub struct MlpTrainShaderPlan {
+  workgroup_size : Int
+  grad_update_w1_wgsl : String
+  grad_update_b1_wgsl : String
+  grad_update_w2_wgsl : String
+  grad_update_b2_wgsl : String
+  epoch_accum_wgsl : String
+}
+pub impl Eq for MlpTrainShaderPlan
+pub impl Show for MlpTrainShaderPlan
+
+pub enum MnistError {
+  InvalidMagic(String)
+  InvalidLength(String)
+  InvalidLabel(String)
+  Io(String)
+  InvalidDataset(String)
+}
+pub impl Eq for MnistError
+pub impl Show for MnistError
+
+pub struct MnistImages {
+  count : Int
+  rows : Int
+  cols : Int
+  data : Bytes
+}
+pub impl Eq for MnistImages
+pub impl Show for MnistImages
+
+pub struct MnistLabels {
+  count : Int
+  data : Bytes
+}
+pub impl Eq for MnistLabels
+pub impl Show for MnistLabels
+
+// Type aliases
+
+// Traits
+

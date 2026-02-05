@@ -39,6 +39,13 @@ fn to_native_layout_entry(
   entry : BindGroupLayoutEntry,
 ) -> Result[NativeLayoutEntry, WgpuError] {
   if not(is_buffer_binding(entry.ty)) {
+    log_native_error(
+      "bind group layout entry not supported (binding=" +
+      entry.binding.to_string() +
+      " type=" +
+      entry.ty.to_string() +
+      ")",
+    )
     return Err(NotSupported)
   }
   Ok({
@@ -63,7 +70,14 @@ fn to_native_bind_entry(
   match entry.resource {
     Buffer(buf, offset, size) =>
       Ok({ binding: entry.binding, buffer: buf, offset, size })
-    _ => Err(NotSupported)
+    _ => {
+      log_native_error(
+        "bind group entry not supported (binding=" +
+        entry.binding.to_string() +
+        ")",
+      )
+      Err(NotSupported)
+    }
   }
 }
 
@@ -253,6 +267,61 @@ extern "C" fn native_device_create_bind_group_layout_6(
 ) -> BindGroupLayout = "wgpu_native_device_create_bind_group_layout_6"
 
 ///|
+extern "C" fn native_device_create_bind_group_layout_7(
+  device : Device,
+  binding0 : Int,
+  visibility0 : Int,
+  type0 : Int,
+  binding1 : Int,
+  visibility1 : Int,
+  type1 : Int,
+  binding2 : Int,
+  visibility2 : Int,
+  type2 : Int,
+  binding3 : Int,
+  visibility3 : Int,
+  type3 : Int,
+  binding4 : Int,
+  visibility4 : Int,
+  type4 : Int,
+  binding5 : Int,
+  visibility5 : Int,
+  type5 : Int,
+  binding6 : Int,
+  visibility6 : Int,
+  type6 : Int,
+) -> BindGroupLayout = "wgpu_native_device_create_bind_group_layout_7"
+
+///|
+extern "C" fn native_device_create_bind_group_layout_8(
+  device : Device,
+  binding0 : Int,
+  visibility0 : Int,
+  type0 : Int,
+  binding1 : Int,
+  visibility1 : Int,
+  type1 : Int,
+  binding2 : Int,
+  visibility2 : Int,
+  type2 : Int,
+  binding3 : Int,
+  visibility3 : Int,
+  type3 : Int,
+  binding4 : Int,
+  visibility4 : Int,
+  type4 : Int,
+  binding5 : Int,
+  visibility5 : Int,
+  type5 : Int,
+  binding6 : Int,
+  visibility6 : Int,
+  type6 : Int,
+  binding7 : Int,
+  visibility7 : Int,
+  type7 : Int,
+) -> BindGroupLayout = "wgpu_native_device_create_bind_group_layout_8"
+
+///|
 extern "C" fn native_device_create_bind_group_1(
   device : Device,
   layout : BindGroupLayout,
@@ -373,6 +442,78 @@ extern "C" fn native_device_create_bind_group_6(
 ) -> BindGroup = "wgpu_native_device_create_bind_group_6"
 
 ///|
+extern "C" fn native_device_create_bind_group_7(
+  device : Device,
+  layout : BindGroupLayout,
+  binding0 : Int,
+  buffer0 : Buffer,
+  offset0 : Int,
+  size0 : Int,
+  binding1 : Int,
+  buffer1 : Buffer,
+  offset1 : Int,
+  size1 : Int,
+  binding2 : Int,
+  buffer2 : Buffer,
+  offset2 : Int,
+  size2 : Int,
+  binding3 : Int,
+  buffer3 : Buffer,
+  offset3 : Int,
+  size3 : Int,
+  binding4 : Int,
+  buffer4 : Buffer,
+  offset4 : Int,
+  size4 : Int,
+  binding5 : Int,
+  buffer5 : Buffer,
+  offset5 : Int,
+  size5 : Int,
+  binding6 : Int,
+  buffer6 : Buffer,
+  offset6 : Int,
+  size6 : Int,
+) -> BindGroup = "wgpu_native_device_create_bind_group_7"
+
+///|
+extern "C" fn native_device_create_bind_group_8(
+  device : Device,
+  layout : BindGroupLayout,
+  binding0 : Int,
+  buffer0 : Buffer,
+  offset0 : Int,
+  size0 : Int,
+  binding1 : Int,
+  buffer1 : Buffer,
+  offset1 : Int,
+  size1 : Int,
+  binding2 : Int,
+  buffer2 : Buffer,
+  offset2 : Int,
+  size2 : Int,
+  binding3 : Int,
+  buffer3 : Buffer,
+  offset3 : Int,
+  size3 : Int,
+  binding4 : Int,
+  buffer4 : Buffer,
+  offset4 : Int,
+  size4 : Int,
+  binding5 : Int,
+  buffer5 : Buffer,
+  offset5 : Int,
+  size5 : Int,
+  binding6 : Int,
+  buffer6 : Buffer,
+  offset6 : Int,
+  size6 : Int,
+  binding7 : Int,
+  buffer7 : Buffer,
+  offset7 : Int,
+  size7 : Int,
+) -> BindGroup = "wgpu_native_device_create_bind_group_8"
+
+///|
 extern "C" fn native_device_create_pipeline_layout(
   device : Device,
   layout : BindGroupLayout,
@@ -419,11 +560,17 @@ pub fn is_supported() -> Bool {
 }
 
 ///|
+fn log_native_error(message : String) -> Unit {
+  println("wgpu_native: " + message)
+}
+
+///|
 pub async fn request_adapter(
   options : RequestAdapterOptions,
 ) -> Result[Adapter, WgpuError] {
   let instance = native_instance_new()
   if native_ptr_is_null_instance(instance) {
+    log_native_error("native_instance_new returned null")
     return Err(NotSupported)
   }
   let adapter = native_request_adapter(
@@ -432,6 +579,13 @@ pub async fn request_adapter(
     options.force_fallback_adapter,
   )
   if native_ptr_is_null_adapter(adapter) {
+    log_native_error(
+      "native_request_adapter returned null (power_preference=" +
+      options.power_preference.to_string() +
+      " fallback=" +
+      options.force_fallback_adapter.to_string() +
+      ")",
+    )
     Err(NotSupported)
   } else {
     Ok(adapter)
@@ -445,10 +599,12 @@ pub async fn request_device(
 ) -> Result[Device, WgpuError] {
   if desc.required_features.length() > 0 ||
     not(limits_is_default(desc.required_limits)) {
+    log_native_error("request_device rejected non-default features/limits")
     return Err(NotSupported)
   }
   let device = native_request_device(adapter)
   if native_ptr_is_null_device(device) {
+    log_native_error("native_request_device returned null")
     Err(NotSupported)
   } else {
     Ok(device)
@@ -459,6 +615,7 @@ pub async fn request_device(
 pub fn device_get_queue(device : Device) -> Result[Queue, WgpuError] {
   let queue = native_device_get_queue(device)
   if native_ptr_is_null_queue(queue) {
+    log_native_error("native_device_get_queue returned null")
     Err(NotSupported)
   } else {
     Ok(queue)
@@ -531,7 +688,10 @@ pub fn device_create_bind_group_layout(
 ) -> Result[BindGroupLayout, WgpuError] {
   let entries = desc.entries
   let count = entries.length()
-  if count <= 0 || count > 6 {
+  if count <= 0 || count > 8 {
+    log_native_error(
+      "bind group layout entry count not supported: " + count.to_string(),
+    )
     return Err(NotSupported)
   }
   to_native_layout_entry(entries[0]).bind(fn(e0) {
@@ -623,7 +783,7 @@ pub fn device_create_bind_group_layout(
             })
           })
         })
-      _ =>
+      6 =>
         to_native_layout_entry(entries[1]).bind(fn(e1) {
           to_native_layout_entry(entries[2]).bind(fn(e2) {
             to_native_layout_entry(entries[3]).bind(fn(e3) {
@@ -655,6 +815,85 @@ pub fn device_create_bind_group_layout(
             })
           })
         })
+      7 =>
+        to_native_layout_entry(entries[1]).bind(fn(e1) {
+          to_native_layout_entry(entries[2]).bind(fn(e2) {
+            to_native_layout_entry(entries[3]).bind(fn(e3) {
+              to_native_layout_entry(entries[4]).bind(fn(e4) {
+                to_native_layout_entry(entries[5]).bind(fn(e5) {
+                  to_native_layout_entry(entries[6]).map(fn(e6) {
+                    native_device_create_bind_group_layout_7(
+                      device,
+                      e0.binding,
+                      e0.visibility,
+                      e0.binding_type,
+                      e1.binding,
+                      e1.visibility,
+                      e1.binding_type,
+                      e2.binding,
+                      e2.visibility,
+                      e2.binding_type,
+                      e3.binding,
+                      e3.visibility,
+                      e3.binding_type,
+                      e4.binding,
+                      e4.visibility,
+                      e4.binding_type,
+                      e5.binding,
+                      e5.visibility,
+                      e5.binding_type,
+                      e6.binding,
+                      e6.visibility,
+                      e6.binding_type,
+                    )
+                  })
+                })
+              })
+            })
+          })
+        })
+      _ =>
+        to_native_layout_entry(entries[1]).bind(fn(e1) {
+          to_native_layout_entry(entries[2]).bind(fn(e2) {
+            to_native_layout_entry(entries[3]).bind(fn(e3) {
+              to_native_layout_entry(entries[4]).bind(fn(e4) {
+                to_native_layout_entry(entries[5]).bind(fn(e5) {
+                  to_native_layout_entry(entries[6]).bind(fn(e6) {
+                    to_native_layout_entry(entries[7]).map(fn(e7) {
+                      native_device_create_bind_group_layout_8(
+                        device,
+                        e0.binding,
+                        e0.visibility,
+                        e0.binding_type,
+                        e1.binding,
+                        e1.visibility,
+                        e1.binding_type,
+                        e2.binding,
+                        e2.visibility,
+                        e2.binding_type,
+                        e3.binding,
+                        e3.visibility,
+                        e3.binding_type,
+                        e4.binding,
+                        e4.visibility,
+                        e4.binding_type,
+                        e5.binding,
+                        e5.visibility,
+                        e5.binding_type,
+                        e6.binding,
+                        e6.visibility,
+                        e6.binding_type,
+                        e7.binding,
+                        e7.visibility,
+                        e7.binding_type,
+                      )
+                    })
+                  })
+                })
+              })
+            })
+          })
+        })
     }
     layout_result.bind(fn(layout) {
       if native_ptr_is_null_bind_group_layout(layout) {
@@ -673,7 +912,10 @@ pub fn device_create_bind_group(
 ) -> Result[BindGroup, WgpuError] {
   let entries = desc.entries
   let count = entries.length()
-  if count <= 0 || count > 6 {
+  if count <= 0 || count > 8 {
+    log_native_error(
+      "bind group entry count not supported: " + count.to_string(),
+    )
     return Err(NotSupported)
   }
   to_native_bind_entry(entries[0]).bind(fn(e0) {
@@ -785,7 +1027,7 @@ pub fn device_create_bind_group(
             })
           })
         })
-      _ =>
+      6 =>
         to_native_bind_entry(entries[1]).bind(fn(e1) {
           to_native_bind_entry(entries[2]).bind(fn(e2) {
             to_native_bind_entry(entries[3]).bind(fn(e3) {
@@ -819,6 +1061,102 @@ pub fn device_create_bind_group(
                     e5.offset,
                     e5.size,
                   )
+                })
+              })
+            })
+          })
+        })
+      7 =>
+        to_native_bind_entry(entries[1]).bind(fn(e1) {
+          to_native_bind_entry(entries[2]).bind(fn(e2) {
+            to_native_bind_entry(entries[3]).bind(fn(e3) {
+              to_native_bind_entry(entries[4]).bind(fn(e4) {
+                to_native_bind_entry(entries[5]).bind(fn(e5) {
+                  to_native_bind_entry(entries[6]).map(fn(e6) {
+                    native_device_create_bind_group_7(
+                      device,
+                      desc.layout,
+                      e0.binding,
+                      e0.buffer,
+                      e0.offset,
+                      e0.size,
+                      e1.binding,
+                      e1.buffer,
+                      e1.offset,
+                      e1.size,
+                      e2.binding,
+                      e2.buffer,
+                      e2.offset,
+                      e2.size,
+                      e3.binding,
+                      e3.buffer,
+                      e3.offset,
+                      e3.size,
+                      e4.binding,
+                      e4.buffer,
+                      e4.offset,
+                      e4.size,
+                      e5.binding,
+                      e5.buffer,
+                      e5.offset,
+                      e5.size,
+                      e6.binding,
+                      e6.buffer,
+                      e6.offset,
+                      e6.size,
+                    )
+                  })
+                })
+              })
+            })
+          })
+        })
+      _ =>
+        to_native_bind_entry(entries[1]).bind(fn(e1) {
+          to_native_bind_entry(entries[2]).bind(fn(e2) {
+            to_native_bind_entry(entries[3]).bind(fn(e3) {
+              to_native_bind_entry(entries[4]).bind(fn(e4) {
+                to_native_bind_entry(entries[5]).bind(fn(e5) {
+                  to_native_bind_entry(entries[6]).bind(fn(e6) {
+                    to_native_bind_entry(entries[7]).map(fn(e7) {
+                      native_device_create_bind_group_8(
+                        device,
+                        desc.layout,
+                        e0.binding,
+                        e0.buffer,
+                        e0.offset,
+                        e0.size,
+                        e1.binding,
+                        e1.buffer,
+                        e1.offset,
+                        e1.size,
+                        e2.binding,
+                        e2.buffer,
+                        e2.offset,
+                        e2.size,
+                        e3.binding,
+                        e3.buffer,
+                        e3.offset,
+                        e3.size,
+                        e4.binding,
+                        e4.buffer,
+                        e4.offset,
+                        e4.size,
+                        e5.binding,
+                        e5.buffer,
+                        e5.offset,
+                        e5.size,
+                        e6.binding,
+                        e6.buffer,
+                        e6.offset,
+                        e6.size,
+                        e7.binding,
+                        e7.buffer,
+                        e7.offset,
+                        e7.size,
+                      )
+                    })
+                  })
                 })
               })
             })

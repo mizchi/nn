@@ -466,24 +466,48 @@ fn argmax_in_probs(probs : Array[Float], base : Int, size : Int) -> Int {
 }
 
 ///|
-fn lcg_next(state : UInt) -> UInt {
-  let a = Int::reinterpret_as_uint(1664525)
-  let c = Int::reinterpret_as_uint(1013904223)
-  state * a + c
+
+///|
+fn gcd(a : Int, b : Int) -> Int {
+  let mut x = if a < 0 { -a } else { a }
+  let mut y = if b < 0 { -b } else { b }
+  while y != 0 {
+    let t = x % y
+    x = y
+    y = t
+  }
+  if x == 0 {
+    1
+  } else {
+    x
+  }
 }
 
 ///|
-fn shuffle_indices(indices : Array[Int], seed : Int) -> Unit {
-  let mut state = Int::reinterpret_as_uint(seed)
-  let mut i = indices.length() - 1
-  while i > 0 {
-    state = lcg_next(state)
-    let j = (state % Int::reinterpret_as_uint(i + 1)).reinterpret_as_int()
-    let tmp = indices[i]
-    indices[i] = indices[j]
-    indices[j] = tmp
-    i = i - 1
+fn ceil_div(n : Int, d : Int) -> Int {
+  if d <= 0 {
+    0
+  } else {
+    (n + d - 1) / d
   }
+}
+
+///|
+fn shuffle_stride(count : Int, seed : Int) -> Int {
+  if count <= 1 {
+    return 1
+  }
+  let mut stride = seed % (count - 1) + 1
+  if stride <= 0 {
+    stride = 1
+  }
+  while gcd(stride, count) != 1 {
+    stride = stride + 1
+    if stride >= count {
+      stride = 1
+    }
+  }
+  stride
 }
 
 ///|
@@ -598,7 +622,16 @@ pub async fn run_mlp_loss() -> Unit {
       return
     }
   }
-  let loss_buffers = match @nn.mlp_plan_loss_buffers(spec) {
+  let dataset_buffers = match
+    @nn.mlp_plan_dataset_buffers(spec, spec.batch_size) {
+    Ok(p) => p
+    Err(err) => {
+      report_error(expected, err.to_string())
+      return
+    }
+  }
+  let loss_buffers = match
+    @nn.mlp_plan_loss_buffers_for_dataset(spec, spec.batch_size) {
     Ok(p) => p
     Err(err) => {
       report_error(expected, err.to_string())
@@ -627,7 +660,10 @@ pub async fn run_mlp_loss() -> Unit {
       return
     }
   }
-  let input_buf = create_storage_buffer_js(device_any, buffer_plan.input_bytes)
+  let input_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.dataset_input_bytes,
+  )
   let hidden_buf = create_storage_buffer_js(
     device_any,
     buffer_plan.hidden_bytes,
@@ -651,6 +687,10 @@ pub async fn run_mlp_loss() -> Unit {
     device_any,
     loss_buffers.labels_bytes,
   )
+  let indices_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.indices_bytes,
+  )
   let loss_buf_any = create_storage_buffer_js(
     device_any,
     loss_buffers.loss_bytes,
@@ -658,6 +698,10 @@ pub async fn run_mlp_loss() -> Unit {
   let probs_buf_any = create_storage_buffer_js(
     device_any,
     loss_buffers.probs_bytes,
+  )
+  let correct_buf_any = create_storage_buffer_js(
+    device_any,
+    loss_buffers.correct_bytes,
   )
   let loss_sum_buf_any = create_storage_buffer_js(
     device_any,
@@ -671,6 +715,11 @@ pub async fn run_mlp_loss() -> Unit {
   queue_write_f32_js(device_any, weight2_buf, params.weight2)
   queue_write_f32_js(device_any, bias2_buf, params.bias2)
   queue_write_u32_js(device_any, labels_buf, labels)
+  queue_write_u32_js(
+    device_any,
+    indices_buf,
+    Array::makei(spec.batch_size + 1, fn(i) { if i == 0 { 0 } else { i - 1 } }),
+  )
   let layer1_pipeline = create_compute_pipeline_js(
     device_any,
     shader_plan.layer1_wgsl,
@@ -688,13 +737,13 @@ pub async fn run_mlp_loss() -> Unit {
     loss_plan.loss_reduce_wgsl,
   )
   let layer1_bind = create_bind_group_js(device_any, layer1_pipeline, [
-    input_buf, weight1_buf, bias1_buf, hidden_buf,
+    input_buf, indices_buf, weight1_buf, bias1_buf, hidden_buf,
   ])
   let layer2_bind = create_bind_group_js(device_any, layer2_pipeline, [
     hidden_buf, weight2_buf, bias2_buf, output_buf_any,
   ])
   let loss_bind = create_bind_group_js(device_any, loss_pipeline, [
-    output_buf_any, labels_buf, loss_buf_any, probs_buf_any,
+    output_buf_any, labels_buf, indices_buf, loss_buf_any, probs_buf_any, correct_buf_any,
   ])
   let loss_reduce_bind = create_bind_group_js(
     device_any,
@@ -946,14 +995,16 @@ pub async fn run_mlp_train_step() -> Unit {
       return
     }
   }
-  let loss_buffers = match @nn.mlp_plan_loss_buffers(spec) {
+  let dataset_buffers = match
+    @nn.mlp_plan_dataset_buffers(spec, spec.batch_size) {
     Ok(p) => p
     Err(err) => {
       set_e2e_result_js(false, expected, [], Some(err.to_string()))
       return
     }
   }
-  let train_buffers = match @nn.mlp_plan_train_buffers(spec) {
+  let loss_buffers = match
+    @nn.mlp_plan_loss_buffers_for_dataset(spec, spec.batch_size) {
     Ok(p) => p
     Err(err) => {
       set_e2e_result_js(false, expected, [], Some(err.to_string()))
@@ -981,7 +1032,10 @@ pub async fn run_mlp_train_step() -> Unit {
       return
     }
   }
-  let input_buf = create_storage_buffer_js(device_any, buffer_plan.input_bytes)
+  let input_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.dataset_input_bytes,
+  )
   let hidden_buf = create_storage_buffer_js(
     device_any,
     buffer_plan.hidden_bytes,
@@ -1004,6 +1058,10 @@ pub async fn run_mlp_train_step() -> Unit {
     device_any,
     loss_buffers.labels_bytes,
   )
+  let indices_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.indices_bytes,
+  )
   let loss_buf_any = create_storage_buffer_js(
     device_any,
     loss_buffers.loss_bytes,
@@ -1012,21 +1070,9 @@ pub async fn run_mlp_train_step() -> Unit {
     device_any,
     loss_buffers.probs_bytes,
   )
-  let grad_w1_buf = create_storage_buffer_js(
+  let correct_buf_any = create_storage_buffer_js(
     device_any,
-    train_buffers.grad_weight1_bytes,
-  )
-  let grad_b1_buf = create_storage_buffer_js(
-    device_any,
-    train_buffers.grad_bias1_bytes,
-  )
-  let grad_w2_buf = create_storage_buffer_js(
-    device_any,
-    train_buffers.grad_weight2_bytes,
-  )
-  let grad_b2_buf = create_storage_buffer_js(
-    device_any,
-    train_buffers.grad_bias2_bytes,
+    loss_buffers.correct_bytes,
   )
   let lr_buf = create_storage_buffer_js(device_any, 4)
   queue_write_f32_js(device_any, input_buf, inputs)
@@ -1035,6 +1081,11 @@ pub async fn run_mlp_train_step() -> Unit {
   queue_write_f32_js(device_any, weight2_buf, params_gpu.weight2)
   queue_write_f32_js(device_any, bias2_buf, params_gpu.bias2)
   queue_write_u32_js(device_any, labels_buf, labels)
+  queue_write_u32_js(
+    device_any,
+    indices_buf,
+    Array::makei(spec.batch_size + 1, fn(i) { if i == 0 { 0 } else { i - 1 } }),
+  )
   queue_write_f32_js(device_any, lr_buf, [learning_rate])
   let layer1_pipeline = create_compute_pipeline_js(
     device_any,
@@ -1048,71 +1099,57 @@ pub async fn run_mlp_train_step() -> Unit {
     device_any,
     loss_plan.loss_wgsl,
   )
-  let grad_w2_pipeline = create_compute_pipeline_js(
+  let grad_update_w1_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_w2_wgsl,
+    train_plan.grad_update_w1_wgsl,
   )
-  let grad_b2_pipeline = create_compute_pipeline_js(
+  let grad_update_b1_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_b2_wgsl,
+    train_plan.grad_update_b1_wgsl,
   )
-  let grad_w1_pipeline = create_compute_pipeline_js(
+  let grad_update_w2_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_w1_wgsl,
+    train_plan.grad_update_w2_wgsl,
   )
-  let grad_b1_pipeline = create_compute_pipeline_js(
+  let grad_update_b2_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_b1_wgsl,
-  )
-  let update_w2_pipeline = create_compute_pipeline_js(
-    device_any,
-    train_plan.update_w2_wgsl,
-  )
-  let update_b2_pipeline = create_compute_pipeline_js(
-    device_any,
-    train_plan.update_b2_wgsl,
-  )
-  let update_w1_pipeline = create_compute_pipeline_js(
-    device_any,
-    train_plan.update_w1_wgsl,
-  )
-  let update_b1_pipeline = create_compute_pipeline_js(
-    device_any,
-    train_plan.update_b1_wgsl,
+    train_plan.grad_update_b2_wgsl,
   )
   let layer1_bind = create_bind_group_js(device_any, layer1_pipeline, [
-    input_buf, weight1_buf, bias1_buf, hidden_buf,
+    input_buf, indices_buf, weight1_buf, bias1_buf, hidden_buf,
   ])
   let layer2_bind = create_bind_group_js(device_any, layer2_pipeline, [
     hidden_buf, weight2_buf, bias2_buf, output_buf_any,
   ])
   let loss_bind = create_bind_group_js(device_any, loss_pipeline, [
-    output_buf_any, labels_buf, loss_buf_any, probs_buf_any,
+    output_buf_any, labels_buf, indices_buf, loss_buf_any, probs_buf_any, correct_buf_any,
   ])
-  let grad_w2_bind = create_bind_group_js(device_any, grad_w2_pipeline, [
-    hidden_buf, probs_buf_any, labels_buf, grad_w2_buf,
-  ])
-  let grad_b2_bind = create_bind_group_js(device_any, grad_b2_pipeline, [
-    probs_buf_any, labels_buf, grad_b2_buf,
-  ])
-  let grad_w1_bind = create_bind_group_js(device_any, grad_w1_pipeline, [
-    input_buf, hidden_buf, probs_buf_any, labels_buf, weight2_buf, grad_w1_buf,
-  ])
-  let grad_b1_bind = create_bind_group_js(device_any, grad_b1_pipeline, [
-    hidden_buf, probs_buf_any, labels_buf, weight2_buf, grad_b1_buf,
-  ])
-  let update_w2_bind = create_bind_group_js(device_any, update_w2_pipeline, [
-    weight2_buf, grad_w2_buf, lr_buf,
-  ])
-  let update_b2_bind = create_bind_group_js(device_any, update_b2_pipeline, [
-    bias2_buf, grad_b2_buf, lr_buf,
-  ])
-  let update_w1_bind = create_bind_group_js(device_any, update_w1_pipeline, [
-    weight1_buf, grad_w1_buf, lr_buf,
-  ])
-  let update_b1_bind = create_bind_group_js(device_any, update_b1_pipeline, [
-    bias1_buf, grad_b1_buf, lr_buf,
-  ])
+  let grad_update_w1_bind = create_bind_group_js(
+    device_any,
+    grad_update_w1_pipeline,
+    [
+      input_buf, hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf,
+      weight1_buf, lr_buf,
+    ],
+  )
+  let grad_update_b1_bind = create_bind_group_js(
+    device_any,
+    grad_update_b1_pipeline,
+    [
+      hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf, bias1_buf,
+      lr_buf,
+    ],
+  )
+  let grad_update_w2_bind = create_bind_group_js(
+    device_any,
+    grad_update_w2_pipeline,
+    [hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf, lr_buf],
+  )
+  let grad_update_b2_bind = create_bind_group_js(
+    device_any,
+    grad_update_b2_pipeline,
+    [probs_buf_any, labels_buf, indices_buf, bias2_buf, lr_buf],
+  )
   dispatch_compute_js(
     device_any,
     layer1_pipeline,
@@ -1126,53 +1163,30 @@ pub async fn run_mlp_train_step() -> Unit {
     dispatch.layer2_dispatch_x,
   )
   dispatch_compute_js(device_any, loss_pipeline, loss_bind, loss_dispatch)
+  // Dispatch order: w1, b1 first (read weight2), then w2, b2 (write weight2)
   dispatch_compute_js(
     device_any,
-    grad_w2_pipeline,
-    grad_w2_bind,
-    train_dispatch.grad_w2_dispatch_x,
+    grad_update_w1_pipeline,
+    grad_update_w1_bind,
+    train_dispatch.grad_update_w1_dispatch_x,
   )
   dispatch_compute_js(
     device_any,
-    grad_b2_pipeline,
-    grad_b2_bind,
-    train_dispatch.grad_b2_dispatch_x,
+    grad_update_b1_pipeline,
+    grad_update_b1_bind,
+    train_dispatch.grad_update_b1_dispatch_x,
   )
   dispatch_compute_js(
     device_any,
-    grad_w1_pipeline,
-    grad_w1_bind,
-    train_dispatch.grad_w1_dispatch_x,
+    grad_update_w2_pipeline,
+    grad_update_w2_bind,
+    train_dispatch.grad_update_w2_dispatch_x,
   )
   dispatch_compute_js(
     device_any,
-    grad_b1_pipeline,
-    grad_b1_bind,
-    train_dispatch.grad_b1_dispatch_x,
-  )
-  dispatch_compute_js(
-    device_any,
-    update_w2_pipeline,
-    update_w2_bind,
-    train_dispatch.update_w2_dispatch_x,
-  )
-  dispatch_compute_js(
-    device_any,
-    update_b2_pipeline,
-    update_b2_bind,
-    train_dispatch.update_b2_dispatch_x,
-  )
-  dispatch_compute_js(
-    device_any,
-    update_w1_pipeline,
-    update_w1_bind,
-    train_dispatch.update_w1_dispatch_x,
-  )
-  dispatch_compute_js(
-    device_any,
-    update_b1_pipeline,
-    update_b1_bind,
-    train_dispatch.update_b1_dispatch_x,
+    grad_update_b2_pipeline,
+    grad_update_b2_bind,
+    train_dispatch.grad_update_b2_dispatch_x,
   )
   let weight1_read = @web.device_read_buffer_bytes(
     device,
@@ -1332,6 +1346,14 @@ pub async fn run_mnist_train() -> Unit {
       return
     }
   }
+  let dataset_plan = match
+    @nn.mlp_dataset_shader_plan(spec, effective_count, workgroup_size) {
+    Ok(p) => p
+    Err(err) => {
+      set_status_js("dataset shader error: " + err.to_string())
+      return
+    }
+  }
   let buffer_plan = match @nn.mlp_plan_buffers(spec) {
     Ok(p) => p
     Err(err) => {
@@ -1339,17 +1361,19 @@ pub async fn run_mnist_train() -> Unit {
       return
     }
   }
-  let loss_buffers = match @nn.mlp_plan_loss_buffers(spec) {
+  let dataset_buffers = match
+    @nn.mlp_plan_dataset_buffers(spec, effective_count) {
     Ok(p) => p
     Err(err) => {
-      set_status_js("loss buffer error: " + err.to_string())
+      set_status_js("dataset buffer error: " + err.to_string())
       return
     }
   }
-  let train_buffers = match @nn.mlp_plan_train_buffers(spec) {
+  let loss_buffers = match
+    @nn.mlp_plan_loss_buffers_for_dataset(spec, effective_count) {
     Ok(p) => p
     Err(err) => {
-      set_status_js("train buffer error: " + err.to_string())
+      set_status_js("loss buffer error: " + err.to_string())
       return
     }
   }
@@ -1382,7 +1406,10 @@ pub async fn run_mnist_train() -> Unit {
       return
     }
   }
-  let input_buf = create_storage_buffer_js(device_any, buffer_plan.input_bytes)
+  let input_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.dataset_input_bytes,
+  )
   let hidden_buf = create_storage_buffer_js(
     device_any,
     buffer_plan.hidden_bytes,
@@ -1405,6 +1432,10 @@ pub async fn run_mnist_train() -> Unit {
     device_any,
     loss_buffers.labels_bytes,
   )
+  let indices_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.indices_bytes,
+  )
   let loss_buf_any = create_storage_buffer_js(
     device_any,
     loss_buffers.loss_bytes,
@@ -1417,28 +1448,37 @@ pub async fn run_mnist_train() -> Unit {
     device_any,
     loss_buffers.loss_sum_bytes,
   )
-  let loss_sum_buf : Buffer = loss_sum_buf_any.cast()
-  let grad_w1_buf = create_storage_buffer_js(
+  let correct_buf_any = create_storage_buffer_js(
     device_any,
-    train_buffers.grad_weight1_bytes,
+    loss_buffers.correct_bytes,
   )
-  let grad_b1_buf = create_storage_buffer_js(
+  let correct_sum_buf_any = create_storage_buffer_js(
     device_any,
-    train_buffers.grad_bias1_bytes,
+    loss_buffers.correct_sum_bytes,
   )
-  let grad_w2_buf = create_storage_buffer_js(
+  let epoch_loss_buf_any = create_storage_buffer_js(
     device_any,
-    train_buffers.grad_weight2_bytes,
+    loss_buffers.epoch_loss_bytes,
   )
-  let grad_b2_buf = create_storage_buffer_js(
+  let epoch_correct_buf_any = create_storage_buffer_js(
     device_any,
-    train_buffers.grad_bias2_bytes,
+    loss_buffers.epoch_correct_bytes,
+  )
+  let epoch_seen_buf_any = create_storage_buffer_js(
+    device_any,
+    loss_buffers.epoch_seen_bytes,
+  )
+  let shuffle_params_buf = create_storage_buffer_js(
+    device_any,
+    dataset_buffers.shuffle_params_bytes,
   )
   let lr_buf = create_storage_buffer_js(device_any, 4)
   queue_write_f32_js(device_any, weight1_buf, params.weight1)
   queue_write_f32_js(device_any, bias1_buf, params.bias1)
   queue_write_f32_js(device_any, weight2_buf, params.weight2)
   queue_write_f32_js(device_any, bias2_buf, params.bias2)
+  queue_write_f32_js(device_any, input_buf, inputs)
+  queue_write_u32_js(device_any, labels_buf, labels)
   queue_write_f32_js(device_any, lr_buf, [learning_rate])
   let layer1_pipeline = create_compute_pipeline_js(
     device_any,
@@ -1456,111 +1496,109 @@ pub async fn run_mnist_train() -> Unit {
     device_any,
     loss_plan.loss_reduce_wgsl,
   )
-  let grad_w2_pipeline = create_compute_pipeline_js(
+  let indices_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_w2_wgsl,
+    dataset_plan.indices_wgsl,
   )
-  let grad_b2_pipeline = create_compute_pipeline_js(
+  let grad_update_w1_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_b2_wgsl,
+    train_plan.grad_update_w1_wgsl,
   )
-  let grad_w1_pipeline = create_compute_pipeline_js(
+  let grad_update_b1_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_w1_wgsl,
+    train_plan.grad_update_b1_wgsl,
   )
-  let grad_b1_pipeline = create_compute_pipeline_js(
+  let grad_update_w2_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.grad_b1_wgsl,
+    train_plan.grad_update_w2_wgsl,
   )
-  let update_w2_pipeline = create_compute_pipeline_js(
+  let grad_update_b2_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.update_w2_wgsl,
+    train_plan.grad_update_b2_wgsl,
   )
-  let update_b2_pipeline = create_compute_pipeline_js(
+  let epoch_accum_pipeline = create_compute_pipeline_js(
     device_any,
-    train_plan.update_b2_wgsl,
-  )
-  let update_w1_pipeline = create_compute_pipeline_js(
-    device_any,
-    train_plan.update_w1_wgsl,
-  )
-  let update_b1_pipeline = create_compute_pipeline_js(
-    device_any,
-    train_plan.update_b1_wgsl,
+    train_plan.epoch_accum_wgsl,
   )
   let layer1_bind = create_bind_group_js(device_any, layer1_pipeline, [
-    input_buf, weight1_buf, bias1_buf, hidden_buf,
+    input_buf, indices_buf, weight1_buf, bias1_buf, hidden_buf,
   ])
   let layer2_bind = create_bind_group_js(device_any, layer2_pipeline, [
     hidden_buf, weight2_buf, bias2_buf, output_buf_any,
   ])
   let loss_bind = create_bind_group_js(device_any, loss_pipeline, [
-    output_buf_any, labels_buf, loss_buf_any, probs_buf_any,
+    output_buf_any, labels_buf, indices_buf, loss_buf_any, probs_buf_any, correct_buf_any,
   ])
   let loss_reduce_bind = create_bind_group_js(
     device_any,
     loss_reduce_pipeline,
     [loss_buf_any, loss_sum_buf_any],
   )
-  let grad_w2_bind = create_bind_group_js(device_any, grad_w2_pipeline, [
-    hidden_buf, probs_buf_any, labels_buf, grad_w2_buf,
+  let indices_bind = create_bind_group_js(device_any, indices_pipeline, [
+    indices_buf, shuffle_params_buf,
   ])
-  let grad_b2_bind = create_bind_group_js(device_any, grad_b2_pipeline, [
-    probs_buf_any, labels_buf, grad_b2_buf,
-  ])
-  let grad_w1_bind = create_bind_group_js(device_any, grad_w1_pipeline, [
-    input_buf, hidden_buf, probs_buf_any, labels_buf, weight2_buf, grad_w1_buf,
-  ])
-  let grad_b1_bind = create_bind_group_js(device_any, grad_b1_pipeline, [
-    hidden_buf, probs_buf_any, labels_buf, weight2_buf, grad_b1_buf,
-  ])
-  let update_w2_bind = create_bind_group_js(device_any, update_w2_pipeline, [
-    weight2_buf, grad_w2_buf, lr_buf,
-  ])
-  let update_b2_bind = create_bind_group_js(device_any, update_b2_pipeline, [
-    bias2_buf, grad_b2_buf, lr_buf,
-  ])
-  let update_w1_bind = create_bind_group_js(device_any, update_w1_pipeline, [
-    weight1_buf, grad_w1_buf, lr_buf,
-  ])
-  let update_b1_bind = create_bind_group_js(device_any, update_b1_pipeline, [
-    bias1_buf, grad_b1_buf, lr_buf,
-  ])
+  let correct_reduce_bind = create_bind_group_js(
+    device_any,
+    loss_reduce_pipeline,
+    [correct_buf_any, correct_sum_buf_any],
+  )
+  let grad_update_w1_bind = create_bind_group_js(
+    device_any,
+    grad_update_w1_pipeline,
+    [
+      input_buf, hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf,
+      weight1_buf, lr_buf,
+    ],
+  )
+  let grad_update_b1_bind = create_bind_group_js(
+    device_any,
+    grad_update_b1_pipeline,
+    [
+      hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf, bias1_buf,
+      lr_buf,
+    ],
+  )
+  let grad_update_w2_bind = create_bind_group_js(
+    device_any,
+    grad_update_w2_pipeline,
+    [hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf, lr_buf],
+  )
+  let grad_update_b2_bind = create_bind_group_js(
+    device_any,
+    grad_update_b2_pipeline,
+    [probs_buf_any, labels_buf, indices_buf, bias2_buf, lr_buf],
+  )
+  let epoch_accum_bind = create_bind_group_js(
+    device_any,
+    epoch_accum_pipeline,
+    [
+      loss_sum_buf_any, correct_sum_buf_any, epoch_loss_buf_any, epoch_correct_buf_any,
+      epoch_seen_buf_any,
+    ],
+  )
   let steps = effective_count / batch_size
-  let input_step = batch_size * input_size
-  let indices = Array::makei(effective_count, fn(i) { i })
+  let indices_dispatch_x = ceil_div(effective_count, workgroup_size)
+  let zero_f32 = [Float::from_int(0)]
   let mut epoch = 0
   while epoch < epochs {
     set_status_js("epoch " + epoch.to_string())
-    let mut epoch_loss_sum = Float::from_int(0)
-    let mut epoch_correct = 0
-    let mut epoch_seen = 0
-    let mut step = 0
-    if shuffle {
-      shuffle_indices(indices, seed + epoch)
+    queue_write_f32_js(device_any, epoch_loss_buf_any, zero_f32)
+    queue_write_f32_js(device_any, epoch_correct_buf_any, zero_f32)
+    queue_write_f32_js(device_any, epoch_seen_buf_any, zero_f32)
+    let epoch_seed = if shuffle { seed + epoch } else { 0 }
+    let stride = if shuffle {
+      shuffle_stride(effective_count, epoch_seed)
+    } else {
+      1
     }
+    queue_write_u32_js(device_any, shuffle_params_buf, [epoch_seed, stride])
+    dispatch_compute_js(
+      device_any, indices_pipeline, indices_bind, indices_dispatch_x,
+    )
+    let mut step = 0
     while step < steps {
-      let batch_inputs : Array[Float] = Array::make(
-        input_step,
-        Float::from_int(0),
-      )
-      let batch_labels : Array[Int] = Array::make(batch_size, 0)
       let base = step * batch_size
-      let mut bi = 0
-      while bi < batch_size {
-        let idx = if shuffle { indices[base + bi] } else { base + bi }
-        batch_labels[bi] = labels[idx]
-        let input_offset = idx * input_size
-        let out_offset = bi * input_size
-        let mut j = 0
-        while j < input_size {
-          batch_inputs[out_offset + j] = inputs[input_offset + j]
-          j = j + 1
-        }
-        bi = bi + 1
-      }
-      queue_write_f32_js(device_any, input_buf, batch_inputs)
-      queue_write_u32_js(device_any, labels_buf, batch_labels)
+      queue_write_u32_js(device_any, indices_buf, [base])
       dispatch_compute_js(
         device_any,
         layer1_pipeline,
@@ -1578,104 +1616,87 @@ pub async fn run_mnist_train() -> Unit {
         device_any, loss_reduce_pipeline, loss_reduce_bind, loss_reduce_dispatch,
       )
       dispatch_compute_js(
+        device_any, loss_reduce_pipeline, correct_reduce_bind, loss_reduce_dispatch,
+      )
+      dispatch_compute_js(device_any, epoch_accum_pipeline, epoch_accum_bind, 1)
+      // Dispatch order: w1, b1 first (read weight2), then w2, b2 (write weight2)
+      dispatch_compute_js(
         device_any,
-        grad_w2_pipeline,
-        grad_w2_bind,
-        train_dispatch.grad_w2_dispatch_x,
+        grad_update_w1_pipeline,
+        grad_update_w1_bind,
+        train_dispatch.grad_update_w1_dispatch_x,
       )
       dispatch_compute_js(
         device_any,
-        grad_b2_pipeline,
-        grad_b2_bind,
-        train_dispatch.grad_b2_dispatch_x,
+        grad_update_b1_pipeline,
+        grad_update_b1_bind,
+        train_dispatch.grad_update_b1_dispatch_x,
       )
       dispatch_compute_js(
         device_any,
-        grad_w1_pipeline,
-        grad_w1_bind,
-        train_dispatch.grad_w1_dispatch_x,
+        grad_update_w2_pipeline,
+        grad_update_w2_bind,
+        train_dispatch.grad_update_w2_dispatch_x,
       )
       dispatch_compute_js(
         device_any,
-        grad_b1_pipeline,
-        grad_b1_bind,
-        train_dispatch.grad_b1_dispatch_x,
+        grad_update_b2_pipeline,
+        grad_update_b2_bind,
+        train_dispatch.grad_update_b2_dispatch_x,
       )
-      dispatch_compute_js(
-        device_any,
-        update_w2_pipeline,
-        update_w2_bind,
-        train_dispatch.update_w2_dispatch_x,
-      )
-      dispatch_compute_js(
-        device_any,
-        update_b2_pipeline,
-        update_b2_bind,
-        train_dispatch.update_b2_dispatch_x,
-      )
-      dispatch_compute_js(
-        device_any,
-        update_w1_pipeline,
-        update_w1_bind,
-        train_dispatch.update_w1_dispatch_x,
-      )
-      dispatch_compute_js(
-        device_any,
-        update_b1_pipeline,
-        update_b1_bind,
-        train_dispatch.update_b1_dispatch_x,
-      )
-      let loss_read = @web.device_read_buffer_bytes(
-        device,
-        loss_sum_buf,
-        loss_buffers.loss_sum_bytes,
-      )
-      match loss_read {
-        Ok(loss_bytes) => {
-          let losses = bytes_to_f32_array_js(loss_bytes)
-          epoch_loss_sum = epoch_loss_sum + losses[0]
-        }
-        Err(err) => {
-          set_status_js("loss read error: " + err.to_string())
-          return
-        }
-      }
-      let probs_read = @web.device_read_buffer_bytes(
-        device,
-        probs_buf_any.cast(),
-        loss_buffers.probs_bytes,
-      )
-      match probs_read {
-        Ok(prob_bytes) => {
-          let probs = bytes_to_f32_array_js(prob_bytes)
-          let mut b = 0
-          while b < batch_size {
-            let base = b * output_size
-            let pred = argmax_in_probs(probs, base, output_size)
-            if pred == batch_labels[b] {
-              epoch_correct = epoch_correct + 1
-            }
-            b = b + 1
-          }
-          epoch_seen = epoch_seen + batch_size
-        }
-        Err(err) => {
-          set_status_js("probs read error: " + err.to_string())
-          return
-        }
-      }
       step = step + 1
     }
-    let avg_loss = epoch_loss_sum / Float::from_int(epoch_seen)
-    let acc = Float::from_int(epoch_correct) / Float::from_int(epoch_seen)
-    set_status_js(
-      "epoch " +
-      epoch.to_string() +
-      " avg_loss=" +
-      avg_loss.to_string() +
-      " acc=" +
-      acc.to_string(),
+    let loss_read = @web.device_read_buffer_bytes(
+      device,
+      epoch_loss_buf_any.cast(),
+      loss_buffers.epoch_loss_bytes,
     )
+    let correct_read = @web.device_read_buffer_bytes(
+      device,
+      epoch_correct_buf_any.cast(),
+      loss_buffers.epoch_correct_bytes,
+    )
+    let seen_read = @web.device_read_buffer_bytes(
+      device,
+      epoch_seen_buf_any.cast(),
+      loss_buffers.epoch_seen_bytes,
+    )
+    match loss_read {
+      Ok(loss_bytes) =>
+        match correct_read {
+          Ok(correct_bytes) =>
+            match seen_read {
+              Ok(seen_bytes) => {
+                let loss_values = bytes_to_f32_array_js(loss_bytes)
+                let correct_values = bytes_to_f32_array_js(correct_bytes)
+                let seen_values = bytes_to_f32_array_js(seen_bytes)
+                let seen = seen_values[0]
+                let avg_loss = loss_values[0] / seen
+                let acc = correct_values[0] / seen
+                set_status_js(
+                  "epoch " +
+                  epoch.to_string() +
+                  " avg_loss=" +
+                  avg_loss.to_string() +
+                  " acc=" +
+                  acc.to_string(),
+                )
+              }
+              Err(err) => {
+                set_status_js("epoch seen read error: " + err.to_string())
+                return
+              }
+            }
+          Err(err) => {
+            set_status_js("epoch correct read error: " + err.to_string())
+            return
+          }
+        }
+      Err(err) => {
+        set_status_js("epoch loss read error: " + err.to_string())
+        return
+      }
+    }
     epoch = epoch + 1
   }
   set_status_js("evaluating test (gpu)...")
@@ -1708,37 +1729,63 @@ pub async fn run_mnist_train() -> Unit {
     test_effective * input_size,
   )
   let test_labels = slice_i32(test_dataset.labels, 0, test_effective)
+  let test_dataset_buffers = match
+    @nn.mlp_plan_dataset_buffers(spec, test_effective) {
+    Ok(p) => p
+    Err(err) => {
+      set_status_js("test dataset buffer error: " + err.to_string())
+      return
+    }
+  }
+  let test_loss_buffers = match
+    @nn.mlp_plan_loss_buffers_for_dataset(spec, test_effective) {
+    Ok(p) => p
+    Err(err) => {
+      set_status_js("test loss buffer error: " + err.to_string())
+      return
+    }
+  }
+  let test_input_buf = create_storage_buffer_js(
+    device_any,
+    test_dataset_buffers.dataset_input_bytes,
+  )
+  let test_labels_buf = create_storage_buffer_js(
+    device_any,
+    test_loss_buffers.labels_bytes,
+  )
+  let test_indices_buf = create_storage_buffer_js(
+    device_any,
+    test_dataset_buffers.indices_bytes,
+  )
+  let test_indices = Array::makei(test_effective + 1, fn(i) {
+    if i == 0 {
+      0
+    } else {
+      i - 1
+    }
+  })
+  queue_write_f32_js(device_any, test_input_buf, test_inputs)
+  queue_write_u32_js(device_any, test_labels_buf, test_labels)
+  queue_write_u32_js(device_any, test_indices_buf, test_indices)
+  let test_layer1_bind = create_bind_group_js(device_any, layer1_pipeline, [
+    test_input_buf, test_indices_buf, weight1_buf, bias1_buf, hidden_buf,
+  ])
+  let test_loss_bind = create_bind_group_js(device_any, loss_pipeline, [
+    output_buf_any, test_labels_buf, test_indices_buf, loss_buf_any, probs_buf_any,
+    correct_buf_any,
+  ])
   let test_steps = test_effective / batch_size
-  let mut test_loss_sum = Float::from_int(0)
-  let mut test_correct = 0
-  let mut test_seen = 0
+  queue_write_f32_js(device_any, epoch_loss_buf_any, zero_f32)
+  queue_write_f32_js(device_any, epoch_correct_buf_any, zero_f32)
+  queue_write_f32_js(device_any, epoch_seen_buf_any, zero_f32)
   let mut step = 0
   while step < test_steps {
-    let batch_inputs : Array[Float] = Array::make(
-      input_step,
-      Float::from_int(0),
-    )
-    let batch_labels : Array[Int] = Array::make(batch_size, 0)
     let base = step * batch_size
-    let mut bi = 0
-    while bi < batch_size {
-      let idx = base + bi
-      batch_labels[bi] = test_labels[idx]
-      let input_offset = idx * input_size
-      let out_offset = bi * input_size
-      let mut j = 0
-      while j < input_size {
-        batch_inputs[out_offset + j] = test_inputs[input_offset + j]
-        j = j + 1
-      }
-      bi = bi + 1
-    }
-    queue_write_f32_js(device_any, input_buf, batch_inputs)
-    queue_write_u32_js(device_any, labels_buf, batch_labels)
+    queue_write_u32_js(device_any, test_indices_buf, [base])
     dispatch_compute_js(
       device_any,
       layer1_pipeline,
-      layer1_bind,
+      test_layer1_bind,
       dispatch.layer1_dispatch_x,
     )
     dispatch_compute_js(
@@ -1747,56 +1794,67 @@ pub async fn run_mnist_train() -> Unit {
       layer2_bind,
       dispatch.layer2_dispatch_x,
     )
-    dispatch_compute_js(device_any, loss_pipeline, loss_bind, loss_dispatch)
+    dispatch_compute_js(
+      device_any, loss_pipeline, test_loss_bind, loss_dispatch,
+    )
     dispatch_compute_js(
       device_any, loss_reduce_pipeline, loss_reduce_bind, loss_reduce_dispatch,
     )
-    let loss_read = @web.device_read_buffer_bytes(
-      device,
-      loss_sum_buf,
-      loss_buffers.loss_sum_bytes,
+    dispatch_compute_js(
+      device_any, loss_reduce_pipeline, correct_reduce_bind, loss_reduce_dispatch,
     )
-    match loss_read {
-      Ok(loss_bytes) => {
-        let losses = bytes_to_f32_array_js(loss_bytes)
-        test_loss_sum = test_loss_sum + losses[0]
-      }
-      Err(err) => {
-        set_status_js("test loss read error: " + err.to_string())
-        return
-      }
-    }
-    let probs_read = @web.device_read_buffer_bytes(
-      device,
-      probs_buf_any.cast(),
-      loss_buffers.probs_bytes,
-    )
-    match probs_read {
-      Ok(prob_bytes) => {
-        let probs = bytes_to_f32_array_js(prob_bytes)
-        let mut b = 0
-        while b < batch_size {
-          let base = b * output_size
-          let pred = argmax_in_probs(probs, base, output_size)
-          if pred == batch_labels[b] {
-            test_correct = test_correct + 1
-          }
-          b = b + 1
-        }
-        test_seen = test_seen + batch_size
-      }
-      Err(err) => {
-        set_status_js("test probs read error: " + err.to_string())
-        return
-      }
-    }
+    dispatch_compute_js(device_any, epoch_accum_pipeline, epoch_accum_bind, 1)
     step = step + 1
   }
-  let test_loss = test_loss_sum / Float::from_int(test_seen)
-  let test_acc = Float::from_int(test_correct) / Float::from_int(test_seen)
-  set_status_js(
-    "test loss=" + test_loss.to_string() + " acc=" + test_acc.to_string(),
+  let loss_read = @web.device_read_buffer_bytes(
+    device,
+    epoch_loss_buf_any.cast(),
+    loss_buffers.epoch_loss_bytes,
   )
+  let correct_read = @web.device_read_buffer_bytes(
+    device,
+    epoch_correct_buf_any.cast(),
+    loss_buffers.epoch_correct_bytes,
+  )
+  let seen_read = @web.device_read_buffer_bytes(
+    device,
+    epoch_seen_buf_any.cast(),
+    loss_buffers.epoch_seen_bytes,
+  )
+  match loss_read {
+    Ok(loss_bytes) =>
+      match correct_read {
+        Ok(correct_bytes) =>
+          match seen_read {
+            Ok(seen_bytes) => {
+              let loss_values = bytes_to_f32_array_js(loss_bytes)
+              let correct_values = bytes_to_f32_array_js(correct_bytes)
+              let seen_values = bytes_to_f32_array_js(seen_bytes)
+              let seen = seen_values[0]
+              let test_loss = loss_values[0] / seen
+              let test_acc = correct_values[0] / seen
+              set_status_js(
+                "test loss=" +
+                test_loss.to_string() +
+                " acc=" +
+                test_acc.to_string(),
+              )
+            }
+            Err(err) => {
+              set_status_js("test seen read error: " + err.to_string())
+              return
+            }
+          }
+        Err(err) => {
+          set_status_js("test correct read error: " + err.to_string())
+          return
+        }
+      }
+    Err(err) => {
+      set_status_js("test loss read error: " + err.to_string())
+      return
+    }
+  }
 }
 
 ///|

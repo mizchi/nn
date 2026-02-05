@@ -454,6 +454,102 @@ WGPUBindGroupLayout wgpu_native_device_create_bind_group_layout_6(
   return wgpuDeviceCreateBindGroupLayout(device, &desc);
 }
 
+WGPUBindGroupLayout wgpu_native_device_create_bind_group_layout_7(
+  WGPUDevice device,
+  int binding0,
+  int visibility0,
+  int type0,
+  int binding1,
+  int visibility1,
+  int type1,
+  int binding2,
+  int visibility2,
+  int type2,
+  int binding3,
+  int visibility3,
+  int type3,
+  int binding4,
+  int visibility4,
+  int type4,
+  int binding5,
+  int visibility5,
+  int type5,
+  int binding6,
+  int visibility6,
+  int type6
+) {
+  if (device == NULL) {
+    return NULL;
+  }
+  WGPUBindGroupLayoutEntry entries[7];
+  fill_bind_group_layout_entry(&entries[0], binding0, visibility0, type0);
+  fill_bind_group_layout_entry(&entries[1], binding1, visibility1, type1);
+  fill_bind_group_layout_entry(&entries[2], binding2, visibility2, type2);
+  fill_bind_group_layout_entry(&entries[3], binding3, visibility3, type3);
+  fill_bind_group_layout_entry(&entries[4], binding4, visibility4, type4);
+  fill_bind_group_layout_entry(&entries[5], binding5, visibility5, type5);
+  fill_bind_group_layout_entry(&entries[6], binding6, visibility6, type6);
+
+  WGPUBindGroupLayoutDescriptor desc;
+  memset(&desc, 0, sizeof(desc));
+  desc.nextInChain = NULL;
+  desc.label = string_view_empty();
+  desc.entryCount = 7;
+  desc.entries = entries;
+
+  return wgpuDeviceCreateBindGroupLayout(device, &desc);
+}
+
+WGPUBindGroupLayout wgpu_native_device_create_bind_group_layout_8(
+  WGPUDevice device,
+  int binding0,
+  int visibility0,
+  int type0,
+  int binding1,
+  int visibility1,
+  int type1,
+  int binding2,
+  int visibility2,
+  int type2,
+  int binding3,
+  int visibility3,
+  int type3,
+  int binding4,
+  int visibility4,
+  int type4,
+  int binding5,
+  int visibility5,
+  int type5,
+  int binding6,
+  int visibility6,
+  int type6,
+  int binding7,
+  int visibility7,
+  int type7
+) {
+  if (device == NULL) {
+    return NULL;
+  }
+  WGPUBindGroupLayoutEntry entries[8];
+  fill_bind_group_layout_entry(&entries[0], binding0, visibility0, type0);
+  fill_bind_group_layout_entry(&entries[1], binding1, visibility1, type1);
+  fill_bind_group_layout_entry(&entries[2], binding2, visibility2, type2);
+  fill_bind_group_layout_entry(&entries[3], binding3, visibility3, type3);
+  fill_bind_group_layout_entry(&entries[4], binding4, visibility4, type4);
+  fill_bind_group_layout_entry(&entries[5], binding5, visibility5, type5);
+  fill_bind_group_layout_entry(&entries[6], binding6, visibility6, type6);
+  fill_bind_group_layout_entry(&entries[7], binding7, visibility7, type7);
+
+  WGPUBindGroupLayoutDescriptor desc;
+  memset(&desc, 0, sizeof(desc));
+  desc.nextInChain = NULL;
+  desc.label = string_view_empty();
+  desc.entryCount = 8;
+  desc.entries = entries;
+
+  return wgpuDeviceCreateBindGroupLayout(device, &desc);
+}
+
 WGPUBindGroup wgpu_native_device_create_bind_group_1(
   WGPUDevice device,
   WGPUBindGroupLayout layout,
@@ -743,6 +839,168 @@ WGPUBindGroup wgpu_native_device_create_bind_group_6(
   desc.label = string_view_empty();
   desc.layout = layout;
   desc.entryCount = 6;
+  desc.entries = entries;
+
+  return wgpuDeviceCreateBindGroup(device, &desc);
+}
+
+WGPUBindGroup wgpu_native_device_create_bind_group_7(
+  WGPUDevice device,
+  WGPUBindGroupLayout layout,
+  int binding0,
+  WGPUBuffer buffer0,
+  int offset0,
+  int size0,
+  int binding1,
+  WGPUBuffer buffer1,
+  int offset1,
+  int size1,
+  int binding2,
+  WGPUBuffer buffer2,
+  int offset2,
+  int size2,
+  int binding3,
+  WGPUBuffer buffer3,
+  int offset3,
+  int size3,
+  int binding4,
+  WGPUBuffer buffer4,
+  int offset4,
+  int size4,
+  int binding5,
+  WGPUBuffer buffer5,
+  int offset5,
+  int size5,
+  int binding6,
+  WGPUBuffer buffer6,
+  int offset6,
+  int size6
+) {
+  if (device == NULL || layout == NULL) {
+    return NULL;
+  }
+  WGPUBindGroupEntry entries[7];
+  memset(entries, 0, sizeof(entries));
+  entries[0].binding = (uint32_t)binding0;
+  entries[0].buffer = buffer0;
+  entries[0].offset = (uint64_t)offset0;
+  entries[0].size = (uint64_t)size0;
+  entries[1].binding = (uint32_t)binding1;
+  entries[1].buffer = buffer1;
+  entries[1].offset = (uint64_t)offset1;
+  entries[1].size = (uint64_t)size1;
+  entries[2].binding = (uint32_t)binding2;
+  entries[2].buffer = buffer2;
+  entries[2].offset = (uint64_t)offset2;
+  entries[2].size = (uint64_t)size2;
+  entries[3].binding = (uint32_t)binding3;
+  entries[3].buffer = buffer3;
+  entries[3].offset = (uint64_t)offset3;
+  entries[3].size = (uint64_t)size3;
+  entries[4].binding = (uint32_t)binding4;
+  entries[4].buffer = buffer4;
+  entries[4].offset = (uint64_t)offset4;
+  entries[4].size = (uint64_t)size4;
+  entries[5].binding = (uint32_t)binding5;
+  entries[5].buffer = buffer5;
+  entries[5].offset = (uint64_t)offset5;
+  entries[5].size = (uint64_t)size5;
+  entries[6].binding = (uint32_t)binding6;
+  entries[6].buffer = buffer6;
+  entries[6].offset = (uint64_t)offset6;
+  entries[6].size = (uint64_t)size6;
+
+  WGPUBindGroupDescriptor desc;
+  memset(&desc, 0, sizeof(desc));
+  desc.nextInChain = NULL;
+  desc.label = string_view_empty();
+  desc.layout = layout;
+  desc.entryCount = 7;
+  desc.entries = entries;
+
+  return wgpuDeviceCreateBindGroup(device, &desc);
+}
+
+WGPUBindGroup wgpu_native_device_create_bind_group_8(
+  WGPUDevice device,
+  WGPUBindGroupLayout layout,
+  int binding0,
+  WGPUBuffer buffer0,
+  int offset0,
+  int size0,
+  int binding1,
+  WGPUBuffer buffer1,
+  int offset1,
+  int size1,
+  int binding2,
+  WGPUBuffer buffer2,
+  int offset2,
+  int size2,
+  int binding3,
+  WGPUBuffer buffer3,
+  int offset3,
+  int size3,
+  int binding4,
+  WGPUBuffer buffer4,
+  int offset4,
+  int size4,
+  int binding5,
+  WGPUBuffer buffer5,
+  int offset5,
+  int size5,
+  int binding6,
+  WGPUBuffer buffer6,
+  int offset6,
+  int size6,
+  int binding7,
+  WGPUBuffer buffer7,
+  int offset7,
+  int size7
+) {
+  if (device == NULL || layout == NULL) {
+    return NULL;
+  }
+  WGPUBindGroupEntry entries[8];
+  memset(entries, 0, sizeof(entries));
+  entries[0].binding = (uint32_t)binding0;
+  entries[0].buffer = buffer0;
+  entries[0].offset = (uint64_t)offset0;
+  entries[0].size = (uint64_t)size0;
+  entries[1].binding = (uint32_t)binding1;
+  entries[1].buffer = buffer1;
+  entries[1].offset = (uint64_t)offset1;
+  entries[1].size = (uint64_t)size1;
+  entries[2].binding = (uint32_t)binding2;
+  entries[2].buffer = buffer2;
+  entries[2].offset = (uint64_t)offset2;
+  entries[2].size = (uint64_t)size2;
+  entries[3].binding = (uint32_t)binding3;
+  entries[3].buffer = buffer3;
+  entries[3].offset = (uint64_t)offset3;
+  entries[3].size = (uint64_t)size3;
+  entries[4].binding = (uint32_t)binding4;
+  entries[4].buffer = buffer4;
+  entries[4].offset = (uint64_t)offset4;
+  entries[4].size = (uint64_t)size4;
+  entries[5].binding = (uint32_t)binding5;
+  entries[5].buffer = buffer5;
+  entries[5].offset = (uint64_t)offset5;
+  entries[5].size = (uint64_t)size5;
+  entries[6].binding = (uint32_t)binding6;
+  entries[6].buffer = buffer6;
+  entries[6].offset = (uint64_t)offset6;
+  entries[6].size = (uint64_t)size6;
+  entries[7].binding = (uint32_t)binding7;
+  entries[7].buffer = buffer7;
+  entries[7].offset = (uint64_t)offset7;
+  entries[7].size = (uint64_t)size7;
+
+  WGPUBindGroupDescriptor desc;
+  memset(&desc, 0, sizeof(desc));
+  desc.nextInChain = NULL;
+  desc.label = string_view_empty();
+  desc.layout = layout;
+  desc.entryCount = 8;
   desc.entries = entries;
 
   return wgpuDeviceCreateBindGroup(device, &desc);

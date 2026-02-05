@@ -1,0 +1,446 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/wgpu"
+
+// Values
+pub fn bind_group_descriptor(BindGroupLayout, Array[BindGroupEntry], String?) -> BindGroupDescriptor
+
+pub fn bind_group_entry(Int, BindingResource) -> BindGroupEntry
+
+pub fn bind_group_layout_descriptor(Array[BindGroupLayoutEntry], String?) -> BindGroupLayoutDescriptor
+
+pub fn bind_group_layout_entry(Int, Int, BindingType) -> BindGroupLayoutEntry
+
+pub fn binding_resource_buffer(Buffer, Int, Int) -> BindingResource
+
+pub fn binding_resource_sampler(Sampler) -> BindingResource
+
+pub fn binding_resource_texture_view(TextureView) -> BindingResource
+
+pub let binding_type_read_only_storage_buffer : BindingType
+
+pub let binding_type_sampler : BindingType
+
+pub let binding_type_storage_buffer : BindingType
+
+pub let binding_type_texture : BindingType
+
+pub let binding_type_uniform_buffer : BindingType
+
+pub fn buffer_descriptor(Int, Int, Bool, String?) -> BufferDescriptor
+
+pub let buffer_usage_copy_dst : Int
+
+pub let buffer_usage_copy_src : Int
+
+pub let buffer_usage_index : Int
+
+pub let buffer_usage_indirect : Int
+
+pub let buffer_usage_map_read : Int
+
+pub let buffer_usage_map_write : Int
+
+pub fn buffer_usage_or(Int, Int) -> Int
+
+pub let buffer_usage_query_resolve : Int
+
+pub let buffer_usage_storage : Int
+
+pub let buffer_usage_uniform : Int
+
+pub let buffer_usage_vertex : Int
+
+pub fn command_encoder_finish(CommandEncoder) -> Result[CommandBuffer, WgpuError]
+
+pub fn compute_pipeline_descriptor(PipelineLayout, ProgrammableStage, String?) -> ComputePipelineDescriptor
+
+pub fn device_create_bind_group(Device, BindGroupDescriptor) -> Result[BindGroup, WgpuError]
+
+pub fn device_create_bind_group_layout(Device, BindGroupLayoutDescriptor) -> Result[BindGroupLayout, WgpuError]
+
+pub fn device_create_buffer(Device, BufferDescriptor) -> Result[Buffer, WgpuError]
+
+pub fn device_create_command_encoder(Device, CommandEncoderDescriptor) -> Result[CommandEncoder, WgpuError]
+
+pub fn device_create_compute_pipeline(Device, ComputePipelineDescriptor) -> Result[ComputePipeline, WgpuError]
+
+pub fn device_create_pipeline_layout(Device, PipelineLayoutDescriptor) -> Result[PipelineLayout, WgpuError]
+
+pub fn device_create_render_pipeline(Device, RenderPipelineDescriptor) -> Result[RenderPipeline, WgpuError]
+
+pub fn device_create_sampler(Device, SamplerDescriptor) -> Result[Sampler, WgpuError]
+
+pub fn device_create_shader_module(Device, ShaderModuleDescriptor) -> Result[ShaderModule, WgpuError]
+
+pub fn device_create_texture(Device, TextureDescriptor) -> Result[Texture, WgpuError]
+
+pub fn device_descriptor_default() -> DeviceDescriptor
+
+pub fn device_dispatch_compute(Device, ComputePipeline, BindGroup, Int) -> Result[Unit, WgpuError]
+
+pub fn device_get_queue(Device) -> Result[Queue, WgpuError]
+
+pub fn device_read_buffer_bytes(Device, Buffer, Int) -> Result[Bytes, WgpuError]
+
+pub fn error_not_implemented() -> WgpuError
+
+pub fn error_not_supported() -> WgpuError
+
+pub fn error_validation(String) -> WgpuError
+
+pub fn extent_2d(Int, Int) -> Extent3d
+
+pub fn feature_other(String) -> Feature
+
+pub let filter_mode_linear : FilterMode
+
+pub let filter_mode_nearest : FilterMode
+
+pub fn is_supported() -> Bool
+
+pub fn limits_default() -> Limits
+
+pub fn pipeline_layout_descriptor(Array[BindGroupLayout], String?) -> PipelineLayoutDescriptor
+
+pub let power_preference_default : PowerPreference
+
+pub let power_preference_high_performance : PowerPreference
+
+pub let power_preference_low_power : PowerPreference
+
+pub let primitive_topology_triangle_list : PrimitiveTopology
+
+pub fn programmable_stage(ShaderModule, String) -> ProgrammableStage
+
+pub fn queue_submit(Queue, Array[CommandBuffer]) -> Result[Unit, WgpuError]
+
+pub fn queue_write_buffer(Queue, Buffer, Int, Array[Byte]) -> Result[Unit, WgpuError]
+
+pub async fn request_adapter(RequestAdapterOptions) -> Result[Adapter, WgpuError]
+
+pub fn request_adapter_options_default() -> RequestAdapterOptions
+
+pub async fn request_device(Adapter, DeviceDescriptor) -> Result[Device, WgpuError]
+
+pub fn shader_module_descriptor(String, String?) -> ShaderModuleDescriptor
+
+pub let shader_stage_compute : Int
+
+pub let shader_stage_fragment : Int
+
+pub fn shader_stage_or(Int, Int) -> Int
+
+pub let shader_stage_vertex : Int
+
+pub fn texture_create_view(Texture) -> Result[TextureView, WgpuError]
+
+pub let texture_dimension_2d : TextureDimension
+
+pub let texture_format_bgra8_unorm : TextureFormat
+
+pub let texture_format_rgba8_unorm : TextureFormat
+
+pub let texture_usage_copy_dst : Int
+
+pub let texture_usage_copy_src : Int
+
+pub fn texture_usage_or(Int, Int) -> Int
+
+pub let texture_usage_render_attachment : Int
+
+pub let texture_usage_storage_binding : Int
+
+pub let texture_usage_texture_binding : Int
+
+// Errors
+
+// Types and methods
+#external
+pub type Adapter
+
+#external
+pub type BindGroup
+
+pub struct BindGroupDescriptor {
+  layout : BindGroupLayout
+  entries : Array[BindGroupEntry]
+  label : String?
+}
+
+pub struct BindGroupEntry {
+  binding : Int
+  resource : BindingResource
+}
+
+#external
+pub type BindGroupLayout
+
+pub struct BindGroupLayoutDescriptor {
+  entries : Array[BindGroupLayoutEntry]
+  label : String?
+}
+pub impl Eq for BindGroupLayoutDescriptor
+pub impl Show for BindGroupLayoutDescriptor
+
+pub struct BindGroupLayoutEntry {
+  binding : Int
+  visibility : Int
+  ty : BindingType
+}
+pub impl Eq for BindGroupLayoutEntry
+pub impl Show for BindGroupLayoutEntry
+
+pub enum BindingResource {
+  Buffer(Buffer, Int, Int)
+  Sampler(Sampler)
+  TextureView(TextureView)
+}
+
+pub enum BindingType {
+  UniformBuffer
+  StorageBuffer
+  ReadOnlyStorageBuffer
+  Sampler
+  Texture
+  StorageTexture
+}
+pub impl Eq for BindingType
+pub impl Show for BindingType
+
+#external
+pub type Buffer
+
+pub struct BufferDescriptor {
+  size : Int
+  usage : Int
+  mapped_at_creation : Bool
+  label : String?
+}
+pub impl Eq for BufferDescriptor
+pub impl Show for BufferDescriptor
+
+pub struct ColorTargetState {
+  format : TextureFormat
+}
+pub impl Eq for ColorTargetState
+pub impl Show for ColorTargetState
+
+#external
+pub type CommandBuffer
+
+#external
+pub type CommandEncoder
+
+pub struct CommandEncoderDescriptor {
+  label : String?
+}
+pub impl Eq for CommandEncoderDescriptor
+pub impl Show for CommandEncoderDescriptor
+
+#external
+pub type ComputePipeline
+
+pub struct ComputePipelineDescriptor {
+  layout : PipelineLayout
+  compute : ProgrammableStage
+  label : String?
+}
+
+#external
+pub type Device
+
+pub struct DeviceDescriptor {
+  required_features : Array[Feature]
+  required_limits : Limits
+  label : String?
+}
+pub impl Eq for DeviceDescriptor
+pub impl Show for DeviceDescriptor
+
+pub struct Extent3d {
+  width : Int
+  height : Int
+  depth_or_array_layers : Int
+}
+pub impl Eq for Extent3d
+pub impl Show for Extent3d
+
+pub enum Feature {
+  ShaderF16
+  TimestampQuery
+  TextureCompressionBC
+  TextureCompressionETC2
+  TextureCompressionASTC
+  Float32Filterable
+  Other(String)
+}
+pub impl Eq for Feature
+pub impl Show for Feature
+
+pub enum FilterMode {
+  Nearest
+  Linear
+}
+pub impl Eq for FilterMode
+pub impl Show for FilterMode
+
+pub struct FragmentState {
+  shader_module : ShaderModule
+  entry_point : String
+  targets : Array[ColorTargetState]
+}
+
+#external
+pub type Instance
+
+pub struct Limits {
+  max_texture_dimension_2d : Int
+  max_storage_buffer_binding_size : Int
+  max_uniform_buffer_binding_size : Int
+  max_bind_groups : Int
+  max_compute_workgroup_size_x : Int
+  max_compute_workgroup_size_y : Int
+  max_compute_workgroup_size_z : Int
+  max_compute_workgroups_per_dimension : Int
+}
+pub impl Eq for Limits
+pub impl Show for Limits
+
+#external
+pub type PipelineLayout
+
+pub struct PipelineLayoutDescriptor {
+  bind_group_layouts : Array[BindGroupLayout]
+  label : String?
+}
+
+pub enum PowerPreference {
+  Default
+  LowPower
+  HighPerformance
+}
+pub impl Eq for PowerPreference
+pub impl Show for PowerPreference
+
+pub struct PrimitiveState {
+  topology : PrimitiveTopology
+}
+pub impl Eq for PrimitiveState
+pub impl Show for PrimitiveState
+
+pub enum PrimitiveTopology {
+  PointList
+  LineList
+  LineStrip
+  TriangleList
+  TriangleStrip
+}
+pub impl Eq for PrimitiveTopology
+pub impl Show for PrimitiveTopology
+
+pub struct ProgrammableStage {
+  shader_module : ShaderModule
+  entry_point : String
+}
+
+#external
+pub type Queue
+
+#external
+pub type RenderPipeline
+
+pub struct RenderPipelineDescriptor {
+  layout : PipelineLayout
+  vertex : VertexState
+  fragment : FragmentState
+  primitive : PrimitiveState
+  label : String?
+}
+
+pub struct RequestAdapterOptions {
+  power_preference : PowerPreference
+  force_fallback_adapter : Bool
+}
+pub impl Eq for RequestAdapterOptions
+pub impl Show for RequestAdapterOptions
+
+#external
+pub type Sampler
+
+pub struct SamplerDescriptor {
+  mag_filter : FilterMode
+  min_filter : FilterMode
+  mipmap_filter : FilterMode
+  label : String?
+}
+pub impl Eq for SamplerDescriptor
+pub impl Show for SamplerDescriptor
+
+#external
+pub type ShaderModule
+
+pub struct ShaderModuleDescriptor {
+  code : String
+  label : String?
+}
+pub impl Eq for ShaderModuleDescriptor
+pub impl Show for ShaderModuleDescriptor
+
+#external
+pub type Texture
+
+pub struct TextureDescriptor {
+  size : Extent3d
+  mip_level_count : Int
+  sample_count : Int
+  dimension : TextureDimension
+  format : TextureFormat
+  usage : Int
+  label : String?
+}
+pub impl Eq for TextureDescriptor
+pub impl Show for TextureDescriptor
+
+pub enum TextureDimension {
+  D1
+  D2
+  D3
+}
+pub impl Eq for TextureDimension
+pub impl Show for TextureDimension
+
+pub enum TextureFormat {
+  Rgba8Unorm
+  Bgra8Unorm
+  Rgba16Float
+  R32Float
+  R32Uint
+}
+pub impl Eq for TextureFormat
+pub impl Show for TextureFormat
+
+#external
+pub type TextureView
+
+pub struct VertexState {
+  shader_module : ShaderModule
+  entry_point : String
+}
+
+pub enum WgpuError {
+  NotImplemented
+  NotSupported
+  Validation(String)
+}
+pub impl Eq for WgpuError
+pub impl Show for WgpuError
+
+// Type aliases
+pub type BufferUsage = Int
+
+pub type ShaderStageFlags = Int
+
+pub type TextureUsage = Int
+
+// Traits
+

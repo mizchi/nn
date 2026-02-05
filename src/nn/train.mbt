@@ -103,62 +103,6 @@ fn dataset_validate_for_spec(
 }
 
 ///|
-fn relu_grad(x : Float) -> Float {
-  let zero = Float::from_int(0)
-  if x > zero {
-    Float::from_int(1)
-  } else {
-    zero
-  }
-}
-
-///|
-fn softmax_into(
-  logits : Array[Float],
-  offset : Int,
-  size : Int,
-  probs : Array[Float],
-) -> Unit {
-  let mut max = logits[offset]
-  for k = 1; k < size; k = k + 1 {
-    let v = logits[offset + k]
-    if v > max {
-      max = v
-    }
-  }
-  let mut sum = Float::from_int(0)
-  for k = 0; k < size; k = k + 1 {
-    let v = @math.expf(logits[offset + k] - max)
-    probs[k] = v
-    sum = sum + v
-  }
-  for k = 0; k < size; k = k + 1 {
-    probs[k] = probs[k] / sum
-  }
-}
-
-///|
-fn cross_entropy_loss(probs : Array[Float], label : Int) -> Float {
-  let eps = Float::from_int(1) / Float::from_int(1000000)
-  let p = probs[label] + eps
-  -@math.lnf(p)
-}
-
-///|
-fn argmax(values : Array[Float], offset : Int, size : Int) -> Int {
-  let mut best = 0
-  let mut best_value = values[offset]
-  for k = 1; k < size; k = k + 1 {
-    let v = values[offset + k]
-    if v > best_value {
-      best_value = v
-      best = k
-    }
-  }
-  best
-}
-
-///|
 fn forward_single(
   spec : MlpSpec,
   params : MlpParams,
@@ -168,23 +112,23 @@ fn forward_single(
   logits : Array[Float],
 ) -> Unit {
   let input_offset = index * spec.input_size
-  let zero = Float::from_int(0)
-  for j = 0; j < spec.hidden_size; j = j + 1 {
-    let mut acc = params.bias1[j]
-    for i = 0; i < spec.input_size; i = i + 1 {
-      acc = acc +
-        dataset.inputs[input_offset + i] *
-        params.weight1[i * spec.hidden_size + j]
-    }
-    hidden[j] = if acc < zero { zero } else { acc }
-  }
-  for k = 0; k < spec.output_size; k = k + 1 {
-    let mut acc = params.bias2[k]
-    for j = 0; j < spec.hidden_size; j = j + 1 {
-      acc = acc + hidden[j] * params.weight2[j * spec.output_size + k]
-    }
-    logits[k] = acc
-  }
+  let input = @numbt.vec_view(dataset.inputs, input_offset, spec.input_size)
+  let hidden_vec = @numbt.vec_view(hidden, 0, spec.hidden_size)
+  let logits_vec = @numbt.vec_view(logits, 0, spec.output_size)
+  let weight1 = @numbt.mat_view(
+    params.weight1,
+    spec.input_size,
+    spec.hidden_size,
+  )
+  let weight2 = @numbt.mat_view(
+    params.weight2,
+    spec.hidden_size,
+    spec.output_size,
+  )
+  let bias1 = @numbt.vec_view(params.bias1, 0, spec.hidden_size)
+  let bias2 = @numbt.vec_view(params.bias2, 0, spec.output_size)
+  @numbt.matmul_vec_bias_relu_into(weight1, input, bias1, hidden_vec)
+  @numbt.matmul_vec_bias_into(weight2, hidden_vec, bias2, logits_vec)
 }
 
 ///|
@@ -200,14 +144,16 @@ pub fn mlp_eval(
     let hidden = Array::make(spec.hidden_size, Float::from_int(0))
     let logits = Array::make(spec.output_size, Float::from_int(0))
     let probs = Array::make(spec.output_size, Float::from_int(0))
+    let logits_vec = @numbt.vec_view(logits, 0, spec.output_size)
+    let probs_vec = @numbt.vec_view(probs, 0, spec.output_size)
     let mut loss_sum = Float::from_int(0)
     let mut correct = 0
     for i = 0; i < dataset.count; i = i + 1 {
       forward_single(spec, params, dataset, i, hidden, logits)
-      softmax_into(logits, 0, spec.output_size, probs)
+      @numbt.softmax_into(logits_vec, probs_vec)
       let label = dataset.labels[i]
-      loss_sum = loss_sum + cross_entropy_loss(probs, label)
-      let pred = argmax(logits, 0, spec.output_size)
+      loss_sum = loss_sum + @numbt.cross_entropy_loss(probs_vec, label)
+      let pred = @numbt.vec_argmax(logits_vec)
       if pred == label {
         correct = correct + 1
       }
@@ -264,6 +210,8 @@ pub fn mlp_train(
     let hidden = Array::make(spec.hidden_size, zero)
     let logits = Array::make(spec.output_size, zero)
     let probs = Array::make(spec.output_size, zero)
+    let logits_vec = @numbt.vec_view(logits, 0, spec.output_size)
+    let probs_vec = @numbt.vec_view(probs, 0, spec.output_size)
     let grad_w1 = Array::make(params.weight1.length(), zero)
     let grad_b1 = Array::make(params.bias1.length(), zero)
     let grad_w2 = Array::make(params.weight2.length(), zero)
@@ -289,10 +237,10 @@ pub fn mlp_train(
         for bi = 0; bi < batch_count; bi = bi + 1 {
           let idx = indices[start + bi]
           forward_single(spec, params, dataset, idx, hidden, logits)
-          softmax_into(logits, 0, spec.output_size, probs)
+          @numbt.softmax_into(logits_vec, probs_vec)
           let label = dataset.labels[idx]
-          loss_sum = loss_sum + cross_entropy_loss(probs, label)
-          let pred = argmax(logits, 0, spec.output_size)
+          loss_sum = loss_sum + @numbt.cross_entropy_loss(probs_vec, label)
+          let pred = @numbt.vec_argmax(logits_vec)
           if pred == label {
             correct = correct + 1
           }
@@ -313,7 +261,7 @@ pub fn mlp_train(
             for k = 0; k < spec.output_size; k = k + 1 {
               acc = acc + probs[k] * params.weight2[j * spec.output_size + k]
             }
-            let dz1 = acc * relu_grad(hidden[j])
+            let dz1 = acc * @numbt.relu_grad(hidden[j])
             grad_b1[j] = grad_b1[j] + dz1
             for i = 0; i < spec.input_size; i = i + 1 {
               let idx_w1 = i * spec.hidden_size + j

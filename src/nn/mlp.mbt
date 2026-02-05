@@ -419,16 +419,6 @@ pub struct MlpCpuResult {
 } derive(Show, Eq)
 
 ///|
-fn relu(x : Float) -> Float {
-  let zero = Float::from_int(0)
-  if x < zero {
-    zero
-  } else {
-    x
-  }
-}
-
-///|
 pub fn mlp_forward(
   spec : MlpSpec,
   params : MlpParams,
@@ -441,34 +431,27 @@ pub fn mlp_forward(
     let zero = Float::from_int(0)
     let hidden = Array::make(elements_hidden(spec), zero)
     let output = Array::make(elements_output(spec), zero)
+    let weight1 = @numbt.mat_view(
+      params.weight1,
+      spec.input_size,
+      spec.hidden_size,
+    )
+    let weight2 = @numbt.mat_view(
+      params.weight2,
+      spec.hidden_size,
+      spec.output_size,
+    )
+    let bias1 = @numbt.vec_view(params.bias1, 0, spec.hidden_size)
+    let bias2 = @numbt.vec_view(params.bias2, 0, spec.output_size)
     for b = 0; b < spec.batch_size; b = b + 1 {
       let input_offset = b * spec.input_size
       let hidden_offset = b * spec.hidden_size
       let output_offset = b * spec.output_size
-      for j = 0; j < spec.hidden_size; j = j + 1 {
-        let acc = for i = 0, acc = params.bias1[j]
-                      i < spec.input_size
-                      i = i + 1, acc = acc +
-                        input[input_offset + i] *
-                        params.weight1[i * spec.hidden_size + j] {
-
-        } else {
-          acc
-        }
-        hidden[hidden_offset + j] = relu(acc)
-      }
-      for k = 0; k < spec.output_size; k = k + 1 {
-        let acc = for j = 0, acc = params.bias2[k]
-                      j < spec.hidden_size
-                      j = j + 1, acc = acc +
-                        hidden[hidden_offset + j] *
-                        params.weight2[j * spec.output_size + k] {
-
-        } else {
-          acc
-        }
-        output[output_offset + k] = acc
-      }
+      let input_vec = @numbt.vec_view(input, input_offset, spec.input_size)
+      let hidden_vec = @numbt.vec_view(hidden, hidden_offset, spec.hidden_size)
+      let output_vec = @numbt.vec_view(output, output_offset, spec.output_size)
+      @numbt.matmul_vec_bias_relu_into(weight1, input_vec, bias1, hidden_vec)
+      @numbt.matmul_vec_bias_into(weight2, hidden_vec, bias2, output_vec)
     }
     { hidden, output }
   })

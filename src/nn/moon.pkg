@@ -1,4 +1,5 @@
 import {
   "mizchi/wgpu" as @wgpu,
+  "mizchi/wgpu/numbt" as @numbt,
   "moonbitlang/core/math" as @math,
 }

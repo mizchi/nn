@@ -1,0 +1,14 @@
+import {
+  "mizchi/wgpu/nn" as @nn,
+  "mizchi/wgpu/mnist" as @mnist,
+  "moonbitlang/async",
+  "moonbitlang/async/fs" as @afs,
+}
+
+options(
+  "is-main": true,
+  targets: {
+    "main.mbt": [ "not", "js" ],
+    "main_js.mbt": [ "js" ],
+  },
+)

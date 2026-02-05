@@ -5,3 +5,9 @@ target
 .mooncakes/
 .moonagent/
 .jj/
+node_modules/
+playwright-report/
+test-results/
+.playwright/
+e2e/moonbit.js
+data/

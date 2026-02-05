@@ -1,0 +1,7 @@
+import {
+  "mizchi/wgpu" as @wgpu,
+}
+
+options(
+  "supported-targets": [ "native" ],
+)

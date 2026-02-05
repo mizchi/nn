@@ -18,6 +18,32 @@ check:
 test:
     moon test --target {{target}}
 
+# E2E tests (Playwright)
+e2e:
+    pnpm e2e
+
+e2e-install:
+    pnpm e2e:install
+
+# MNIST (native)
+mnist_primary := "http://yann.lecun.com/exdb/mnist"
+mnist_mirror := "https://storage.googleapis.com/cvdf-datasets/mnist"
+
+mnist-download:
+    mkdir -p data/mnist
+    rm -f data/mnist/*.gz
+    curl -fL -o data/mnist/train-images-idx3-ubyte.gz {{mnist_primary}}/train-images-idx3-ubyte.gz || curl -fL -o data/mnist/train-images-idx3-ubyte.gz {{mnist_mirror}}/train-images-idx3-ubyte.gz
+    curl -fL -o data/mnist/train-labels-idx1-ubyte.gz {{mnist_primary}}/train-labels-idx1-ubyte.gz || curl -fL -o data/mnist/train-labels-idx1-ubyte.gz {{mnist_mirror}}/train-labels-idx1-ubyte.gz
+    curl -fL -o data/mnist/t10k-images-idx3-ubyte.gz {{mnist_primary}}/t10k-images-idx3-ubyte.gz || curl -fL -o data/mnist/t10k-images-idx3-ubyte.gz {{mnist_mirror}}/t10k-images-idx3-ubyte.gz
+    curl -fL -o data/mnist/t10k-labels-idx1-ubyte.gz {{mnist_primary}}/t10k-labels-idx1-ubyte.gz || curl -fL -o data/mnist/t10k-labels-idx1-ubyte.gz {{mnist_mirror}}/t10k-labels-idx1-ubyte.gz
+    gunzip -f data/mnist/*.gz
+
+mnist-train:
+    moon run --target native src/train
+
+mnist-infer *ARGS:
+    moon run --target native src/infer -- {{ARGS}}
+
 # Update snapshot tests
 test-update:
     moon test --update --target {{target}}

@@ -1,24 +1,41 @@
-# MoonBit Template
+# mizchi/wgpu.mbt
 
-A minimal MoonBit project template with CI, justfile, and AI coding assistant support.
+Minimal WebGPU contract layer for MoonBit.
 
-## Usage
+## Goals
 
-Clone this repository and start coding:
+- Common API for WebGPU (browser) and wgpu-native (native)
+- Small, strict contract surface for 2D rendering and compute
+- Backend implementations live in separate packages
 
-```bash
-git clone https://github.com/mizchi/moonbit-template my-project
-cd my-project
-```
+## Status
 
-Update `moon.mod.json` with your module name:
+Contract layer only. All backend functions return `NotImplemented` for now.
 
-```json
-{
-  "name": "your-username/your-project",
-  ...
-}
-```
+## Packages
+
+- `mizchi/wgpu` : core contract (no surface)
+- `mizchi/wgpu/web` : browser surface API (Canvas)
+- `mizchi/wgpu/native` : native surface API (window handle)
+- `mizchi/wgpu/nn` : minimal 2-layer MLP planning + CPU reference
+- `mizchi/wgpu/glfw` : GLFW contract (native stub, may be split out)
+- `mizchi/wgpu/browser` : browser entry sample (WebGPU readback)
+- `mizchi/wgpu/mnist` : MNIST loader (native)
+- `mizchi/wgpu/train` : MNIST training entry (native)
+- `mizchi/wgpu/infer` : MNIST inference entry (native)
+
+## Web I/O note
+
+`@web.device_read_buffer_bytes` is async. Buffers you read back from must include
+`COPY_SRC` usage (the helper in `@nn` already plans output buffers with it).
+
+Browser entry supports `/?mode=loss` to run a minimal GPU forward + softmax loss demo.
+
+## Enum helpers
+
+Enum constructors are read-only across packages, so `wgpu` exposes helper values/functions like
+`texture_format_rgba8_unorm` and `feature_other("name")`. The helper list is intentionally minimal
+and should grow only when the backend supports it.
 
 ## Quick Commands
 
@@ -27,39 +44,9 @@ just           # check + test
 just fmt       # format code
 just check     # type check
 just test      # run tests
-just test-update  # update snapshot tests
-just run       # run main
-just info      # generate type definition files
+just e2e       # run Playwright e2e (builds browser entry)
+just e2e-install # install Playwright Chromium
+just mnist-download # download MNIST (official URL + mirror fallback)
+just mnist-train # run MNIST training (native, ~95% test acc)
+just mnist-infer # run MNIST inference with saved weights (native)
 ```
-
-## Project Structure
-
-```
-my-project/
-├── moon.mod.json      # Module configuration
-├── src/
-│   ├── moon.pkg       # Package configuration
-│   ├── lib.mbt        # Library code
-│   ├── lib_test.mbt   # Tests
-│   ├── lib_bench.mbt  # Benchmarks
-│   ├── API.mbt.md     # Doc tests
-│   └── main/
-│       ├── moon.pkg
-│       └── main.mbt   # Entry point
-├── justfile           # Task runner
-└── .github/workflows/
-    └── ci.yml         # GitHub Actions CI
-```
-
-## Features
-
-- `src/` directory structure with `moon.pkg` format
-- Snapshot testing with `inspect()`
-- Doc tests in `.mbt.md` files
-- Benchmarks with `moon bench`
-- GitHub Actions CI
-- Claude Code / GitHub Copilot support (AGENTS.md)
-
-## License
-
-Apache-2.0

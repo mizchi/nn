@@ -1,0 +1,8 @@
+import {
+  "mizchi/wgpu" as @wgpu,
+  "moonbitlang/async/js_async",
+}
+
+options(
+  "supported-targets": [ "js" ],
+)

@@ -1,14 +1,15 @@
 {
-  "name": "mizchi/lib",
+  "name": "mizchi/wgpu",
   "version": "0.1.0",
-  "description": "",
+  "description": "Minimal WebGPU contract layer for MoonBit",
   "deps": {
-    "moonbitlang/async": "0.16.4"
+    "moonbitlang/async": "0.16.4",
+    "mizchi/js": "0.10.11"
   },
   "readme": "src/README.mbt.md",
-  "repository": "https://github.com/mizchi/lib",
+  "repository": "https://github.com/mizchi/wgpu.mbt",
   "license": "Apache-2.0",
-  "keywords": [],
+  "keywords": ["webgpu", "wgpu"],
   "source": "src",
   "preferred-target": "js"
 }

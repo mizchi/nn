@@ -10,7 +10,8 @@ Minimal WebGPU contract layer for MoonBit.
 
 ## Status
 
-Contract layer only. All backend functions return `NotImplemented` for now.
+- JS backend: contract only (NotImplemented).
+- Native backend: minimal compute path implemented for MLP inference (wgpu-native).
 
 ## Packages
 
@@ -30,6 +31,10 @@ Contract layer only. All backend functions return `NotImplemented` for now.
 `COPY_SRC` usage (the helper in `@nn` already plans output buffers with it).
 
 Browser entry supports `/?mode=loss` to run a minimal GPU forward + softmax loss demo.
+Use `/?mode=train` for a single GPU train step vs CPU reference.
+Use `/?mode=mnist&limit=1024&test_limit=10000&epochs=1&batch=128&lr=0.1&shuffle=1&init=he` to train MNIST in browser.
+For benchmarking, add `bench=1` and size params
+(`input`, `hidden`, `output`, `batch`, `warmup`, `iters`, `seed`).
 
 ## Enum helpers
 
@@ -46,7 +51,28 @@ just check     # type check
 just test      # run tests
 just e2e       # run Playwright e2e (builds browser entry)
 just e2e-install # install Playwright Chromium
+just bench-cpu # run CPU loss benchmark (native)
+just bench-gpu # run WebGPU loss benchmark (Playwright)
+just wgpu-native-build # build wgpu-native (native target)
+just serve     # build browser entry + serve repo root
 just mnist-download # download MNIST (official URL + mirror fallback)
 just mnist-train # run MNIST training (native, ~95% test acc)
 just mnist-infer # run MNIST inference with saved weights (native)
+just mnist-infer --json # emit JSON lines for inference
+just mnist-train --json # emit JSON lines for training
+just mnist-infer --backend cpu --bench # benchmark CPU inference
+just mnist-infer --backend gpu --bench # benchmark GPU inference
+just mnist-train --backend cpu --bench # benchmark CPU training
+just mnist-train --backend gpu --bench # benchmark GPU training
+just mnist-train --backend gpu --bench --bench-no-readback # GPU training without per-step readback
+just mnist-train --epochs 5 --limit 2048 # quick training on a subset
+```
+
+## Native (wgpu-native)
+
+`mnist-infer` and `mnist-train --backend gpu` use the wgpu-native backend
+(compute only). Build the native library once before running:
+
+```bash
+just wgpu-native-build
 ```

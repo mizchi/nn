@@ -1,6 +1,7 @@
 import {
   "mizchi/wgpu/nn" as @nn,
   "mizchi/wgpu/mnist" as @mnist,
+  "mizchi/wgpu" as @wgpu,
   "moonbitlang/async",
   "moonbitlang/async/fs" as @afs,
   "moonbitlang/core/env" as @env,
@@ -9,8 +10,10 @@ import {
 
 options(
   "is-main": true,
-  targets: {
-    "main.mbt": [ "not", "js" ],
-    "main_js.mbt": [ "js" ],
+  link: {
+    "native": {
+      "cc-link-flags": "-Ldeps/wgpu-native/target/release -lwgpu_native",
+    },
   },
+  targets: { "main.mbt": [ "not", "js" ], "main_js.mbt": [ "js" ] },
 )

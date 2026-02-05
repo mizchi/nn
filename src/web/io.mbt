@@ -1,10 +1,11 @@
 ///|
+
 ///|
 pub fn queue_write_bytes(
   queue : @wgpu.Queue,
   buffer : @wgpu.Buffer,
   offset : Int,
-  data : Bytes
+  data : Bytes,
 ) -> Result[Unit, @wgpu.WgpuError] {
   @wgpu.queue_write_buffer(queue, buffer, offset, data.to_array())
 }
@@ -13,7 +14,7 @@ pub fn queue_write_bytes(
 extern "js" fn read_buffer_bytes_js(
   device : @wgpu.Device,
   buffer : @wgpu.Buffer,
-  size : Int
+  size : Int,
 ) -> @js_async.Promise[Bytes] =
   #| async (device, buffer, size) => {
   #|   if (size <= 0) return new Uint8Array(0)
@@ -36,7 +37,7 @@ extern "js" fn read_buffer_bytes_js(
 pub async fn device_read_buffer_bytes(
   device : @wgpu.Device,
   buffer : @wgpu.Buffer,
-  size : Int
+  size : Int,
 ) -> Result[Bytes, @wgpu.WgpuError] {
   let bytes = read_buffer_bytes_js(device, buffer, size).wait()
   Ok(bytes)

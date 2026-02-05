@@ -15,8 +15,7 @@ test "default_device_descriptor" {
 ///|
 test "buffer_usage_flags" {
   let usage = @wgpu.buffer_usage_or(
-    @wgpu.buffer_usage_copy_dst,
-    @wgpu.buffer_usage_storage,
+    @wgpu.buffer_usage_copy_dst, @wgpu.buffer_usage_storage,
   )
   inspect(usage, content="136")
 }
@@ -24,8 +23,7 @@ test "buffer_usage_flags" {
 ///|
 test "shader_stage_flags" {
   let stages = @wgpu.shader_stage_or(
-    @wgpu.shader_stage_vertex,
-    @wgpu.shader_stage_fragment,
+    @wgpu.shader_stage_vertex, @wgpu.shader_stage_fragment,
   )
   inspect(stages, content="3")
 }

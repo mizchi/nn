@@ -1,0 +1,11 @@
+import {
+  "mizchi/wgpu/nn" as @nn,
+  "moonbitlang/core/env" as @env,
+  "moonbitlang/core/math" as @math,
+  "moonbitlang/core/strconv" as @strconv,
+}
+
+options(
+  "is-main": true,
+  targets: { "main.mbt": [ "not", "js" ], "main_js.mbt": [ "js" ] },
+)

@@ -1,7 +1,9 @@
 ///|
 test "mlp_params_bytes_roundtrip" {
   let spec = mlp_spec_new(2, 3, 1, 1).unwrap()
-  let params = mlp_init_params_with_policy(spec, 1, mlp_init_policy_deterministic).unwrap()
+  let params = mlp_init_params_with_policy(
+    spec, 1, mlp_init_policy_deterministic,
+  ).unwrap()
   let bytes = mlp_params_to_bytes(spec, params).unwrap()
   let restored = mlp_params_from_bytes(spec, bytes).unwrap()
   let bytes2 = mlp_params_to_bytes(spec, restored).unwrap()
@@ -15,7 +17,9 @@ test "mlp_train_reduces_loss" {
   let inputs : Array[Float] = [f(1), f(0), f(0), f(1)]
   let labels : Array[Int] = [0, 1]
   let dataset = mlp_dataset_new(2, inputs, labels).unwrap()
-  let params = mlp_init_params_with_policy(spec, 0, mlp_init_policy_deterministic).unwrap()
+  let params = mlp_init_params_with_policy(
+    spec, 0, mlp_init_policy_deterministic,
+  ).unwrap()
   let before = mlp_eval(spec, params, dataset).unwrap()
   let cfg = mlp_train_config(5, 2, f(1) / f(20), false, 0)
   let result = mlp_train(spec, params, dataset, cfg).unwrap()
@@ -31,7 +35,9 @@ test "mlp_eval_from_bytes_matches_eval" {
   let inputs : Array[Float] = [f(1), f(0), f(0), f(1)]
   let labels : Array[Int] = [0, 1]
   let dataset = mlp_dataset_new(2, inputs, labels).unwrap()
-  let params = mlp_init_params_with_policy(spec, 0, mlp_init_policy_deterministic).unwrap()
+  let params = mlp_init_params_with_policy(
+    spec, 0, mlp_init_policy_deterministic,
+  ).unwrap()
   let expected = mlp_eval(spec, params, dataset).unwrap()
   let bytes = mlp_params_to_bytes(spec, params).unwrap()
   let actual = mlp_eval_from_bytes(spec, bytes, dataset).unwrap()

@@ -62,3 +62,19 @@ test("webgpu mlp loss matches cpu eval", async ({ page }) => {
   expect(result.actual.length).toBe(9);
   expect(result.expected.length).toBe(9);
 });
+
+test("webgpu mlp train step matches cpu update", async ({ page }) => {
+  await page.goto("/?mode=train");
+  const hasGpu = await page.evaluate(() => !!navigator.gpu);
+  test.skip(!hasGpu, "WebGPU is not available in this browser");
+
+  await page.waitForFunction(
+    () => window.__E2E_RESULT__ && window.__E2E_RESULT__.done === true,
+    null,
+    { timeout: 30000 },
+  );
+  const result = await page.evaluate(() => window.__E2E_RESULT__);
+  expect(result.ok, JSON.stringify(result)).toBe(true);
+  expect(result.actual.length).toBe(23);
+  expect(result.expected.length).toBe(23);
+});

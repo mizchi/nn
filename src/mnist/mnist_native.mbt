@@ -1,5 +1,5 @@
 ///|
-using @nn { type MnistError }
+using @nn {type MnistError}
 
 ///|
 pub struct MnistDataset {
@@ -8,7 +8,9 @@ pub struct MnistDataset {
 } derive(Show, Eq)
 
 ///|
-pub async fn mnist_load_images(path : String) -> Result[@nn.MnistImages, MnistError] {
+pub async fn mnist_load_images(
+  path : String,
+) -> Result[@nn.MnistImages, MnistError] {
   let data_result = try? @afs.read_file(path)
   match data_result {
     Ok(data) => {
@@ -20,7 +22,9 @@ pub async fn mnist_load_images(path : String) -> Result[@nn.MnistImages, MnistEr
 }
 
 ///|
-pub async fn mnist_load_labels(path : String) -> Result[@nn.MnistLabels, MnistError] {
+pub async fn mnist_load_labels(
+  path : String,
+) -> Result[@nn.MnistLabels, MnistError] {
   let data_result = try? @afs.read_file(path)
   match data_result {
     Ok(data) => {
@@ -34,7 +38,7 @@ pub async fn mnist_load_labels(path : String) -> Result[@nn.MnistLabels, MnistEr
 ///|
 pub async fn mnist_load_dataset(
   images_path : String,
-  labels_path : String
+  labels_path : String,
 ) -> Result[MnistDataset, MnistError] {
   let images = mnist_load_images(images_path)
   match images {
@@ -51,7 +55,7 @@ pub async fn mnist_load_dataset(
 pub async fn mnist_load_mlp_dataset(
   images_path : String,
   labels_path : String,
-  limit : Int?
+  limit : Int?,
 ) -> Result[@nn.MlpDataset, MnistError] {
   let dataset = mnist_load_dataset(images_path, labels_path)
   match dataset {

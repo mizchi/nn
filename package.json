@@ -7,6 +7,7 @@
   },
   "scripts": {
     "e2e": "node e2e/build.mjs && playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "bench:gpu": "BENCH=1 node e2e/build.mjs && BENCH=1 playwright test e2e/bench.spec.ts"
   }
 }

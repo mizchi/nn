@@ -1,6 +1,7 @@
 import {
   "mizchi/js/core" as @core,
   "mizchi/wgpu" as @wgpu,
+  "mizchi/wgpu/mnist" as @mnist,
   "mizchi/wgpu/nn" as @nn,
   "mizchi/wgpu/web" as @web,
   "moonbitlang/core/math" as @math,
@@ -9,6 +10,6 @@ import {
 }
 
 options(
-  "supported-targets": [ "js" ],
   "is-main": true,
+  "supported-targets": [ "js" ],
 )

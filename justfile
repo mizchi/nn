@@ -25,6 +25,22 @@ e2e:
 e2e-install:
     pnpm e2e:install
 
+# Benchmarks
+bench-cpu *ARGS:
+    moon run --target native src/bench -- {{ARGS}}
+
+bench-gpu:
+    pnpm bench:gpu
+
+# Build wgpu-native (required for native target)
+wgpu-native-build:
+    bash src/scripts/build-wgpu-native.sh src/build-stamps/wgpu_native_build.stamp
+
+# Browser demo (serves repo root for data/mnist)
+serve:
+    node e2e/build.mjs
+    node tools/server.mjs
+
 # MNIST (native)
 mnist_primary := "http://yann.lecun.com/exdb/mnist"
 mnist_mirror := "https://storage.googleapis.com/cvdf-datasets/mnist"

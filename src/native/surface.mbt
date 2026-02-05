@@ -22,19 +22,19 @@ pub struct SurfaceConfiguration {
   width : Int
   height : Int
   usage : TextureUsage
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
 
 ///|
 pub fn surface_configuration_default(
   format : TextureFormat,
   width : Int,
-  height : Int
+  height : Int,
 ) -> SurfaceConfiguration {
   {
-    format: format,
-    width: width,
-    height: height,
+    format,
+    width,
+    height,
     usage: @wgpu.texture_usage_render_attachment,
     label: None,
   }
@@ -43,7 +43,7 @@ pub fn surface_configuration_default(
 ///|
 pub fn create_surface_from_window(
   _instance : Instance,
-  _window : NativeWindow
+  _window : NativeWindow,
 ) -> Result[Surface, WgpuError] {
   Err(@wgpu.error_not_implemented())
 }
@@ -52,7 +52,7 @@ pub fn create_surface_from_window(
 pub fn configure_surface(
   _surface : Surface,
   _device : Device,
-  _config : SurfaceConfiguration
+  _config : SurfaceConfiguration,
 ) -> Result[Unit, WgpuError] {
   Err(@wgpu.error_not_implemented())
 }

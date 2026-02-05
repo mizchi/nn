@@ -1,2 +1,21 @@
 import {
+  "moonbitlang/core/encoding/utf8" as @utf8,
 }
+
+options(
+  link: {
+    "native": {
+      "cc-link-flags": "-Ldeps/wgpu-native/target/release -lwgpu_native",
+    },
+  },
+  "native-stub": [ "wgpu_native_stub.c" ],
+  "pre-build": [
+    {
+      "command": "bash $input $output",
+      "input": "scripts/build-wgpu-native.sh",
+      "output": "build-stamps/wgpu_native_build.stamp",
+    },
+  ],
+  "supported-targets": [ "js", "native" ],
+  targets: { "wgpu_js.mbt": [ "js" ], "wgpu_native.mbt": [ "native" ] },
+)

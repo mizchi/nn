@@ -38,7 +38,7 @@ pub fn terminate() -> Unit {
 pub fn create_window(
   _width : Int,
   _height : Int,
-  _title : String
+  _title : String,
 ) -> Result[Window, GlfwError] {
   Err(NotImplemented)
 }

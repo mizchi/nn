@@ -111,10 +111,7 @@ pub struct RequestAdapterOptions {
 
 ///|
 pub fn request_adapter_options_default() -> RequestAdapterOptions {
-  {
-    power_preference: Default,
-    force_fallback_adapter: false,
-  }
+  { power_preference: Default, force_fallback_adapter: false }
 }
 
 ///|
@@ -130,6 +127,7 @@ pub enum Feature {
 } derive(Show, Eq)
 
 ///|
+
 ///|
 pub fn feature_other(name : String) -> Feature {
   Other(name)
@@ -166,16 +164,12 @@ pub fn limits_default() -> Limits {
 pub struct DeviceDescriptor {
   required_features : Array[Feature]
   required_limits : Limits
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
 
 ///|
 pub fn device_descriptor_default() -> DeviceDescriptor {
-  {
-    required_features: [],
-    required_limits: limits_default(),
-    label: None,
-  }
+  { required_features: [], required_limits: limits_default(), label: None }
 }
 
 ///|
@@ -214,7 +208,7 @@ pub let buffer_usage_query_resolve : BufferUsage = 0x0200
 
 ///|
 pub fn buffer_usage_or(a : BufferUsage, b : BufferUsage) -> BufferUsage {
-  a.lor(b)
+  a | b
 }
 
 ///|
@@ -231,8 +225,11 @@ pub let shader_stage_fragment : ShaderStageFlags = 0x0002
 pub let shader_stage_compute : ShaderStageFlags = 0x0004
 
 ///|
-pub fn shader_stage_or(a : ShaderStageFlags, b : ShaderStageFlags) -> ShaderStageFlags {
-  a.lor(b)
+pub fn shader_stage_or(
+  a : ShaderStageFlags,
+  b : ShaderStageFlags,
+) -> ShaderStageFlags {
+  a | b
 }
 
 ///|
@@ -240,7 +237,7 @@ pub struct BufferDescriptor {
   size : Int
   usage : BufferUsage
   mapped_at_creation : Bool
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
 
 ///|
@@ -248,9 +245,9 @@ pub fn buffer_descriptor(
   size : Int,
   usage : BufferUsage,
   mapped_at_creation : Bool,
-  label : Option[String]
+  label : String?,
 ) -> BufferDescriptor {
-  { size: size, usage: usage, mapped_at_creation: mapped_at_creation, label: label }
+  { size, usage, mapped_at_creation, label }
 }
 
 ///|
@@ -274,7 +271,7 @@ pub let texture_usage_render_attachment : TextureUsage = 0x0010
 
 ///|
 pub fn texture_usage_or(a : TextureUsage, b : TextureUsage) -> TextureUsage {
-  a.lor(b)
+  a | b
 }
 
 ///|
@@ -286,7 +283,6 @@ pub enum TextureDimension {
 
 ///|
 pub let texture_dimension_2d : TextureDimension = D2
-
 
 ///|
 pub enum TextureFormat {
@@ -312,7 +308,7 @@ pub struct Extent3d {
 
 ///|
 pub fn extent_2d(width : Int, height : Int) -> Extent3d {
-  { width: width, height: height, depth_or_array_layers: 1 }
+  { width, height, depth_or_array_layers: 1 }
 }
 
 ///|
@@ -323,7 +319,7 @@ pub struct TextureDescriptor {
   dimension : TextureDimension
   format : TextureFormat
   usage : TextureUsage
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
 
 ///|
@@ -343,14 +339,22 @@ pub struct SamplerDescriptor {
   mag_filter : FilterMode
   min_filter : FilterMode
   mipmap_filter : FilterMode
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
 
 ///|
 pub struct ShaderModuleDescriptor {
   code : String
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
+
+///|
+pub fn shader_module_descriptor(
+  code : String,
+  label : String?,
+) -> ShaderModuleDescriptor {
+  { code, label }
+}
 
 ///|
 // Bind group layouts
@@ -386,10 +390,27 @@ pub struct BindGroupLayoutEntry {
 } derive(Show, Eq)
 
 ///|
+pub fn bind_group_layout_entry(
+  binding : Int,
+  visibility : ShaderStageFlags,
+  ty : BindingType,
+) -> BindGroupLayoutEntry {
+  { binding, visibility, ty }
+}
+
+///|
 pub struct BindGroupLayoutDescriptor {
   entries : Array[BindGroupLayoutEntry]
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
+
+///|
+pub fn bind_group_layout_descriptor(
+  entries : Array[BindGroupLayoutEntry],
+  label : String?,
+) -> BindGroupLayoutDescriptor {
+  { entries, label }
+}
 
 ///|
 pub enum BindingResource {
@@ -399,7 +420,11 @@ pub enum BindingResource {
 }
 
 ///|
-pub fn binding_resource_buffer(buffer : Buffer, offset : Int, size : Int) -> BindingResource {
+pub fn binding_resource_buffer(
+  buffer : Buffer,
+  offset : Int,
+  size : Int,
+) -> BindingResource {
   Buffer(buffer, offset, size)
 }
 
@@ -420,17 +445,42 @@ pub struct BindGroupEntry {
 }
 
 ///|
+pub fn bind_group_entry(
+  binding : Int,
+  resource : BindingResource,
+) -> BindGroupEntry {
+  { binding, resource }
+}
+
+///|
 pub struct BindGroupDescriptor {
   layout : BindGroupLayout
   entries : Array[BindGroupEntry]
-  label : Option[String]
+  label : String?
+}
+
+///|
+pub fn bind_group_descriptor(
+  layout : BindGroupLayout,
+  entries : Array[BindGroupEntry],
+  label : String?,
+) -> BindGroupDescriptor {
+  { layout, entries, label }
 }
 
 ///|
 // Pipeline layouts
 pub struct PipelineLayoutDescriptor {
   bind_group_layouts : Array[BindGroupLayout]
-  label : Option[String]
+  label : String?
+}
+
+///|
+pub fn pipeline_layout_descriptor(
+  bind_group_layouts : Array[BindGroupLayout],
+  label : String?,
+) -> PipelineLayoutDescriptor {
+  { bind_group_layouts, label }
 }
 
 ///|
@@ -475,7 +525,7 @@ pub struct RenderPipelineDescriptor {
   vertex : VertexState
   fragment : FragmentState
   primitive : PrimitiveState
-  label : Option[String]
+  label : String?
 }
 
 ///|
@@ -486,126 +536,34 @@ pub struct ProgrammableStage {
 }
 
 ///|
+pub fn programmable_stage(
+  shader_module : ShaderModule,
+  entry_point : String,
+) -> ProgrammableStage {
+  { shader_module, entry_point }
+}
+
+///|
 pub struct ComputePipelineDescriptor {
   layout : PipelineLayout
   compute : ProgrammableStage
-  label : Option[String]
+  label : String?
+}
+
+///|
+pub fn compute_pipeline_descriptor(
+  layout : PipelineLayout,
+  compute : ProgrammableStage,
+  label : String?,
+) -> ComputePipelineDescriptor {
+  { layout, compute, label }
 }
 
 ///|
 // Command encoding
 pub struct CommandEncoderDescriptor {
-  label : Option[String]
+  label : String?
 } derive(Show, Eq)
 
 ///|
-// Backend entry points (stub)
-pub fn is_supported() -> Bool {
-  false
-}
-
-///|
-pub async fn request_adapter(_options : RequestAdapterOptions) -> Result[Adapter, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub async fn request_device(_adapter : Adapter, _desc : DeviceDescriptor) -> Result[Device, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_buffer(_device : Device, _desc : BufferDescriptor) -> Result[Buffer, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_texture(_device : Device, _desc : TextureDescriptor) -> Result[Texture, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn texture_create_view(_texture : Texture) -> Result[TextureView, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_sampler(_device : Device, _desc : SamplerDescriptor) -> Result[Sampler, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_shader_module(
-  _device : Device,
-  _desc : ShaderModuleDescriptor
-) -> Result[ShaderModule, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_bind_group_layout(
-  _device : Device,
-  _desc : BindGroupLayoutDescriptor
-) -> Result[BindGroupLayout, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_bind_group(
-  _device : Device,
-  _desc : BindGroupDescriptor
-) -> Result[BindGroup, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_pipeline_layout(
-  _device : Device,
-  _desc : PipelineLayoutDescriptor
-) -> Result[PipelineLayout, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_render_pipeline(
-  _device : Device,
-  _desc : RenderPipelineDescriptor
-) -> Result[RenderPipeline, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_compute_pipeline(
-  _device : Device,
-  _desc : ComputePipelineDescriptor
-) -> Result[ComputePipeline, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn device_create_command_encoder(
-  _device : Device,
-  _desc : CommandEncoderDescriptor
-) -> Result[CommandEncoder, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn command_encoder_finish(_encoder : CommandEncoder) -> Result[CommandBuffer, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn queue_submit(_queue : Queue, _commands : Array[CommandBuffer]) -> Result[Unit, WgpuError] {
-  Err(NotImplemented)
-}
-
-///|
-pub fn queue_write_buffer(
-  _queue : Queue,
-  _buffer : Buffer,
-  _offset : Int,
-  _data : Array[Byte]
-) -> Result[Unit, WgpuError] {
-  Err(NotImplemented)
-}
+// Backend entry points

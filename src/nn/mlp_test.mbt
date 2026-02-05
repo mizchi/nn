@@ -12,12 +12,21 @@ test "mlp_buffer_plan_sizes" {
 }
 
 ///|
+test "mlp_train_buffer_plan_sizes" {
+  let spec = mlp_spec_new(4, 3, 2, 2).unwrap()
+  let plan = mlp_plan_train_buffers(spec).unwrap()
+  inspect(plan.grad_weight1_bytes, content="48")
+  inspect(plan.grad_bias1_bytes, content="12")
+  inspect(plan.grad_weight2_bytes, content="24")
+  inspect(plan.grad_bias2_bytes, content="8")
+}
+
+///|
 test "mlp_resource_plan_usage" {
   let spec = mlp_spec_new(4, 8, 2, 1).unwrap()
   let plan = mlp_plan_resources(spec).unwrap()
   let upload = @wgpu.buffer_usage_or(
-    @wgpu.buffer_usage_storage,
-    @wgpu.buffer_usage_copy_dst,
+    @wgpu.buffer_usage_storage, @wgpu.buffer_usage_copy_dst,
   )
   let readback = @wgpu.buffer_usage_or(upload, @wgpu.buffer_usage_copy_src)
   inspect(plan.input.usage, content=upload.to_string())
@@ -34,12 +43,28 @@ test "mlp_dispatch_plan" {
 }
 
 ///|
+test "mlp_train_dispatch_plan" {
+  let spec = mlp_spec_new(4, 3, 2, 2).unwrap()
+  let plan = mlp_train_dispatch_plan(spec, 4).unwrap()
+  inspect(plan.grad_w1_dispatch_x, content="3")
+  inspect(plan.grad_b1_dispatch_x, content="1")
+  inspect(plan.grad_w2_dispatch_x, content="2")
+  inspect(plan.grad_b2_dispatch_x, content="1")
+}
+
+///|
 test "mlp_shader_plan" {
   let spec = mlp_spec_new(4, 8, 2, 1).unwrap()
   let plan = mlp_shader_plan(spec, 64).unwrap()
-  inspect(plan.layer1_wgsl.contains("const INPUT_SIZE : u32 = 4u;"), content="true")
+  inspect(
+    plan.layer1_wgsl.contains("const INPUT_SIZE : u32 = 4u;"),
+    content="true",
+  )
   inspect(plan.layer1_wgsl.contains("@workgroup_size(64)"), content="true")
-  inspect(plan.layer2_wgsl.contains("const OUTPUT_SIZE : u32 = 2u;"), content="true")
+  inspect(
+    plan.layer2_wgsl.contains("const OUTPUT_SIZE : u32 = 2u;"),
+    content="true",
+  )
 }
 
 ///|
@@ -104,7 +129,9 @@ test "mlp_init_policy_zero" {
 ///|
 test "mlp_init_policy_deterministic" {
   let spec = mlp_spec_new(2, 2, 1, 1).unwrap()
-  let params = mlp_init_params_with_policy(spec, 1, mlp_init_policy_deterministic).unwrap()
+  let params = mlp_init_params_with_policy(
+    spec, 1, mlp_init_policy_deterministic,
+  ).unwrap()
   let zero = Float::from_int(0)
   let any_non_zero = params.weight1.any(fn(v) { v != zero })
   inspect(any_non_zero, content="true")

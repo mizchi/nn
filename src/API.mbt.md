@@ -4,28 +4,36 @@ This file contains executable doc tests using `mbt test` blocks.
 
 ## request_adapter_options_default
 
-```mbt test
-let opts = @wgpu.request_adapter_options_default()
-inspect(opts.power_preference, content="Default")
-inspect(opts.force_fallback_adapter, content="false")
+```mbt check
+///|
+test {
+  let opts = @wgpu.request_adapter_options_default()
+  inspect(opts.power_preference, content="Default")
+  inspect(opts.force_fallback_adapter, content="false")
+}
 ```
 
 ## limits_default
 
-```mbt test
-let limits = @wgpu.limits_default()
-inspect(limits.max_bind_groups, content="0")
-inspect(limits.max_texture_dimension_2d, content="0")
+```mbt check
+///|
+test {
+  let limits = @wgpu.limits_default()
+  inspect(limits.max_bind_groups, content="0")
+  inspect(limits.max_texture_dimension_2d, content="0")
+}
 ```
 
 ## buffer_usage_or
 
-```mbt test
-let usage = @wgpu.buffer_usage_or(
-  @wgpu.buffer_usage_copy_dst,
-  @wgpu.buffer_usage_storage,
-)
-inspect(usage, content="136")
+```mbt check
+///|
+test {
+  let usage = @wgpu.buffer_usage_or(
+    @wgpu.buffer_usage_copy_dst, @wgpu.buffer_usage_storage,
+  )
+  inspect(usage, content="136")
+}
 ```
 
 ## Surface APIs
@@ -57,13 +65,14 @@ to bridge Bytes into the core buffer API.
 ## Web I/O example
 
 ```mbt
+///|
 /// pseudo (async function)
 pub async fn readback_example(
   device : @wgpu.Device,
   queue : @wgpu.Queue,
   buffer : @wgpu.Buffer,
   size : Int,
-  input : Bytes
+  input : Bytes,
 ) -> Result[Bytes, @wgpu.WgpuError] {
   match @web.queue_write_bytes(queue, buffer, 0, input) {
     Ok(_) => @web.device_read_buffer_bytes(device, buffer, size)
@@ -80,16 +89,24 @@ publishes results to `window.__E2E_RESULT__`).
 Enum constructors are not directly accessible across packages, so helper values/functions are provided.
 The helper list is intentionally minimal.
 
-```mbt test
-inspect(@wgpu.power_preference_high_performance, content="HighPerformance")
-inspect(@wgpu.texture_format_rgba8_unorm, content="Rgba8Unorm")
-inspect(@wgpu.feature_other("foo"), content="Other(\"foo\")")
+```mbt check
+///|
+test {
+  inspect(@wgpu.power_preference_high_performance, content="HighPerformance")
+  inspect(@wgpu.texture_format_rgba8_unorm, content="Rgba8Unorm")
+  inspect(@wgpu.feature_other("foo"), content="Other(\"foo\")")
+}
 ```
 
 ## Descriptor helpers
 
-```mbt test
-let usage = @wgpu.buffer_usage_or(@wgpu.buffer_usage_storage, @wgpu.buffer_usage_copy_dst)
-let desc = @wgpu.buffer_descriptor(16, usage, false, None)
-inspect(desc.size, content="16")
+```mbt check
+///|
+test {
+  let usage = @wgpu.buffer_usage_or(
+    @wgpu.buffer_usage_storage, @wgpu.buffer_usage_copy_dst,
+  )
+  let desc = @wgpu.buffer_descriptor(16, usage, false, None)
+  inspect(desc.size, content="16")
+}
 ```

@@ -140,6 +140,64 @@ bench: backend=pytorch device=mps train_ms=10282
 result: split=test loss=0.079558 acc=0.976200
 ```
 
+## numbt - NumPy-like library for MoonBit
+
+`mizchi/wgpu/numbt` provides NumPy-like vector/matrix operations with BLAS/LAPACK acceleration via Apple Accelerate framework.
+
+### Features
+
+- **Vec/Mat types** with NumPy-compatible API
+- **FMat type** for zero-copy LAPACK operations
+- **BLAS acceleration** for matmul, dot, etc.
+- **LAPACK functions**: SVD, eigenvalues, Cholesky, QR, LU, determinant, least squares
+- **193 tests** including NumPy compatibility tests
+
+### Benchmark (numbt vs NumPy)
+
+Measured on Apple M3 Max, N=1024 vectors, 100x100 matrices, 1000 iterations.
+
+| Operation | numbt (ms) | NumPy (ms) | Notes |
+|-----------|-----------|------------|-------|
+| vec_add | <0.001 | <0.001 | Element-wise |
+| vec_dot | <0.001 | <0.001 | BLAS sdot |
+| vec_exp | <0.001 | 0.001 | vForce |
+| vec_sort | <0.001 | 0.006 | vDSP_vsort |
+| mat_matmul (128x784 @ 784x128) | ~0.02 | 0.019 | BLAS sgemm |
+| fmat_inv (100x100) | <0.001 | 0.067 | LAPACK sgetrf/sgetri |
+| fmat_svd (100x100) | <0.001 | - | LAPACK sgesvd |
+| fmat_cholesky (100x100) | <0.001 | - | LAPACK spotrf |
+| fmat_qr (100x100) | <0.001 | - | LAPACK sgeqrf |
+
+Run benchmarks:
+```bash
+# numbt benchmark
+moon run --target native src/bench -- --numbt --iters 1000
+
+# NumPy benchmark (for comparison)
+cd bench && uv run python numpy_bench.py
+```
+
+### Usage
+
+```moonbit
+let a = @numbt.vec_from_array([1.0, 2.0, 3.0])
+let b = @numbt.vec_from_array([4.0, 5.0, 6.0])
+
+// Vector operations
+let c = a + b                    // [5.0, 7.0, 9.0]
+let dot = @numbt.vec_dot(a, b)   // 32.0
+let sum = @numbt.vec_sum(a)      // 6.0
+
+// Matrix operations
+let m = @numbt.mat_view([1.0, 2.0, 3.0, 4.0], 2, 2)
+let inv = @numbt.mat_inv(m)      // Option[Mat]
+
+// LAPACK (FMat for zero-copy)
+let fm = @numbt.fmat_from_mat(m)
+let (u, s, vt) = @numbt.fmat_svd(fm).unwrap()
+let eigenvalues = @numbt.fmat_eig(fm).unwrap().0
+```
+
 ## Native (wgpu-native)
 
 `mnist-infer` and `mnist-train --backend gpu` use the wgpu-native backend

@@ -142,7 +142,7 @@ result: split=test loss=0.079558 acc=0.976200
 
 ## numbt - NumPy-like library for MoonBit
 
-`mizchi/wgpu/numbt` provides NumPy-like vector/matrix operations with BLAS/LAPACK acceleration via Apple Accelerate framework.
+This project uses [`mizchi/numbt`](https://github.com/mizchi/numbt) for NumPy-like vector/matrix operations with BLAS/LAPACK acceleration via Apple Accelerate framework.
 
 ### Features
 

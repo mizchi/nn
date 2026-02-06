@@ -1,8 +1,8 @@
 ///|
 fn forward_single(
-  spec : MlpSpec,
-  params : MlpParams,
-  dataset : MlpDataset,
+  spec : @nn.MlpSpec,
+  params : @nn.MlpParams,
+  dataset : @nn.MlpDataset,
   index : Int,
   hidden : Array[Float],
   logits : Array[Float],
@@ -29,13 +29,13 @@ fn forward_single(
 
 ///|
 pub fn mlp_eval(
-  spec : MlpSpec,
-  params : MlpParams,
-  dataset : MlpDataset,
-) -> Result[MlpTrainMetrics, MlpError] {
-  mlp_validate_spec(spec)
-  .bind(fn(_) { mlp_validate_params(spec, params) })
-  .bind(fn(_) { dataset_validate_for_spec(spec, dataset) })
+  spec : @nn.MlpSpec,
+  params : @nn.MlpParams,
+  dataset : @nn.MlpDataset,
+) -> Result[@nn.MlpTrainMetrics, @nn.MlpError] {
+  @nn.mlp_validate_spec(spec)
+  .bind(fn(_) { @nn.mlp_validate_params(spec, params) })
+  .bind(fn(_) { @nn.dataset_validate_for_spec(spec, dataset) })
   .map(fn(_) {
     let hidden = Array::make(spec.hidden_size, Float::from_int(0))
     let logits = Array::make(spec.output_size, Float::from_int(0))
@@ -57,7 +57,7 @@ pub fn mlp_eval(
     let count_f = Float::from_int(dataset.count)
     let loss = loss_sum / count_f
     let accuracy = Float::from_int(correct) / count_f
-    { loss, accuracy }
+    @nn.mlp_train_metrics(loss, accuracy)
   })
 }
 
@@ -84,23 +84,23 @@ fn shuffle_indices(indices : Array[Int], seed : Int) -> Unit {
 
 ///|
 pub fn mlp_train(
-  spec : MlpSpec,
-  params : MlpParams,
-  dataset : MlpDataset,
-  config : MlpTrainConfig,
-) -> Result[MlpTrainResult, MlpError] {
+  spec : @nn.MlpSpec,
+  params : @nn.MlpParams,
+  dataset : @nn.MlpDataset,
+  config : @nn.MlpTrainConfig,
+) -> Result[@nn.MlpTrainResult, @nn.MlpError] {
   if config.epochs <= 0 {
-    return Err(InvalidSpec("epochs must be > 0"))
+    return Err(@nn.mlp_error_invalid_spec("epochs must be > 0"))
   }
   if config.batch_size <= 0 {
-    return Err(InvalidSpec("batch_size must be > 0"))
+    return Err(@nn.mlp_error_invalid_spec("batch_size must be > 0"))
   }
-  mlp_validate_spec(spec)
-  .bind(fn(_) { mlp_validate_params(spec, params) })
-  .bind(fn(_) { dataset_validate_for_spec(spec, dataset) })
+  @nn.mlp_validate_spec(spec)
+  .bind(fn(_) { @nn.mlp_validate_params(spec, params) })
+  .bind(fn(_) { @nn.dataset_validate_for_spec(spec, dataset) })
   .map(fn(_) {
     let params = params
-    let metrics : Array[MlpTrainMetrics] = []
+    let metrics : Array[@nn.MlpTrainMetrics] = []
     let indices = Array::makei(dataset.count, fn(i) { i })
     let zero = Float::from_int(0)
     let hidden = Array::make(spec.hidden_size, zero)
@@ -184,8 +184,8 @@ pub fn mlp_train(
       let count_f = Float::from_int(dataset.count)
       let loss = loss_sum / count_f
       let accuracy = Float::from_int(correct) / count_f
-      metrics.push({ loss, accuracy })
+      metrics.push(@nn.mlp_train_metrics(loss, accuracy))
     }
-    { params, metrics }
+    @nn.mlp_train_result(params, metrics)
   })
 }

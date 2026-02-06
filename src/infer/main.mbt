@@ -863,7 +863,7 @@ async fn gpu_eval(
       Ok(ds) => ds
       Err(err) => return Err(err)
     }
-    let tail_metrics = match @nn.mlp_eval(spec, params, tail) {
+    let tail_metrics = match @nn_cpu.mlp_eval(spec, params, tail) {
       Ok(m) => m
       Err(err) => return Err(err.to_string())
     }
@@ -884,7 +884,7 @@ fn cpu_eval(
   params : @nn.MlpParams,
   dataset : @nn.MlpDataset,
 ) -> Result[@nn.MlpTrainMetrics, String] {
-  match @nn.mlp_eval(spec, params, dataset) {
+  match @nn_cpu.mlp_eval(spec, params, dataset) {
     Ok(m) => Ok(m)
     Err(err) => Err(err.to_string())
   }

@@ -83,7 +83,7 @@ pub struct MlpTrainResult {
 } derive(Show, Eq)
 
 ///|
-fn dataset_validate_for_spec(
+pub fn dataset_validate_for_spec(
   spec : MlpSpec,
   dataset : MlpDataset,
 ) -> Result[Unit, MlpError] {

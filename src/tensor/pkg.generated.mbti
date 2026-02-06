@@ -1,0 +1,99 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/wgpu/tensor"
+
+// Values
+pub fn attention(Tensor, Tensor, Tensor, Tensor?) -> Result[Tensor, String]
+
+pub fn causal_mask(Int) -> Result[Tensor, String]
+
+pub fn multi_head_attention(Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Int, Tensor?) -> Result[Tensor, String]
+
+pub fn shape_broadcast(Shape, Shape) -> Result[Shape, String]
+
+pub fn shape_from(FixedArray[Int]) -> Result[Shape, String]
+
+pub fn shape_matmul(Shape, Shape) -> Result[Shape, String]
+
+pub fn shape_new(Array[Int]) -> Result[Shape, String]
+
+pub fn shape_new_unchecked(Array[Int]) -> Shape
+
+pub fn shape_transpose(Shape, Int, Int) -> Result[Shape, String]
+
+pub fn tensor_add(Tensor, Tensor) -> Result[Tensor, String]
+
+pub fn tensor_from_array(Array[Float]) -> Tensor
+
+pub fn tensor_full(Shape, Float) -> Tensor
+
+pub fn tensor_gelu(Tensor) -> Tensor
+
+pub fn tensor_layer_norm(Tensor, Tensor, Tensor, Float) -> Result[Tensor, String]
+
+pub fn tensor_matmul(Tensor, Tensor) -> Result[Tensor, String]
+
+pub fn tensor_matmul_2d(Tensor, Tensor) -> Result[Tensor, String]
+
+pub fn tensor_mean(Tensor, Int) -> Result[Tensor, String]
+
+pub fn tensor_mul(Tensor, Tensor) -> Result[Tensor, String]
+
+pub fn tensor_new(Shape, Array[Float]) -> Result[Tensor, String]
+
+pub fn tensor_ones(Shape) -> Tensor
+
+pub fn tensor_relu(Tensor) -> Tensor
+
+pub fn tensor_scale(Tensor, Float) -> Tensor
+
+pub fn tensor_softmax(Tensor) -> Result[Tensor, String]
+
+pub fn tensor_sub(Tensor, Tensor) -> Result[Tensor, String]
+
+pub fn tensor_sum(Tensor, Int) -> Result[Tensor, String]
+
+pub fn tensor_zeros(Shape) -> Tensor
+
+// Errors
+
+// Types and methods
+pub struct Shape {
+  dims : Array[Int]
+}
+pub fn Shape::bytes(Self) -> Int
+pub fn Shape::dim(Self, Int) -> Int
+pub fn Shape::eq(Self, Self) -> Bool
+pub fn Shape::ndim(Self) -> Int
+pub fn Shape::numel(Self) -> Int
+pub fn Shape::strides(Self) -> Array[Int]
+pub fn Shape::to_string(Self) -> String
+pub impl Show for Shape
+
+pub struct Tensor {
+  data : Array[Float]
+  shape : Shape
+  offset : Int
+  strides : Array[Int]
+}
+pub fn Tensor::at1(Self, Int) -> Float
+pub fn Tensor::at2(Self, Int, Int) -> Float
+pub fn Tensor::at3(Self, Int, Int, Int) -> Float
+pub fn Tensor::contiguous(Self) -> Self
+pub fn Tensor::dim(Self, Int) -> Int
+pub fn Tensor::get(Self, Array[Int]) -> Float
+pub fn Tensor::is_contiguous(Self) -> Bool
+pub fn Tensor::ndim(Self) -> Int
+pub fn Tensor::numel(Self) -> Int
+pub fn Tensor::reshape(Self, Shape) -> Result[Self, String]
+pub fn Tensor::set(Self, Array[Int], Float) -> Unit
+pub fn Tensor::set2(Self, Int, Int, Float) -> Unit
+pub fn Tensor::slice(Self, Int, Int) -> Result[Self, String]
+pub fn Tensor::to_array(Self) -> Array[Float]
+pub fn Tensor::to_string(Self) -> String
+pub fn Tensor::transpose(Self, Int, Int) -> Result[Self, String]
+pub impl Show for Tensor
+
+// Type aliases
+
+// Traits
+

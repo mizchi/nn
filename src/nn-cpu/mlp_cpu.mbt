@@ -6,17 +6,17 @@ pub struct MlpCpuResult {
 
 ///|
 pub fn mlp_forward(
-  spec : MlpSpec,
-  params : MlpParams,
+  spec : @nn.MlpSpec,
+  params : @nn.MlpParams,
   input : Array[Float],
-) -> Result[MlpCpuResult, MlpError] {
-  mlp_validate_spec(spec)
-  .bind(fn(_) { mlp_validate_params(spec, params) })
-  .bind(fn(_) { mlp_validate_input(spec, input) })
+) -> Result[MlpCpuResult, @nn.MlpError] {
+  @nn.mlp_validate_spec(spec)
+  .bind(fn(_) { @nn.mlp_validate_params(spec, params) })
+  .bind(fn(_) { @nn.mlp_validate_input(spec, input) })
   .map(fn(_) {
     let zero = Float::from_int(0)
-    let hidden = Array::make(elements_hidden(spec), zero)
-    let output = Array::make(elements_output(spec), zero)
+    let hidden = Array::make(@nn.elements_hidden(spec), zero)
+    let output = Array::make(@nn.elements_output(spec), zero)
     let weight1 = @numbt.mat_view(
       params.weight1,
       spec.input_size,

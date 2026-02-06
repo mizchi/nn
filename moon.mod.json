@@ -4,7 +4,8 @@
   "deps": {
     "moonbitlang/async": "0.16.4",
     "mizchi/js": "0.10.11",
-    "mizchi/blas": "0.1.0"
+    "mizchi/blas": "0.1.0",
+    "mizchi/numbt": "0.2.0"
   },
   "readme": "src/README.mbt.md",
   "repository": "https://github.com/mizchi/wgpu.mbt",

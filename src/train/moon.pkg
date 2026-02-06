@@ -1,6 +1,7 @@
 import {
   "mizchi/blas" as @blas,
   "mizchi/wgpu/nn" as @nn,
+  "mizchi/wgpu/nn-cpu" as @nn_cpu,
   "mizchi/wgpu/mnist" as @mnist,
   "mizchi/wgpu" as @wgpu,
   "moonbitlang/async",

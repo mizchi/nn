@@ -372,7 +372,7 @@ fn run_bench(cfg : BenchArgs) -> Unit {
   let mut i = 0
   let mut last_loss = Float::from_int(0)
   while i < cfg.warmup {
-    let forward = match @nn.mlp_forward(spec, params, inputs) {
+    let forward = match @nn_cpu.mlp_forward(spec, params, inputs) {
       Ok(r) => r
       Err(err) => {
         println("forward error: " + err.to_string())
@@ -387,7 +387,7 @@ fn run_bench(cfg : BenchArgs) -> Unit {
   i = 0
   while i < cfg.iters {
     let start = @env.now()
-    let forward = match @nn.mlp_forward(spec, params, inputs) {
+    let forward = match @nn_cpu.mlp_forward(spec, params, inputs) {
       Ok(r) => r
       Err(err) => {
         println("forward error: " + err.to_string())

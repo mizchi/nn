@@ -145,12 +145,12 @@ fn elements_input(spec : MlpSpec) -> Int {
 }
 
 ///|
-fn elements_hidden(spec : MlpSpec) -> Int {
+pub fn elements_hidden(spec : MlpSpec) -> Int {
   spec.batch_size * spec.hidden_size
 }
 
 ///|
-fn elements_output(spec : MlpSpec) -> Int {
+pub fn elements_output(spec : MlpSpec) -> Int {
   spec.batch_size * spec.output_size
 }
 

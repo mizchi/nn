@@ -1,7 +1,8 @@
 import {
   "mizchi/blas" as @blas,
   "mizchi/wgpu/nn" as @nn,
-  "mizchi/wgpu/numbt" as @numbt,
+  "mizchi/wgpu/nn-cpu" as @nn_cpu,
+  "mizchi/numbt" as @numbt,
   "moonbitlang/core/env" as @env,
   "moonbitlang/core/math" as @math,
   "moonbitlang/core/strconv" as @strconv,

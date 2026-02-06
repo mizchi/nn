@@ -2180,7 +2180,7 @@ async fn run_train(
       let train_result = if use_blas {
         blas_train(spec, params, dataset, config)
       } else {
-        match @nn.mlp_train(spec, params, dataset, config) {
+        match @nn_cpu.mlp_train(spec, params, dataset, config) {
           Ok(r) => Ok(r)
           Err(err) => Err(err.to_string())
         }
@@ -2218,7 +2218,7 @@ async fn run_train(
       let train_result = if use_blas {
         blas_train(spec, params, dataset, config)
       } else {
-        match @nn.mlp_train(spec, params, dataset, config) {
+        match @nn_cpu.mlp_train(spec, params, dataset, config) {
           Ok(r) => Ok(r)
           Err(err) => Err(err.to_string())
         }
@@ -2392,7 +2392,7 @@ async fn train_main() -> Unit {
     let m = trained.metrics[i]
     print_train_epoch(args, i + 1, m)
   }
-  let eval = @nn.mlp_eval(spec, trained.params, test_set)
+  let eval = @nn_cpu.mlp_eval(spec, trained.params, test_set)
   match eval {
     Ok(m) => print_train_result(args, report.backend, m)
     Err(err) => print_error_line(args.json, "eval error: " + err.to_string())

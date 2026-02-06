@@ -1,10 +1,10 @@
 import {
-  "mizchi/blas" as @blas,
-  "moonbitlang/core/math" as @math,
+  "mizchi/numbt" as @numbt,
+  "mizchi/wgpu" as @wgpu,
+  "mizchi/wgpu/nn" as @nn,
 }
 
 options(
   link: { "native": { "cc-link-flags": "-framework Accelerate" } },
-  "native-stub": [ "numbt_stub.c" ],
   "supported-targets": [ "native" ],
 )

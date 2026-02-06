@@ -227,6 +227,49 @@ fn seeded_values(seed : Int, count : Int, offset : Int) -> Array[Float] {
 }
 
 ///|
+fn relu(value : Float) -> Float {
+  let zero = Float::from_int(0)
+  if value < zero { zero } else { value }
+}
+
+///|
+fn batch_matmul_bias_blas(
+  input : Array[Float],
+  weight : Array[Float],
+  bias : Array[Float],
+  out : Array[Float],
+  batch : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit {
+  @blas.sgemm(input, weight, out, batch, out_dim, in_dim)
+  for b = 0; b < batch; b = b + 1 {
+    for j = 0; j < out_dim; j = j + 1 {
+      out[b * out_dim + j] = out[b * out_dim + j] + bias[j]
+    }
+  }
+}
+
+///|
+fn batch_matmul_bias_relu_blas(
+  input : Array[Float],
+  weight : Array[Float],
+  bias : Array[Float],
+  out : Array[Float],
+  batch : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit {
+  @blas.sgemm(input, weight, out, batch, out_dim, in_dim)
+  for b = 0; b < batch; b = b + 1 {
+    for j = 0; j < out_dim; j = j + 1 {
+      let idx = b * out_dim + j
+      out[idx] = relu(out[idx] + bias[j])
+    }
+  }
+}
+
+///|
 fn make_labels(batch : Int, output : Int) -> Array[Int] {
   let total = if batch <= 0 { 0 } else { batch }
   Array::makei(total, fn(i) { i % output })
@@ -453,7 +496,7 @@ fn run_blas_bench(cfg : BenchArgs) -> Unit {
   // Warmup (sgemm only)
   let mut i = 0
   while i < cfg.warmup {
-    @numbt.batch_matmul_bias_relu_blas(
+    batch_matmul_bias_relu_blas(
       batch_input,
       weight1_data,
       bias1_data,
@@ -484,7 +527,7 @@ fn run_blas_bench(cfg : BenchArgs) -> Unit {
   i = 0
   while i < cfg.iters {
     // Layer 1: batch_input @ weight1 + bias1 -> batch_hidden (with ReLU)
-    @numbt.batch_matmul_bias_relu_blas(
+    batch_matmul_bias_relu_blas(
       batch_input,
       weight1_data,
       bias1_data,
@@ -494,7 +537,7 @@ fn run_blas_bench(cfg : BenchArgs) -> Unit {
       cfg.hidden_size,
     )
     // Layer 2: batch_hidden @ weight2 + bias2 -> batch_output (no activation)
-    @numbt.batch_matmul_bias_blas(
+    batch_matmul_bias_blas(
       batch_hidden,
       weight2_data,
       bias2_data,
@@ -598,7 +641,7 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
   i = 0
   while i < actual_iters {
     // Layer 1: batch_input @ weight1 + bias1 -> batch_hidden (with ReLU)
-    @numbt.batch_matmul_bias_relu_blas(
+    batch_matmul_bias_relu_blas(
       batch_input,
       weight1_data,
       bias1_data,
@@ -608,7 +651,7 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
       cfg.hidden_size,
     )
     // Layer 2: batch_hidden @ weight2 + bias2 -> batch_output (no activation)
-    @numbt.batch_matmul_bias_blas(
+    batch_matmul_bias_blas(
       batch_hidden,
       weight2_data,
       bias2_data,

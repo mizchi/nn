@@ -1,5 +1,5 @@
 import {
-  "mizchi/wgpu/blas" as @blas,
+  "mizchi/blas" as @blas,
   "mizchi/wgpu/nn" as @nn,
   "mizchi/wgpu/mnist" as @mnist,
   "mizchi/wgpu" as @wgpu,

@@ -19,3 +19,12 @@
 ## メモ
 - `segment_samples` は 128MB 制限回避のために導入済み。
 - readback の削減は 6% 程度なので、主因はカーネルの効率。
+
+## パッケージ依存の整理 TODO
+- [ ] mizchi/blas と mizchi/js の両方を deps に持つため、`moon check` が単一ターゲットで通らない
+  - mizchi/blas: native のみ
+  - mizchi/js: js のみ
+- [ ] 将来的にはパッケージ分離を検討:
+  - `mizchi/wgpu-core`: 共通コード（wgpu_common, nn のWGSL生成など）
+  - `mizchi/wgpu-js`: WebGPU browser bindings
+  - `mizchi/wgpu-native`: wgpu-native bindings + BLAS training

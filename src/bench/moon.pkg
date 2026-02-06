@@ -1,5 +1,5 @@
 import {
-  "mizchi/wgpu/blas" as @blas,
+  "mizchi/blas" as @blas,
   "mizchi/wgpu/nn" as @nn,
   "mizchi/wgpu/numbt" as @numbt,
   "moonbitlang/core/env" as @env,

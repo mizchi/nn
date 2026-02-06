@@ -1,3 +1,402 @@
+// ============================================================================
+// FFI declarations for Accelerate framework optimization
+// ============================================================================
+
+///|
+extern "C" fn numbt_vsort_asc(data : FixedArray[Byte], n : Int) -> Unit = "numbt_vsort_asc"
+
+///|
+extern "C" fn numbt_vsort_desc(data : FixedArray[Byte], n : Int) -> Unit = "numbt_vsort_desc"
+
+///|
+extern "C" fn numbt_vexp(src : FixedArray[Byte], dst : FixedArray[Byte], n : Int) -> Unit = "numbt_vexp"
+
+///|
+extern "C" fn numbt_outer(a : FixedArray[Byte], b : FixedArray[Byte], out : FixedArray[Byte], m : Int, n : Int) -> Unit = "numbt_outer"
+
+///|
+extern "C" fn numbt_seed(seed : Int) -> Unit = "numbt_seed"
+
+///|
+extern "C" fn numbt_rand(out : FixedArray[Byte], n : Int) -> Unit = "numbt_rand"
+
+///|
+extern "C" fn numbt_randn(out : FixedArray[Byte], n : Int) -> Unit = "numbt_randn"
+
+///|
+extern "C" fn numbt_inv(a : FixedArray[Byte], n : Int) -> Int = "numbt_inv"
+
+///|
+extern "C" fn numbt_solve(a : FixedArray[Byte], b : FixedArray[Byte], n : Int) -> Int = "numbt_solve"
+
+///|
+extern "C" fn numbt_svd(
+  a : FixedArray[Byte],
+  u : FixedArray[Byte],
+  s : FixedArray[Byte],
+  vt : FixedArray[Byte],
+  m : Int,
+  n : Int
+) -> Int = "numbt_svd"
+
+///|
+extern "C" fn numbt_eig_symmetric(a : FixedArray[Byte], w : FixedArray[Byte], n : Int) -> Int = "numbt_eig_symmetric"
+
+///|
+extern "C" fn numbt_cholesky(a : FixedArray[Byte], n : Int) -> Int = "numbt_cholesky"
+
+///|
+extern "C" fn numbt_qr(
+  a : FixedArray[Byte],
+  q : FixedArray[Byte],
+  r : FixedArray[Byte],
+  m : Int,
+  n : Int
+) -> Int = "numbt_qr"
+
+///|
+extern "C" fn numbt_det(a : FixedArray[Byte], det : FixedArray[Byte], n : Int) -> Int = "numbt_det"
+
+///|
+extern "C" fn numbt_lstsq(a : FixedArray[Byte], b : FixedArray[Byte], m : Int, n : Int) -> Int = "numbt_lstsq"
+
+///|
+fn float_arr_to_bytes(arr : Array[Float]) -> FixedArray[Byte] {
+  let bytes : FixedArray[Byte] = FixedArray::make(arr.length() * 4, b'\x00')
+  for i, v in arr {
+    let bits = v.reinterpret_as_int()
+    bytes[i * 4] = (bits & 0xFF).to_byte()
+    bytes[i * 4 + 1] = ((bits >> 8) & 0xFF).to_byte()
+    bytes[i * 4 + 2] = ((bits >> 16) & 0xFF).to_byte()
+    bytes[i * 4 + 3] = ((bits >> 24) & 0xFF).to_byte()
+  }
+  bytes
+}
+
+///|
+fn bytes_to_float_arr(bytes : FixedArray[Byte], count : Int) -> Array[Float] {
+  let arr : Array[Float] = Array::make(count, Float::from_int(0))
+  for i in 0..<count {
+    let bits = bytes[i * 4].to_int() |
+      (bytes[i * 4 + 1].to_int() << 8) |
+      (bytes[i * 4 + 2].to_int() << 16) |
+      (bytes[i * 4 + 3].to_int() << 24)
+    arr[i] = Float::reinterpret_from_int(bits)
+  }
+  arr
+}
+
+// ============================================================================
+// Fast Matrix (FMat) - FixedArray[Byte] based for LAPACK operations
+// ============================================================================
+
+///|
+/// Fast Matrix using FixedArray[Byte] for zero-copy LAPACK operations
+pub struct FMat {
+  data : FixedArray[Byte]
+  rows : Int
+  cols : Int
+}
+
+///|
+pub fn fmat_zeros(rows : Int, cols : Int) -> FMat {
+  { data: FixedArray::make(rows * cols * 4, b'\x00'), rows, cols }
+}
+
+///|
+pub fn fmat_from_mat(m : Mat) -> FMat {
+  let bytes = float_arr_to_bytes(m.data)
+  { data: bytes, rows: m.rows, cols: m.cols }
+}
+
+///|
+pub fn fmat_to_mat(fm : FMat) -> Mat {
+  let arr = bytes_to_float_arr(fm.data, fm.rows * fm.cols)
+  mat_view(arr, fm.rows, fm.cols)
+}
+
+///|
+pub fn fmat_clone(fm : FMat) -> FMat {
+  let new_data : FixedArray[Byte] = FixedArray::make(fm.data.length(), b'\x00')
+  for i = 0; i < fm.data.length(); i = i + 1 {
+    new_data[i] = fm.data[i]
+  }
+  { data: new_data, rows: fm.rows, cols: fm.cols }
+}
+
+///|
+pub fn fmat_rows(fm : FMat) -> Int {
+  fm.rows
+}
+
+///|
+pub fn fmat_cols(fm : FMat) -> Int {
+  fm.cols
+}
+
+///|
+/// Matrix inverse on FMat (in-place, returns success)
+pub fn fmat_inv(fm : FMat) -> Bool {
+  if fm.rows != fm.cols {
+    return false
+  }
+  numbt_inv(fm.data, fm.rows) == 0
+}
+
+///|
+/// Solve A @ x = b on FMat (modifies both a and b in-place)
+/// After call, b contains solution x
+pub fn fmat_solve(a : FMat, b : FixedArray[Byte]) -> Bool {
+  if a.rows != a.cols {
+    return false
+  }
+  numbt_solve(a.data, b, a.rows) == 0
+}
+
+///|
+/// Create FMat identity matrix
+pub fn fmat_eye(n : Int) -> FMat {
+  let fm = fmat_zeros(n, n)
+  let one_bits = (1.0 : Float).reinterpret_as_int()
+  for i = 0; i < n; i = i + 1 {
+    let idx = (i * n + i) * 4
+    fm.data[idx] = (one_bits & 0xFF).to_byte()
+    fm.data[idx + 1] = ((one_bits >> 8) & 0xFF).to_byte()
+    fm.data[idx + 2] = ((one_bits >> 16) & 0xFF).to_byte()
+    fm.data[idx + 3] = ((one_bits >> 24) & 0xFF).to_byte()
+  }
+  fm
+}
+
+///|
+/// Create FMat from random values
+pub fn fmat_randn(rows : Int, cols : Int) -> FMat {
+  let n = rows * cols
+  let data : FixedArray[Byte] = FixedArray::make(n * 4, b'\x00')
+  numbt_randn(data, n)
+  { data, rows, cols }
+}
+
+///|
+/// FMat matrix multiply using BLAS (C = A @ B)
+extern "C" fn numbt_sgemm(
+  a : FixedArray[Byte],
+  b : FixedArray[Byte],
+  c : FixedArray[Byte],
+  m : Int,
+  n : Int,
+  k : Int
+) -> Unit = "numbt_sgemm"
+
+///|
+pub fn fmat_matmul(a : FMat, b : FMat) -> FMat {
+  if a.cols != b.rows {
+    panic()
+  }
+  let c = fmat_zeros(a.rows, b.cols)
+  numbt_sgemm(a.data, b.data, c.data, a.rows, b.cols, a.cols)
+  c
+}
+
+///|
+/// FMat add (C = A + B)
+pub fn fmat_add(a : FMat, b : FMat) -> FMat {
+  if a.rows != b.rows || a.cols != b.cols {
+    panic()
+  }
+  let c = fmat_zeros(a.rows, a.cols)
+  let n = a.rows * a.cols
+  for i = 0; i < n; i = i + 1 {
+    let idx = i * 4
+    let a_bits = a.data[idx].to_int() |
+      (a.data[idx + 1].to_int() << 8) |
+      (a.data[idx + 2].to_int() << 16) |
+      (a.data[idx + 3].to_int() << 24)
+    let b_bits = b.data[idx].to_int() |
+      (b.data[idx + 1].to_int() << 8) |
+      (b.data[idx + 2].to_int() << 16) |
+      (b.data[idx + 3].to_int() << 24)
+    let sum = Float::reinterpret_from_int(a_bits) + Float::reinterpret_from_int(b_bits)
+    let sum_bits = sum.reinterpret_as_int()
+    c.data[idx] = (sum_bits & 0xFF).to_byte()
+    c.data[idx + 1] = ((sum_bits >> 8) & 0xFF).to_byte()
+    c.data[idx + 2] = ((sum_bits >> 16) & 0xFF).to_byte()
+    c.data[idx + 3] = ((sum_bits >> 24) & 0xFF).to_byte()
+  }
+  c
+}
+
+///|
+/// FMat transpose
+pub fn fmat_transpose(a : FMat) -> FMat {
+  let t = fmat_zeros(a.cols, a.rows)
+  for i = 0; i < a.rows; i = i + 1 {
+    for j = 0; j < a.cols; j = j + 1 {
+      let src_idx = (i * a.cols + j) * 4
+      let dst_idx = (j * a.rows + i) * 4
+      t.data[dst_idx] = a.data[src_idx]
+      t.data[dst_idx + 1] = a.data[src_idx + 1]
+      t.data[dst_idx + 2] = a.data[src_idx + 2]
+      t.data[dst_idx + 3] = a.data[src_idx + 3]
+    }
+  }
+  t
+}
+
+///|
+/// Helper: create FixedArray[Byte] for n floats
+fn fvec_zeros(n : Int) -> FixedArray[Byte] {
+  FixedArray::make(n * 4, b'\x00')
+}
+
+///|
+/// Helper: read float from FixedArray[Byte] at index i
+fn fvec_get(data : FixedArray[Byte], i : Int) -> Float {
+  let idx = i * 4
+  let bits = data[idx].to_int() |
+    (data[idx + 1].to_int() << 8) |
+    (data[idx + 2].to_int() << 16) |
+    (data[idx + 3].to_int() << 24)
+  Float::reinterpret_from_int(bits)
+}
+
+///|
+/// Helper: set float in FixedArray[Byte] at index i
+fn fvec_set(data : FixedArray[Byte], i : Int, v : Float) -> Unit {
+  let idx = i * 4
+  let bits = v.reinterpret_as_int()
+  data[idx] = (bits & 0xFF).to_byte()
+  data[idx + 1] = ((bits >> 8) & 0xFF).to_byte()
+  data[idx + 2] = ((bits >> 16) & 0xFF).to_byte()
+  data[idx + 3] = ((bits >> 24) & 0xFF).to_byte()
+}
+
+///|
+/// Helper: convert FixedArray[Byte] to Vec
+fn fvec_to_vec(data : FixedArray[Byte], n : Int) -> Vec {
+  let arr = bytes_to_float_arr(data, n)
+  vec_from_array(arr)
+}
+
+///|
+/// SVD decomposition: A = U @ diag(S) @ Vt
+/// Returns (U, S, Vt) or None if failed
+pub fn fmat_svd(a : FMat) -> (FMat, Vec, FMat)? {
+  let m = a.rows
+  let n = a.cols
+  let k = if m < n { m } else { n }
+  let a_copy = fmat_clone(a)
+  let u = fmat_zeros(m, m)
+  let s = fvec_zeros(k)
+  let vt = fmat_zeros(n, n)
+  let ret = numbt_svd(a_copy.data, u.data, s, vt.data, m, n)
+  if ret != 0 {
+    return None
+  }
+  Some((u, fvec_to_vec(s, k), vt))
+}
+
+///|
+/// Eigenvalue decomposition for symmetric matrix
+/// Returns (eigenvalues, eigenvectors) or None if failed
+/// Note: input matrix must be symmetric
+pub fn fmat_eig(a : FMat) -> (Vec, FMat)? {
+  if a.rows != a.cols {
+    return None
+  }
+  let n = a.rows
+  let a_copy = fmat_clone(a)
+  let w = fvec_zeros(n)
+  let ret = numbt_eig_symmetric(a_copy.data, w, n)
+  if ret != 0 {
+    return None
+  }
+  // After ssyev, a_copy contains eigenvectors
+  Some((fvec_to_vec(w, n), a_copy))
+}
+
+///|
+/// Cholesky decomposition: A = L @ L^T
+/// Returns lower triangular L or None if failed
+/// Note: input matrix must be symmetric positive definite
+pub fn fmat_cholesky(a : FMat) -> FMat? {
+  if a.rows != a.cols {
+    return None
+  }
+  let n = a.rows
+  let a_copy = fmat_clone(a)
+  let ret = numbt_cholesky(a_copy.data, n)
+  if ret != 0 {
+    return None
+  }
+  // Zero out upper triangle (LAPACK returns L in lower triangle)
+  for i = 0; i < n; i = i + 1 {
+    for j = i + 1; j < n; j = j + 1 {
+      fvec_set(a_copy.data, i * n + j, 0.0)
+    }
+  }
+  Some(a_copy)
+}
+
+///|
+/// QR decomposition: A = Q @ R
+/// Returns (Q, R) or None if failed
+pub fn fmat_qr(a : FMat) -> (FMat, FMat)? {
+  let m = a.rows
+  let n = a.cols
+  let a_copy = fmat_clone(a)
+  let q = fmat_zeros(m, m)
+  let r = fmat_zeros(m, n)
+  let ret = numbt_qr(a_copy.data, q.data, r.data, m, n)
+  if ret != 0 {
+    return None
+  }
+  Some((q, r))
+}
+
+///|
+/// Compute determinant of square matrix
+/// Returns determinant or None if failed
+pub fn fmat_det(a : FMat) -> Float? {
+  if a.rows != a.cols {
+    return None
+  }
+  let n = a.rows
+  let a_copy = fmat_clone(a)
+  let det_buf = fvec_zeros(1)
+  let ret = numbt_det(a_copy.data, det_buf, n)
+  if ret != 0 {
+    return None
+  }
+  Some(fvec_get(det_buf, 0))
+}
+
+///|
+/// Least squares solution: minimize ||A @ x - b||
+/// Returns solution x or None if failed
+pub fn fmat_lstsq(a : FMat, b : Vec) -> Vec? {
+  let m = a.rows
+  let n = a.cols
+  if b.len != m {
+    return None
+  }
+  let a_copy = fmat_clone(a)
+  let b_data = fvec_zeros(m)
+  for i = 0; i < m; i = i + 1 {
+    fvec_set(b_data, i, vec_at(b, i))
+  }
+  let ret = numbt_lstsq(a_copy.data, b_data, m, n)
+  if ret != 0 {
+    return None
+  }
+  // Solution is in first n elements of b_data
+  Some(fvec_to_vec(b_data, n))
+}
+
+// ============================================================================
+// Core data structures
+// ============================================================================
+
 ///|
 pub struct Vec {
   data : Array[Float]
@@ -309,10 +708,14 @@ pub fn vec_exp_into(out : Vec, input : Vec) -> Unit {
 }
 
 ///|
+/// Uses vvexpf from Accelerate framework for optimal performance
 pub fn vec_exp(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_exp_into(out, input)
-  out
+  let src_arr = vec_to_array(input)
+  let src_bytes = float_arr_to_bytes(src_arr)
+  let dst_bytes : FixedArray[Byte] = FixedArray::make(input.len * 4, b'\x00')
+  numbt_vexp(src_bytes, dst_bytes, input.len)
+  let result = bytes_to_float_arr(dst_bytes, input.len)
+  vec_from_array(result)
 }
 
 ///|
@@ -506,7 +909,7 @@ fn mat_check_same_shape(a : Mat, b : Mat) -> Unit {
 
 ///|
 pub fn mat_view(data : Array[Float], rows : Int, cols : Int) -> Mat {
-  let mat = { data, rows, cols }
+  let mat : Mat = { data, rows, cols }
   mat_check_shape(mat, data)
   mat
 }
@@ -1205,4 +1608,665 @@ pub fn batch_matmul_bias_relu(
       out[idx] = relu(out[idx] + bias[j])
     }
   }
+}
+
+// ============================================================================
+// Sort operations
+// ============================================================================
+
+///|
+/// Sort vector in ascending order (returns new vector)
+/// Uses vDSP_vsort from Accelerate framework for optimal performance
+pub fn vec_sort(v : Vec) -> Vec {
+  let arr = vec_to_array(v)
+  let bytes = float_arr_to_bytes(arr)
+  numbt_vsort_asc(bytes, arr.length())
+  let result = bytes_to_float_arr(bytes, arr.length())
+  vec_from_array(result)
+}
+
+///|
+/// Sort vector in descending order (returns new vector)
+/// Uses vDSP_vsort from Accelerate framework for optimal performance
+pub fn vec_sort_desc(v : Vec) -> Vec {
+  let arr = vec_to_array(v)
+  let bytes = float_arr_to_bytes(arr)
+  numbt_vsort_desc(bytes, arr.length())
+  let result = bytes_to_float_arr(bytes, arr.length())
+  vec_from_array(result)
+}
+
+///|
+fn argsort_quicksort(
+  indices : Array[Int],
+  values : Vec,
+  lo : Int,
+  hi : Int,
+  ascending : Bool
+) -> Unit {
+  if lo < hi {
+    let pivot_idx = argsort_partition(indices, values, lo, hi, ascending)
+    argsort_quicksort(indices, values, lo, pivot_idx - 1, ascending)
+    argsort_quicksort(indices, values, pivot_idx + 1, hi, ascending)
+  }
+}
+
+///|
+fn argsort_partition(
+  indices : Array[Int],
+  values : Vec,
+  lo : Int,
+  hi : Int,
+  ascending : Bool
+) -> Int {
+  let pivot_val = vec_at(values, indices[hi])
+  let mut i = lo - 1
+  for j = lo; j < hi; j = j + 1 {
+    let cmp = if ascending {
+      vec_at(values, indices[j]) <= pivot_val
+    } else {
+      vec_at(values, indices[j]) >= pivot_val
+    }
+    if cmp {
+      i = i + 1
+      let tmp = indices[i]
+      indices[i] = indices[j]
+      indices[j] = tmp
+    }
+  }
+  let tmp = indices[i + 1]
+  indices[i + 1] = indices[hi]
+  indices[hi] = tmp
+  i + 1
+}
+
+///|
+/// Return indices that would sort the vector (ascending)
+pub fn vec_argsort(v : Vec) -> Array[Int] {
+  let n = v.len
+  let indices = Array::makei(n, fn(i) { i })
+  if n > 1 {
+    argsort_quicksort(indices, v, 0, n - 1, true)
+  }
+  indices
+}
+
+///|
+/// Return indices that would sort the vector (descending)
+pub fn vec_argsort_desc(v : Vec) -> Array[Int] {
+  let n = v.len
+  let indices = Array::makei(n, fn(i) { i })
+  if n > 1 {
+    argsort_quicksort(indices, v, 0, n - 1, false)
+  }
+  indices
+}
+
+// ============================================================================
+// Conditional operations (where / nonzero)
+// ============================================================================
+
+///|
+/// Return indices of non-zero elements
+pub fn vec_nonzero(v : Vec) -> Array[Int] {
+  let indices : Array[Int] = []
+  let zero = Float::from_int(0)
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) != zero {
+      indices.push(i)
+    }
+  }
+  indices
+}
+
+///|
+/// Element-wise greater than: out[i] = 1.0 if v[i] > threshold else 0.0
+pub fn vec_gt(v : Vec, threshold : Float) -> Vec {
+  let out = vec_zeros(v.len)
+  let one = Float::from_int(1)
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) > threshold {
+      vec_set(out, i, one)
+    }
+  }
+  out
+}
+
+///|
+/// Element-wise greater than or equal
+pub fn vec_ge(v : Vec, threshold : Float) -> Vec {
+  let out = vec_zeros(v.len)
+  let one = Float::from_int(1)
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) >= threshold {
+      vec_set(out, i, one)
+    }
+  }
+  out
+}
+
+///|
+/// Element-wise less than
+pub fn vec_lt(v : Vec, threshold : Float) -> Vec {
+  let out = vec_zeros(v.len)
+  let one = Float::from_int(1)
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) < threshold {
+      vec_set(out, i, one)
+    }
+  }
+  out
+}
+
+///|
+/// Element-wise less than or equal
+pub fn vec_le(v : Vec, threshold : Float) -> Vec {
+  let out = vec_zeros(v.len)
+  let one = Float::from_int(1)
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) <= threshold {
+      vec_set(out, i, one)
+    }
+  }
+  out
+}
+
+///|
+/// Select elements based on mask: out[i] = x[i] if mask[i] > 0 else y[i]
+pub fn vec_where(mask : Vec, x : Vec, y : Vec) -> Vec {
+  vec_check_same_len(mask, x)
+  vec_check_same_len(x, y)
+  let out = vec_zeros(mask.len)
+  let zero = Float::from_int(0)
+  for i = 0; i < mask.len; i = i + 1 {
+    if vec_at(mask, i) > zero {
+      vec_set(out, i, vec_at(x, i))
+    } else {
+      vec_set(out, i, vec_at(y, i))
+    }
+  }
+  out
+}
+
+///|
+/// Select elements based on mask with scalar fallback
+pub fn vec_where_scalar(mask : Vec, x : Vec, y : Float) -> Vec {
+  vec_check_same_len(mask, x)
+  let out = vec_zeros(mask.len)
+  let zero = Float::from_int(0)
+  for i = 0; i < mask.len; i = i + 1 {
+    if vec_at(mask, i) > zero {
+      vec_set(out, i, vec_at(x, i))
+    } else {
+      vec_set(out, i, y)
+    }
+  }
+  out
+}
+
+// ============================================================================
+// Cumulative operations
+// ============================================================================
+
+///|
+/// Cumulative sum: out[i] = sum(v[0..i+1])
+pub fn vec_cumsum(v : Vec) -> Vec {
+  let out = vec_zeros(v.len)
+  if v.len == 0 {
+    return out
+  }
+  let mut acc = Float::from_int(0)
+  for i = 0; i < v.len; i = i + 1 {
+    acc = acc + vec_at(v, i)
+    vec_set(out, i, acc)
+  }
+  out
+}
+
+///|
+/// Cumulative product: out[i] = prod(v[0..i+1])
+pub fn vec_cumprod(v : Vec) -> Vec {
+  let out = vec_zeros(v.len)
+  if v.len == 0 {
+    return out
+  }
+  let mut acc = Float::from_int(1)
+  for i = 0; i < v.len; i = i + 1 {
+    acc = acc * vec_at(v, i)
+    vec_set(out, i, acc)
+  }
+  out
+}
+
+///|
+/// Difference between consecutive elements: out[i] = v[i+1] - v[i]
+pub fn vec_diff(v : Vec) -> Vec {
+  if v.len <= 1 {
+    return vec_zeros(0)
+  }
+  let out = vec_zeros(v.len - 1)
+  for i = 0; i < v.len - 1; i = i + 1 {
+    vec_set(out, i, vec_at(v, i + 1) - vec_at(v, i))
+  }
+  out
+}
+
+// ============================================================================
+// Linear algebra extras (outer, diag, trace)
+// ============================================================================
+
+///|
+/// Outer product: out[i,j] = a[i] * b[j]
+/// Uses BLAS sger from Accelerate framework for optimal performance
+pub fn vec_outer(a : Vec, b : Vec) -> Mat {
+  let a_bytes = float_arr_to_bytes(vec_to_array(a))
+  let b_bytes = float_arr_to_bytes(vec_to_array(b))
+  let out_bytes : FixedArray[Byte] = FixedArray::make(a.len * b.len * 4, b'\x00')
+  numbt_outer(a_bytes, b_bytes, out_bytes, a.len, b.len)
+  let out_arr = bytes_to_float_arr(out_bytes, a.len * b.len)
+  mat_view(out_arr, a.len, b.len)
+}
+
+///|
+/// Create diagonal matrix from vector
+pub fn vec_diag(v : Vec) -> Mat {
+  let n = v.len
+  let out = mat_zeros(n, n)
+  for i = 0; i < n; i = i + 1 {
+    mat_set(out, i, i, vec_at(v, i))
+  }
+  out
+}
+
+///|
+/// Extract diagonal elements from matrix
+pub fn mat_diag(m : Mat) -> Vec {
+  let n = if m.rows < m.cols { m.rows } else { m.cols }
+  let out = vec_zeros(n)
+  for i = 0; i < n; i = i + 1 {
+    vec_set(out, i, mat_at(m, i, i))
+  }
+  out
+}
+
+///|
+/// Trace of matrix (sum of diagonal elements)
+pub fn mat_trace(m : Mat) -> Float {
+  let n = if m.rows < m.cols { m.rows } else { m.cols }
+  let mut sum = Float::from_int(0)
+  for i = 0; i < n; i = i + 1 {
+    sum = sum + mat_at(m, i, i)
+  }
+  sum
+}
+
+// ============================================================================
+// Concatenate / Stack operations
+// ============================================================================
+
+///|
+/// Concatenate multiple vectors into one
+pub fn vec_concatenate(vecs : Array[Vec]) -> Vec {
+  let mut total_len = 0
+  for i = 0; i < vecs.length(); i = i + 1 {
+    total_len = total_len + vecs[i].len
+  }
+  let data : Array[Float] = []
+  for i = 0; i < vecs.length(); i = i + 1 {
+    let v = vecs[i]
+    for j = 0; j < v.len; j = j + 1 {
+      data.push(vec_at(v, j))
+    }
+  }
+  vec_from_array(data)
+}
+
+///|
+/// Vertical stack: stack matrices along rows (axis=0)
+pub fn mat_vstack(mats : Array[Mat]) -> Mat {
+  if mats.length() == 0 {
+    return mat_zeros(0, 0)
+  }
+  let cols = mats[0].cols
+  let mut total_rows = 0
+  for i = 0; i < mats.length(); i = i + 1 {
+    if mats[i].cols != cols {
+      panic()
+    }
+    total_rows = total_rows + mats[i].rows
+  }
+  let data : Array[Float] = []
+  for i = 0; i < mats.length(); i = i + 1 {
+    let m = mats[i]
+    for j = 0; j < m.data.length(); j = j + 1 {
+      data.push(m.data[j])
+    }
+  }
+  mat_view(data, total_rows, cols)
+}
+
+///|
+/// Horizontal stack: stack matrices along columns (axis=1)
+pub fn mat_hstack(mats : Array[Mat]) -> Mat {
+  if mats.length() == 0 {
+    return mat_zeros(0, 0)
+  }
+  let rows = mats[0].rows
+  let mut total_cols = 0
+  for i = 0; i < mats.length(); i = i + 1 {
+    if mats[i].rows != rows {
+      panic()
+    }
+    total_cols = total_cols + mats[i].cols
+  }
+  let out = mat_zeros(rows, total_cols)
+  let mut col_offset = 0
+  for k = 0; k < mats.length(); k = k + 1 {
+    let m = mats[k]
+    for i = 0; i < m.rows; i = i + 1 {
+      for j = 0; j < m.cols; j = j + 1 {
+        mat_set(out, i, col_offset + j, mat_at(m, i, j))
+      }
+    }
+    col_offset = col_offset + m.cols
+  }
+  out
+}
+
+///|
+/// Repeat vector n times
+pub fn vec_repeat(v : Vec, n : Int) -> Vec {
+  if n <= 0 {
+    return vec_zeros(0)
+  }
+  let data : Array[Float] = []
+  for k = 0; k < n; k = k + 1 {
+    for j = 0; j < v.len; j = j + 1 {
+      data.push(vec_at(v, j))
+    }
+  }
+  vec_from_array(data)
+}
+
+///|
+/// Tile matrix: repeat along rows and columns
+pub fn mat_tile(m : Mat, rows_repeat : Int, cols_repeat : Int) -> Mat {
+  if rows_repeat <= 0 || cols_repeat <= 0 {
+    return mat_zeros(0, 0)
+  }
+  let out = mat_zeros(m.rows * rows_repeat, m.cols * cols_repeat)
+  for ri = 0; ri < rows_repeat; ri = ri + 1 {
+    for ci = 0; ci < cols_repeat; ci = ci + 1 {
+      let row_off = ri * m.rows
+      let col_off = ci * m.cols
+      for i = 0; i < m.rows; i = i + 1 {
+        for j = 0; j < m.cols; j = j + 1 {
+          mat_set(out, row_off + i, col_off + j, mat_at(m, i, j))
+        }
+      }
+    }
+  }
+  out
+}
+
+// ============================================================================
+// Math functions: floor, ceil, round
+// ============================================================================
+
+///|
+pub fn vec_floor_into(out : Vec, input : Vec) -> Unit {
+  vec_check_same_len(out, input)
+  for i = 0; i < input.len; i = i + 1 {
+    vec_set(out, i, vec_at(input, i).floor())
+  }
+}
+
+///|
+pub fn vec_floor(input : Vec) -> Vec {
+  let out = vec_zeros(input.len)
+  vec_floor_into(out, input)
+  out
+}
+
+///|
+pub fn vec_ceil_into(out : Vec, input : Vec) -> Unit {
+  vec_check_same_len(out, input)
+  for i = 0; i < input.len; i = i + 1 {
+    vec_set(out, i, vec_at(input, i).ceil())
+  }
+}
+
+///|
+pub fn vec_ceil(input : Vec) -> Vec {
+  let out = vec_zeros(input.len)
+  vec_ceil_into(out, input)
+  out
+}
+
+///|
+pub fn vec_round_into(out : Vec, input : Vec) -> Unit {
+  vec_check_same_len(out, input)
+  for i = 0; i < input.len; i = i + 1 {
+    vec_set(out, i, vec_at(input, i).round())
+  }
+}
+
+///|
+pub fn vec_round(input : Vec) -> Vec {
+  let out = vec_zeros(input.len)
+  vec_round_into(out, input)
+  out
+}
+
+// ============================================================================
+// Statistics: median, percentile
+// ============================================================================
+
+///|
+/// Median of vector elements
+pub fn vec_median(v : Vec) -> Float {
+  if v.len == 0 {
+    return Float::from_int(0)
+  }
+  let sorted = vec_sort(v)
+  let n = v.len
+  if n % 2 == 1 {
+    vec_at(sorted, n / 2)
+  } else {
+    (vec_at(sorted, n / 2 - 1) + vec_at(sorted, n / 2)) / Float::from_int(2)
+  }
+}
+
+///|
+/// Percentile (0-100) of vector elements
+pub fn vec_percentile(v : Vec, p : Float) -> Float {
+  if v.len == 0 {
+    return Float::from_int(0)
+  }
+  let sorted = vec_sort(v)
+  let n = v.len
+  // Clamp p to [0, 100]
+  let p_clamped = if p < Float::from_int(0) {
+    Float::from_int(0)
+  } else if p > Float::from_int(100) {
+    Float::from_int(100)
+  } else {
+    p
+  }
+  // Linear interpolation
+  let pos = (Float::from_int(n - 1) * p_clamped) / Float::from_int(100)
+  let idx = pos.floor().to_int()
+  let frac = pos - Float::from_int(idx)
+  if idx >= n - 1 {
+    vec_at(sorted, n - 1)
+  } else {
+    vec_at(sorted, idx) * (Float::from_int(1) - frac) + vec_at(sorted, idx + 1) * frac
+  }
+}
+
+///|
+/// Quantile (0-1) of vector elements
+pub fn vec_quantile(v : Vec, q : Float) -> Float {
+  vec_percentile(v, q * Float::from_int(100))
+}
+
+// ============================================================================
+// Utility: unique, searchsorted
+// ============================================================================
+
+///|
+/// Return sorted unique elements
+pub fn vec_unique(v : Vec) -> Vec {
+  if v.len == 0 {
+    return vec_zeros(0)
+  }
+  let sorted = vec_sort(v)
+  let result : Array[Float] = [vec_at(sorted, 0)]
+  for i = 1; i < sorted.len; i = i + 1 {
+    let curr = vec_at(sorted, i)
+    let prev = vec_at(sorted, i - 1)
+    if curr != prev {
+      result.push(curr)
+    }
+  }
+  vec_from_array(result)
+}
+
+///|
+/// Binary search: find insertion point for value in sorted vector
+/// Returns index where value should be inserted to maintain sorted order
+pub fn vec_searchsorted(sorted : Vec, value : Float) -> Int {
+  let mut lo = 0
+  let mut hi = sorted.len
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if vec_at(sorted, mid) < value {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  lo
+}
+
+///|
+/// Binary search (right): find rightmost insertion point
+pub fn vec_searchsorted_right(sorted : Vec, value : Float) -> Int {
+  let mut lo = 0
+  let mut hi = sorted.len
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if vec_at(sorted, mid) <= value {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  lo
+}
+
+// ============================================================================
+// Random number generation
+// ============================================================================
+
+///|
+/// Set random seed
+pub fn random_seed(seed : Int) -> Unit {
+  numbt_seed(seed)
+}
+
+///|
+/// Generate vector of uniform random values in [0, 1)
+pub fn vec_rand(n : Int) -> Vec {
+  let bytes : FixedArray[Byte] = FixedArray::make(n * 4, b'\x00')
+  numbt_rand(bytes, n)
+  let arr = bytes_to_float_arr(bytes, n)
+  vec_from_array(arr)
+}
+
+///|
+/// Generate vector of standard normal random values (mean=0, std=1)
+pub fn vec_randn(n : Int) -> Vec {
+  let bytes : FixedArray[Byte] = FixedArray::make(n * 4, b'\x00')
+  numbt_randn(bytes, n)
+  let arr = bytes_to_float_arr(bytes, n)
+  vec_from_array(arr)
+}
+
+///|
+/// Generate matrix of uniform random values in [0, 1)
+pub fn mat_rand(rows : Int, cols : Int) -> Mat {
+  let n = rows * cols
+  let bytes : FixedArray[Byte] = FixedArray::make(n * 4, b'\x00')
+  numbt_rand(bytes, n)
+  let arr = bytes_to_float_arr(bytes, n)
+  mat_view(arr, rows, cols)
+}
+
+///|
+/// Generate matrix of standard normal random values
+pub fn mat_randn(rows : Int, cols : Int) -> Mat {
+  let n = rows * cols
+  let bytes : FixedArray[Byte] = FixedArray::make(n * 4, b'\x00')
+  numbt_randn(bytes, n)
+  let arr = bytes_to_float_arr(bytes, n)
+  mat_view(arr, rows, cols)
+}
+
+///|
+/// Shuffle vector elements in place
+pub fn vec_shuffle(v : Vec) -> Vec {
+  let arr = vec_to_array(v)
+  let n = arr.length()
+  // Simple Fisher-Yates using vec_rand for random numbers
+  let rand_vals = vec_rand(n)
+  for i = n - 1; i > 0; i = i - 1 {
+    let j = (vec_at(rand_vals, i) * Float::from_int(i + 1)).floor().to_int()
+    let tmp = arr[i]
+    arr[i] = arr[j]
+    arr[j] = tmp
+  }
+  vec_from_array(arr)
+}
+
+// ============================================================================
+// Linear algebra: inv, solve
+// ============================================================================
+
+///|
+/// Matrix inverse using LAPACK sgetrf/sgetri
+/// Returns None if matrix is singular
+pub fn mat_inv(m : Mat) -> Mat? {
+  if m.rows != m.cols {
+    return None
+  }
+  let n = m.rows
+  let a_arr = mat_to_array(m)
+  let a_bytes = float_arr_to_bytes(a_arr)
+  let info = numbt_inv(a_bytes, n)
+  if info != 0 {
+    return None
+  }
+  let result = bytes_to_float_arr(a_bytes, n * n)
+  Some(mat_view(result, n, n))
+}
+
+///|
+/// Solve linear system A @ x = b using LAPACK sgesv
+/// Returns None if system is singular
+pub fn mat_solve(a : Mat, b : Vec) -> Vec? {
+  if a.rows != a.cols || a.rows != b.len {
+    return None
+  }
+  let n = a.rows
+  let a_arr = mat_to_array(a)
+  let b_arr = vec_to_array(b)
+  let a_bytes = float_arr_to_bytes(a_arr)
+  let b_bytes = float_arr_to_bytes(b_arr)
+  let info = numbt_solve(a_bytes, b_bytes, n)
+  if info != 0 {
+    return None
+  }
+  let result = bytes_to_float_arr(b_bytes, n)
+  Some(vec_from_array(result))
 }

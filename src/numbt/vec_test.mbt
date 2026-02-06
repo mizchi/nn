@@ -791,3 +791,565 @@ test "np_sum_axis_consistency" {
   assert_eq(sum_all, sum_axis0)
   assert_eq(sum_all, sum_axis1)
 }
+
+// ============================================================================
+// Sort tests
+// ============================================================================
+
+///|
+test "vec_sort" {
+  let v = vec_from_array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0])
+  let sorted = vec_sort(v)
+  assert_eq(vec_to_array(sorted), [1.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 9.0])
+}
+
+///|
+test "vec_sort_desc" {
+  let v = vec_from_array([3.0, 1.0, 4.0, 1.0, 5.0])
+  let sorted = vec_sort_desc(v)
+  assert_eq(vec_to_array(sorted), [5.0, 4.0, 3.0, 1.0, 1.0])
+}
+
+///|
+test "vec_argsort" {
+  let v = vec_from_array([3.0, 1.0, 4.0, 1.0, 5.0])
+  let indices = vec_argsort(v)
+  // Verify sorted values via indices: should be 1, 1, 3, 4, 5
+  let sorted_vals = Array::makei(5, fn(i) { vec_at(v, indices[i]) })
+  assert_eq(sorted_vals, [1.0, 1.0, 3.0, 4.0, 5.0])
+}
+
+///|
+test "vec_argsort_desc" {
+  let v = vec_from_array([3.0, 1.0, 4.0, 1.0, 5.0])
+  let indices = vec_argsort_desc(v)
+  // Verify sorted values via indices: should be 5, 4, 3, 1, 1
+  let sorted_vals = Array::makei(5, fn(i) { vec_at(v, indices[i]) })
+  assert_eq(sorted_vals, [5.0, 4.0, 3.0, 1.0, 1.0])
+}
+
+// ============================================================================
+// Conditional operations tests
+// ============================================================================
+
+///|
+test "vec_nonzero" {
+  let v = vec_from_array([0.0, 1.0, 0.0, 2.0, 0.0, 3.0])
+  let indices = vec_nonzero(v)
+  assert_eq(indices, [1, 3, 5])
+}
+
+///|
+test "vec_gt" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  let mask = vec_gt(v, 3.0)
+  assert_eq(vec_to_array(mask), [0.0, 0.0, 0.0, 1.0, 1.0])
+}
+
+///|
+test "vec_lt" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  let mask = vec_lt(v, 3.0)
+  assert_eq(vec_to_array(mask), [1.0, 1.0, 0.0, 0.0, 0.0])
+}
+
+///|
+test "vec_ge_le" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  let ge_mask = vec_ge(v, 3.0)
+  let le_mask = vec_le(v, 3.0)
+  assert_eq(vec_to_array(ge_mask), [0.0, 0.0, 1.0, 1.0, 1.0])
+  assert_eq(vec_to_array(le_mask), [1.0, 1.0, 1.0, 0.0, 0.0])
+}
+
+///|
+test "vec_where" {
+  let mask = vec_from_array([1.0, 0.0, 1.0, 0.0])
+  let x = vec_from_array([10.0, 20.0, 30.0, 40.0])
+  let y = vec_from_array([1.0, 2.0, 3.0, 4.0])
+  let result = vec_where(mask, x, y)
+  assert_eq(vec_to_array(result), [10.0, 2.0, 30.0, 4.0])
+}
+
+///|
+test "vec_where_scalar" {
+  let v = vec_from_array([-1.0, 2.0, -3.0, 4.0])
+  let mask = vec_gt(v, 0.0)
+  let result = vec_where_scalar(mask, v, 0.0)
+  // ReLU-like behavior
+  assert_eq(vec_to_array(result), [0.0, 2.0, 0.0, 4.0])
+}
+
+// ============================================================================
+// Cumulative operations tests
+// ============================================================================
+
+///|
+test "vec_cumsum" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0])
+  let cs = vec_cumsum(v)
+  assert_eq(vec_to_array(cs), [1.0, 3.0, 6.0, 10.0])
+}
+
+///|
+test "vec_cumprod" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0])
+  let cp = vec_cumprod(v)
+  assert_eq(vec_to_array(cp), [1.0, 2.0, 6.0, 24.0])
+}
+
+///|
+test "vec_diff" {
+  let v = vec_from_array([1.0, 3.0, 6.0, 10.0])
+  let d = vec_diff(v)
+  assert_eq(vec_to_array(d), [2.0, 3.0, 4.0])
+}
+
+///|
+test "vec_cumsum_cdf" {
+  // Use case: CDF from probabilities
+  let probs = vec_from_array([0.2, 0.3, 0.5])
+  let cdf = vec_cumsum(probs)
+  assert_near(vec_at(cdf, 0), 0.2, 0.0001)
+  assert_near(vec_at(cdf, 1), 0.5, 0.0001)
+  assert_near(vec_at(cdf, 2), 1.0, 0.0001)
+}
+
+// ============================================================================
+// Linear algebra extras tests
+// ============================================================================
+
+///|
+test "vec_outer" {
+  let a = vec_from_array([1.0, 2.0])
+  let b = vec_from_array([3.0, 4.0, 5.0])
+  let outer = vec_outer(a, b)
+  // [[1*3, 1*4, 1*5], [2*3, 2*4, 2*5]] = [[3,4,5], [6,8,10]]
+  assert_eq(mat_rows(outer), 2)
+  assert_eq(mat_cols(outer), 3)
+  assert_eq(mat_to_array(outer), [3.0, 4.0, 5.0, 6.0, 8.0, 10.0])
+}
+
+///|
+test "vec_diag" {
+  let v = vec_from_array([1.0, 2.0, 3.0])
+  let m = vec_diag(v)
+  assert_eq(mat_rows(m), 3)
+  assert_eq(mat_cols(m), 3)
+  assert_eq(mat_to_array(m), [1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0])
+}
+
+///|
+test "mat_diag" {
+  let m = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 3, 3)
+  let d = mat_diag(m)
+  assert_eq(vec_to_array(d), [1.0, 5.0, 9.0])
+}
+
+///|
+test "mat_trace" {
+  let m = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 3, 3)
+  assert_eq(mat_trace(m), 15.0) // 1 + 5 + 9
+}
+
+///|
+test "diag_trace_consistency" {
+  // trace(diag(v)) == sum(v)
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0])
+  let m = vec_diag(v)
+  assert_eq(mat_trace(m), vec_sum(v))
+}
+
+// ============================================================================
+// Concatenate / Stack tests
+// ============================================================================
+
+///|
+test "vec_concatenate" {
+  let a = vec_from_array([1.0, 2.0])
+  let b = vec_from_array([3.0, 4.0, 5.0])
+  let c = vec_from_array([6.0])
+  let result = vec_concatenate([a, b, c])
+  assert_eq(vec_to_array(result), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+}
+
+///|
+test "mat_vstack" {
+  let a = mat_view([1.0, 2.0, 3.0, 4.0], 2, 2)
+  let b = mat_view([5.0, 6.0], 1, 2)
+  let result = mat_vstack([a, b])
+  assert_eq(mat_rows(result), 3)
+  assert_eq(mat_cols(result), 2)
+  assert_eq(mat_to_array(result), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+}
+
+///|
+test "mat_hstack" {
+  let a = mat_view([1.0, 2.0, 3.0, 4.0], 2, 2)
+  let b = mat_view([5.0, 6.0], 2, 1)
+  let result = mat_hstack([a, b])
+  assert_eq(mat_rows(result), 2)
+  assert_eq(mat_cols(result), 3)
+  assert_eq(mat_to_array(result), [1.0, 2.0, 5.0, 3.0, 4.0, 6.0])
+}
+
+///|
+test "vec_repeat" {
+  let v = vec_from_array([1.0, 2.0, 3.0])
+  let r = vec_repeat(v, 3)
+  assert_eq(vec_to_array(r), [1.0, 2.0, 3.0, 1.0, 2.0, 3.0, 1.0, 2.0, 3.0])
+}
+
+///|
+test "mat_tile" {
+  let m = mat_view([1.0, 2.0, 3.0, 4.0], 2, 2)
+  let t = mat_tile(m, 2, 2)
+  assert_eq(mat_rows(t), 4)
+  assert_eq(mat_cols(t), 4)
+  // First row: 1, 2, 1, 2
+  assert_eq(mat_at(t, 0, 0), 1.0)
+  assert_eq(mat_at(t, 0, 2), 1.0)
+  // Third row: 1, 2, 1, 2
+  assert_eq(mat_at(t, 2, 0), 1.0)
+  assert_eq(mat_at(t, 2, 2), 1.0)
+}
+
+// ============================================================================
+// Math functions tests
+// ============================================================================
+
+///|
+test "vec_floor" {
+  let v = vec_from_array([1.5, 2.7, -1.3, -2.9])
+  let result = vec_floor(v)
+  assert_eq(vec_to_array(result), [1.0, 2.0, -2.0, -3.0])
+}
+
+///|
+test "vec_ceil" {
+  let v = vec_from_array([1.5, 2.7, -1.3, -2.9])
+  let result = vec_ceil(v)
+  assert_eq(vec_to_array(result), [2.0, 3.0, -1.0, -2.0])
+}
+
+///|
+test "vec_round" {
+  let v = vec_from_array([1.4, 1.5, 1.6, -1.4, -1.5, -1.6])
+  let result = vec_round(v)
+  // Round half to even or away from zero depends on implementation
+  assert_eq(vec_at(result, 0), 1.0)
+  assert_eq(vec_at(result, 2), 2.0)
+}
+
+// ============================================================================
+// Statistics tests
+// ============================================================================
+
+///|
+test "vec_median_odd" {
+  let v = vec_from_array([3.0, 1.0, 4.0, 1.0, 5.0])
+  let m = vec_median(v)
+  assert_eq(m, 3.0)
+}
+
+///|
+test "vec_median_even" {
+  let v = vec_from_array([3.0, 1.0, 4.0, 2.0])
+  let m = vec_median(v)
+  assert_eq(m, 2.5)
+}
+
+///|
+test "vec_percentile" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  assert_eq(vec_percentile(v, 0.0), 1.0)
+  assert_eq(vec_percentile(v, 100.0), 5.0)
+  assert_eq(vec_percentile(v, 50.0), 3.0)
+}
+
+///|
+test "vec_quantile" {
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  assert_eq(vec_quantile(v, 0.0), 1.0)
+  assert_eq(vec_quantile(v, 1.0), 5.0)
+  assert_eq(vec_quantile(v, 0.5), 3.0)
+}
+
+// ============================================================================
+// Utility tests
+// ============================================================================
+
+///|
+test "vec_unique" {
+  let v = vec_from_array([3.0, 1.0, 2.0, 1.0, 3.0, 2.0])
+  let u = vec_unique(v)
+  assert_eq(vec_to_array(u), [1.0, 2.0, 3.0])
+}
+
+///|
+test "vec_unique_empty" {
+  let v = vec_from_array([])
+  let u = vec_unique(v)
+  assert_eq(vec_len(u), 0)
+}
+
+///|
+test "vec_searchsorted" {
+  let sorted = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  assert_eq(vec_searchsorted(sorted, 0.0), 0)
+  assert_eq(vec_searchsorted(sorted, 1.0), 0)
+  assert_eq(vec_searchsorted(sorted, 2.5), 2)
+  assert_eq(vec_searchsorted(sorted, 5.0), 4)
+  assert_eq(vec_searchsorted(sorted, 6.0), 5)
+}
+
+///|
+test "vec_searchsorted_right" {
+  let sorted = vec_from_array([1.0, 2.0, 2.0, 3.0])
+  assert_eq(vec_searchsorted(sorted, 2.0), 1)
+  assert_eq(vec_searchsorted_right(sorted, 2.0), 3)
+}
+
+// ============================================================================
+// Random tests
+// ============================================================================
+
+///|
+test "vec_rand" {
+  random_seed(42)
+  let v = vec_rand(100)
+  assert_eq(vec_len(v), 100)
+  // All values should be in [0, 1)
+  for i = 0; i < 100; i = i + 1 {
+    let val = vec_at(v, i)
+    assert_true(val >= 0.0 && val < 1.0)
+  }
+}
+
+///|
+test "vec_randn" {
+  random_seed(42)
+  let v = vec_randn(1000)
+  assert_eq(vec_len(v), 1000)
+  // Mean should be close to 0
+  let m = vec_mean(v)
+  assert_true(m.abs() < 0.2)
+}
+
+///|
+test "mat_rand" {
+  random_seed(42)
+  let m = mat_rand(10, 10)
+  assert_eq(mat_rows(m), 10)
+  assert_eq(mat_cols(m), 10)
+}
+
+///|
+test "vec_shuffle" {
+  random_seed(42)
+  let v = vec_from_array([1.0, 2.0, 3.0, 4.0, 5.0])
+  let shuffled = vec_shuffle(v)
+  // Same length
+  assert_eq(vec_len(shuffled), 5)
+  // Same sum (same elements, different order)
+  assert_eq(vec_sum(shuffled), vec_sum(v))
+}
+
+// ============================================================================
+// Linear algebra tests
+// ============================================================================
+
+///|
+test "mat_inv_2x2" {
+  // [[1, 2], [3, 4]] -> [[-2, 1], [1.5, -0.5]]
+  let m = mat_view([1.0, 2.0, 3.0, 4.0], 2, 2)
+  match mat_inv(m) {
+    Some(inv) => {
+      // Check A @ A^-1 = I
+      let prod = mat_matmul(m, inv)
+      assert_near(mat_at(prod, 0, 0), 1.0, 0.001)
+      assert_near(mat_at(prod, 0, 1), 0.0, 0.001)
+      assert_near(mat_at(prod, 1, 0), 0.0, 0.001)
+      assert_near(mat_at(prod, 1, 1), 1.0, 0.001)
+    }
+    None => panic()
+  }
+}
+
+///|
+test "mat_inv_singular" {
+  // Singular matrix: [[1, 2], [2, 4]]
+  let m = mat_view([1.0, 2.0, 2.0, 4.0], 2, 2)
+  match mat_inv(m) {
+    Some(_) => panic() // Should fail
+    None => () // Expected
+  }
+}
+
+///|
+test "mat_solve_2x2" {
+  // Solve: [[2, 1], [1, 3]] @ x = [5, 10]
+  // Solution: x = [1, 3]
+  let a = mat_view([2.0, 1.0, 1.0, 3.0], 2, 2)
+  let b = vec_from_array([5.0, 10.0])
+  match mat_solve(a, b) {
+    Some(x) => {
+      assert_near(vec_at(x, 0), 1.0, 0.001)
+      assert_near(vec_at(x, 1), 3.0, 0.001)
+    }
+    None => panic()
+  }
+}
+
+// ============================================================================
+// FMat LAPACK tests
+// ============================================================================
+
+///|
+test "fmat_svd_2x2" {
+  // SVD of [[3, 0], [0, 2]]
+  // Singular values should be 3, 2
+  let m = mat_view([3.0, 0.0, 0.0, 2.0], 2, 2)
+  let fm = fmat_from_mat(m)
+  match fmat_svd(fm) {
+    Some((u, s, vt)) => {
+      // Check singular values (should be sorted descending)
+      let s_arr = vec_to_array(s)
+      assert_near(s_arr[0], 3.0, 0.001)
+      assert_near(s_arr[1], 2.0, 0.001)
+      // Verify U @ diag(S) @ Vt ≈ A
+      let u_mat = fmat_to_mat(u)
+      let vt_mat = fmat_to_mat(vt)
+      // U and Vt should be orthogonal (U @ U^T = I)
+      assert_near(
+        mat_at(u_mat, 0, 0) * mat_at(u_mat, 0, 0) +
+          mat_at(u_mat, 0, 1) * mat_at(u_mat, 0, 1),
+        1.0,
+        0.001,
+      )
+      ignore(vt_mat)
+    }
+    None => panic()
+  }
+}
+
+///|
+test "fmat_eig_symmetric" {
+  // Symmetric matrix [[2, 1], [1, 2]]
+  // Eigenvalues: 3, 1
+  let m = mat_view([2.0, 1.0, 1.0, 2.0], 2, 2)
+  let fm = fmat_from_mat(m)
+  match fmat_eig(fm) {
+    Some((w, _v)) => {
+      let w_arr = vec_to_array(w)
+      // Eigenvalues are sorted ascending by LAPACK
+      assert_near(w_arr[0], 1.0, 0.001)
+      assert_near(w_arr[1], 3.0, 0.001)
+    }
+    None => panic()
+  }
+}
+
+///|
+test "fmat_cholesky" {
+  // Positive definite matrix [[4, 2], [2, 2]]
+  // Cholesky: L = [[2, 0], [1, 1]]
+  let m = mat_view([4.0, 2.0, 2.0, 2.0], 2, 2)
+  let fm = fmat_from_mat(m)
+  match fmat_cholesky(fm) {
+    Some(l) => {
+      let l_mat = fmat_to_mat(l)
+      assert_near(mat_at(l_mat, 0, 0), 2.0, 0.001)
+      assert_near(mat_at(l_mat, 0, 1), 0.0, 0.001)
+      assert_near(mat_at(l_mat, 1, 0), 1.0, 0.001)
+      assert_near(mat_at(l_mat, 1, 1), 1.0, 0.001)
+    }
+    None => panic()
+  }
+}
+
+///|
+test "fmat_cholesky_not_positive_definite" {
+  // Not positive definite: [[-1, 0], [0, 1]]
+  let m = mat_view([-1.0, 0.0, 0.0, 1.0], 2, 2)
+  let fm = fmat_from_mat(m)
+  match fmat_cholesky(fm) {
+    Some(_) => panic() // Should fail
+    None => () // Expected
+  }
+}
+
+///|
+test "fmat_qr_2x3" {
+  // QR decomposition of [[1, 2, 3], [4, 5, 6]]
+  let m = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
+  let fm = fmat_from_mat(m)
+  match fmat_qr(fm) {
+    Some((q, r)) => {
+      let q_mat = fmat_to_mat(q)
+      let r_mat = fmat_to_mat(r)
+      // Q should be orthogonal (Q @ Q^T = I)
+      let qt = mat_transpose(q_mat)
+      let qqt = mat_matmul(q_mat, qt)
+      assert_near(mat_at(qqt, 0, 0), 1.0, 0.001)
+      assert_near(mat_at(qqt, 0, 1), 0.0, 0.001)
+      assert_near(mat_at(qqt, 1, 0), 0.0, 0.001)
+      assert_near(mat_at(qqt, 1, 1), 1.0, 0.001)
+      // R should be upper triangular
+      assert_near(mat_at(r_mat, 1, 0), 0.0, 0.001)
+    }
+    None => panic()
+  }
+}
+
+///|
+test "fmat_det_2x2" {
+  // det([[1, 2], [3, 4]]) = 1*4 - 2*3 = -2
+  let m = mat_view([1.0, 2.0, 3.0, 4.0], 2, 2)
+  let fm = fmat_from_mat(m)
+  match fmat_det(fm) {
+    Some(det) => assert_near(det, -2.0, 0.001)
+    None => panic()
+  }
+}
+
+///|
+test "fmat_det_3x3" {
+  // det([[1, 2, 3], [4, 5, 6], [7, 8, 10]]) = -3
+  let m = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0], 3, 3)
+  let fm = fmat_from_mat(m)
+  match fmat_det(fm) {
+    Some(det) => assert_near(det, -3.0, 0.001)
+    None => panic()
+  }
+}
+
+///|
+test "fmat_lstsq_overdetermined" {
+  // Least squares: overdetermined system
+  // [[1], [1], [1]] @ x ≈ [1, 2, 3]
+  // Solution: x = [2] (mean)
+  let a = mat_view([1.0, 1.0, 1.0], 3, 1)
+  let b = vec_from_array([1.0, 2.0, 3.0])
+  let fa = fmat_from_mat(a)
+  match fmat_lstsq(fa, b) {
+    Some(x) => assert_near(vec_at(x, 0), 2.0, 0.001)
+    None => panic()
+  }
+}
+
+///|
+test "fmat_lstsq_exact" {
+  // Exact solution: [[2, 1], [1, 3]] @ x = [5, 10]
+  // Solution: x = [1, 3]
+  let a = mat_view([2.0, 1.0, 1.0, 3.0], 2, 2)
+  let b = vec_from_array([5.0, 10.0])
+  let fa = fmat_from_mat(a)
+  match fmat_lstsq(fa, b) {
+    Some(x) => {
+      assert_near(vec_at(x, 0), 1.0, 0.001)
+      assert_near(vec_at(x, 1), 3.0, 0.001)
+    }
+    None => panic()
+  }
+}

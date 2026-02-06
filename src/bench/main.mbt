@@ -25,8 +25,11 @@ fn print_usage(program : String) -> Unit {
   println(
     "Usage: " +
     program +
-    " [--input N] [--hidden N] [--output N] [--batch N] [--warmup N] [--iters N]",
+    " [--blas|--fused|--numbt] [--warmup N] [--iters N]",
   )
+  println("  --blas       BLAS MLP forward benchmark")
+  println("  --fused      Fused BLAS MLP benchmark")
+  println("  --numbt      numbt operations benchmark (sort, cumsum, outer, etc.)")
   println("  --input N    input size (default 784)")
   println("  --hidden N   hidden size (default 128)")
   println("  --output N   output size (default 10)")
@@ -73,6 +76,10 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       continue
     }
     if arg == "--fused" {
+      i = i + 1
+      continue
+    }
+    if arg == "--numbt" {
       i = i + 1
       continue
     }
@@ -683,13 +690,430 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
 }
 
 ///|
+fn format_time_ms(total_ms : Float, iters : Int) -> String {
+  // Convert to ms per operation with 3 decimal places
+  let ms_per_op = total_ms / Float::from_int(iters)
+  // Format with 3 decimal places
+  let scaled = (ms_per_op * Float::from_int(1000)).floor().to_int()
+  let whole = scaled / 1000
+  let frac = scaled % 1000
+  let frac_str = if frac < 10 {
+    "00" + frac.to_string()
+  } else if frac < 100 {
+    "0" + frac.to_string()
+  } else {
+    frac.to_string()
+  }
+  whole.to_string() + "." + frac_str
+}
+
+///|
+fn run_numbt_bench(cfg : BenchArgs) -> Unit {
+  let n_small = 1024
+  let n_mat = 100
+
+  // Generate test data
+  let vec_data = seeded_values(0, n_small, 0)
+  let vec_a = @numbt.vec_from_array(vec_data)
+  let vec_b = @numbt.vec_from_array(seeded_values(1, n_small, 100))
+
+  let mat_data = seeded_values(2, n_mat * n_mat, 200)
+  let mat = @numbt.mat_view(mat_data, n_mat, n_mat)
+
+  let vec_100 = @numbt.vec_from_array(seeded_values(3, n_mat, 300))
+
+  // Warmup
+  let mut i = 0
+  while i < cfg.warmup {
+    ignore(@numbt.vec_sort(vec_a))
+    i = i + 1
+  }
+
+  println("============================================================")
+  println("numbt Benchmark (MoonBit + BLAS)")
+  println("============================================================")
+  println("")
+  println("--- Vector operations (N=" + n_small.to_string() + ") ---")
+
+  // --- Vector basic ops ---
+  let add_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(vec_a + vec_b)
+    i = i + 1
+  }
+  let add_ms = Float::from_uint64(@env.now() - add_start)
+  println("vec_add: " + format_time_ms(add_ms, cfg.iters) + " ms")
+
+  let dot_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_dot(vec_a, vec_b))
+    i = i + 1
+  }
+  let dot_ms = Float::from_uint64(@env.now() - dot_start)
+  println("vec_dot: " + format_time_ms(dot_ms, cfg.iters) + " ms")
+
+  let sum_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_sum(vec_a))
+    i = i + 1
+  }
+  let sum_ms = Float::from_uint64(@env.now() - sum_start)
+  println("vec_sum: " + format_time_ms(sum_ms, cfg.iters) + " ms")
+
+  let mean_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_mean(vec_a))
+    i = i + 1
+  }
+  let mean_ms = Float::from_uint64(@env.now() - mean_start)
+  println("vec_mean: " + format_time_ms(mean_ms, cfg.iters) + " ms")
+
+  let std_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_std(vec_a))
+    i = i + 1
+  }
+  let std_ms = Float::from_uint64(@env.now() - std_start)
+  println("vec_std: " + format_time_ms(std_ms, cfg.iters) + " ms")
+
+  let exp_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_exp(vec_a))
+    i = i + 1
+  }
+  let exp_ms = Float::from_uint64(@env.now() - exp_start)
+  println("vec_exp: " + format_time_ms(exp_ms, cfg.iters) + " ms")
+
+  // --- Sort operations ---
+  println("")
+  println("--- Sort operations (N=" + n_small.to_string() + ") ---")
+
+  let sort_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_sort(vec_a))
+    i = i + 1
+  }
+  let sort_ms = Float::from_uint64(@env.now() - sort_start)
+  println("vec_sort: " + format_time_ms(sort_ms, cfg.iters) + " ms")
+
+  let argsort_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_argsort(vec_a))
+    i = i + 1
+  }
+  let argsort_ms = Float::from_uint64(@env.now() - argsort_start)
+  println("vec_argsort: " + format_time_ms(argsort_ms, cfg.iters) + " ms")
+
+  // --- Cumulative operations ---
+  println("")
+  println("--- Cumulative operations (N=" + n_small.to_string() + ") ---")
+
+  let cumsum_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_cumsum(vec_a))
+    i = i + 1
+  }
+  let cumsum_ms = Float::from_uint64(@env.now() - cumsum_start)
+  println("vec_cumsum: " + format_time_ms(cumsum_ms, cfg.iters) + " ms")
+
+  let cumprod_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_cumprod(@numbt.vec_clip(vec_a, 0.1, 2.0)))
+    i = i + 1
+  }
+  let cumprod_ms = Float::from_uint64(@env.now() - cumprod_start)
+  println("vec_cumprod: " + format_time_ms(cumprod_ms, cfg.iters) + " ms")
+
+  // --- Linear algebra extras ---
+  println("")
+  println("--- Linear algebra extras ---")
+
+  let outer_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_outer(vec_100, vec_100))
+    i = i + 1
+  }
+  let outer_ms = Float::from_uint64(@env.now() - outer_start)
+  println("vec_outer(" + n_mat.to_string() + "): " + format_time_ms(outer_ms, cfg.iters) + " ms")
+
+  let diag_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_diag(vec_100))
+    i = i + 1
+  }
+  let diag_ms = Float::from_uint64(@env.now() - diag_start)
+  println("vec_diag(" + n_mat.to_string() + "): " + format_time_ms(diag_ms, cfg.iters) + " ms")
+
+  let trace_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.mat_trace(mat))
+    i = i + 1
+  }
+  let trace_ms = Float::from_uint64(@env.now() - trace_start)
+  println("mat_trace(" + n_mat.to_string() + "x" + n_mat.to_string() + "): " + format_time_ms(trace_ms, cfg.iters) + " ms")
+
+  // --- Concatenate ---
+  println("")
+  println("--- Concatenate/Stack ---")
+
+  let small_vecs : Array[@numbt.Vec] = [
+    @numbt.vec_from_array(seeded_values(10, 256, 0)),
+    @numbt.vec_from_array(seeded_values(11, 256, 0)),
+    @numbt.vec_from_array(seeded_values(12, 256, 0)),
+    @numbt.vec_from_array(seeded_values(13, 256, 0)),
+  ]
+  let concat_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_concatenate(small_vecs))
+    i = i + 1
+  }
+  let concat_ms = Float::from_uint64(@env.now() - concat_start)
+  println("vec_concatenate(4x256): " + format_time_ms(concat_ms, cfg.iters) + " ms")
+
+  // --- Matrix ops ---
+  println("")
+  println("--- Matrix operations (" + n_mat.to_string() + "x" + n_mat.to_string() + ") ---")
+
+  let mat_sum_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.mat_sum(mat))
+    i = i + 1
+  }
+  let mat_sum_ms = Float::from_uint64(@env.now() - mat_sum_start)
+  println("mat_sum: " + format_time_ms(mat_sum_ms, cfg.iters) + " ms")
+
+  // --- New: Math functions ---
+  println("")
+  println("--- Math functions (N=" + n_small.to_string() + ") ---")
+
+  let floor_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_floor(vec_a))
+    i = i + 1
+  }
+  let floor_ms = Float::from_uint64(@env.now() - floor_start)
+  println("vec_floor: " + format_time_ms(floor_ms, cfg.iters) + " ms")
+
+  let ceil_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_ceil(vec_a))
+    i = i + 1
+  }
+  let ceil_ms = Float::from_uint64(@env.now() - ceil_start)
+  println("vec_ceil: " + format_time_ms(ceil_ms, cfg.iters) + " ms")
+
+  let round_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_round(vec_a))
+    i = i + 1
+  }
+  let round_ms = Float::from_uint64(@env.now() - round_start)
+  println("vec_round: " + format_time_ms(round_ms, cfg.iters) + " ms")
+
+  // --- New: Statistics ---
+  println("")
+  println("--- Statistics ---")
+
+  let median_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_median(vec_a))
+    i = i + 1
+  }
+  let median_ms = Float::from_uint64(@env.now() - median_start)
+  println("vec_median: " + format_time_ms(median_ms, cfg.iters) + " ms")
+
+  let percentile_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_percentile(vec_a, 50.0))
+    i = i + 1
+  }
+  let percentile_ms = Float::from_uint64(@env.now() - percentile_start)
+  println("vec_percentile(50): " + format_time_ms(percentile_ms, cfg.iters) + " ms")
+
+  let unique_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_unique(vec_a))
+    i = i + 1
+  }
+  let unique_ms = Float::from_uint64(@env.now() - unique_start)
+  println("vec_unique: " + format_time_ms(unique_ms, cfg.iters) + " ms")
+
+  // --- New: Search ---
+  println("")
+  println("--- Search ---")
+
+  let sorted_vec = @numbt.vec_sort(vec_a)
+  let searchsorted_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_searchsorted(sorted_vec, 0.5))
+    i = i + 1
+  }
+  let searchsorted_ms = Float::from_uint64(@env.now() - searchsorted_start)
+  println("vec_searchsorted: " + format_time_ms(searchsorted_ms, cfg.iters) + " ms")
+
+  // --- New: Random ---
+  println("")
+  println("--- Random (N=" + n_small.to_string() + ") ---")
+
+  let rand_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_rand(n_small))
+    i = i + 1
+  }
+  let rand_ms = Float::from_uint64(@env.now() - rand_start)
+  println("vec_rand: " + format_time_ms(rand_ms, cfg.iters) + " ms")
+
+  let randn_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    ignore(@numbt.vec_randn(n_small))
+    i = i + 1
+  }
+  let randn_ms = Float::from_uint64(@env.now() - randn_start)
+  println("vec_randn: " + format_time_ms(randn_ms, cfg.iters) + " ms")
+
+  // --- New: Linear algebra inv/solve ---
+  println("")
+  println("--- Linear algebra: inv/solve (N=" + n_mat.to_string() + ") ---")
+
+  // Create invertible matrix using FMat (A @ A^T + I)
+  let fmat_a = @numbt.fmat_randn(n_mat, n_mat)
+  let fmat_at = @numbt.fmat_transpose(fmat_a)
+  let fmat_aat = @numbt.fmat_matmul(fmat_a, fmat_at)
+  let fmat_eye = @numbt.fmat_eye(n_mat)
+  let fmat_pd = @numbt.fmat_add(fmat_aat, fmat_eye)
+
+  // FMat inv benchmark (fast path)
+  let fmat_inv_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_inv(tmp))
+    i = i + 1
+  }
+  let fmat_inv_ms = Float::from_uint64(@env.now() - fmat_inv_start)
+  println("fmat_inv: " + format_time_ms(fmat_inv_ms, cfg.iters / 10) + " ms")
+
+  // Mat inv benchmark (with conversion overhead) for comparison
+  let mat_pd = @numbt.fmat_to_mat(fmat_pd)
+  let mat_inv_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    ignore(@numbt.mat_inv(@numbt.mat_clone(mat_pd)))
+    i = i + 1
+  }
+  let mat_inv_ms = Float::from_uint64(@env.now() - mat_inv_start)
+  println("mat_inv: " + format_time_ms(mat_inv_ms, cfg.iters / 10) + " ms (with conversion)")
+
+  // --- New: LAPACK functions ---
+  println("")
+  println("--- LAPACK operations (N=" + n_mat.to_string() + ") ---")
+
+  // SVD
+  let svd_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_svd(tmp))
+    i = i + 1
+  }
+  let svd_ms = Float::from_uint64(@env.now() - svd_start)
+  println("fmat_svd: " + format_time_ms(svd_ms, cfg.iters / 10) + " ms")
+
+  // Eigenvalues (symmetric)
+  let eig_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_eig(tmp))
+    i = i + 1
+  }
+  let eig_ms = Float::from_uint64(@env.now() - eig_start)
+  println("fmat_eig: " + format_time_ms(eig_ms, cfg.iters / 10) + " ms")
+
+  // Cholesky
+  let chol_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_cholesky(tmp))
+    i = i + 1
+  }
+  let chol_ms = Float::from_uint64(@env.now() - chol_start)
+  println("fmat_cholesky: " + format_time_ms(chol_ms, cfg.iters / 10) + " ms")
+
+  // QR
+  let qr_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_qr(tmp))
+    i = i + 1
+  }
+  let qr_ms = Float::from_uint64(@env.now() - qr_start)
+  println("fmat_qr: " + format_time_ms(qr_ms, cfg.iters / 10) + " ms")
+
+  // Determinant
+  let det_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_det(tmp))
+    i = i + 1
+  }
+  let det_ms = Float::from_uint64(@env.now() - det_start)
+  println("fmat_det: " + format_time_ms(det_ms, cfg.iters / 10) + " ms")
+
+  // Least squares
+  let b_vec = @numbt.vec_from_array(seeded_values(100, n_mat, 0))
+  let lstsq_start = @env.now()
+  i = 0
+  while i < cfg.iters / 10 {
+    let tmp = @numbt.fmat_clone(fmat_pd)
+    ignore(@numbt.fmat_lstsq(tmp, b_vec))
+    i = i + 1
+  }
+  let lstsq_ms = Float::from_uint64(@env.now() - lstsq_start)
+  println("fmat_lstsq: " + format_time_ms(lstsq_ms, cfg.iters / 10) + " ms")
+
+  println("")
+  println("============================================================")
+  println("Benchmark complete")
+  println("============================================================")
+}
+
+///|
 fn main {
   let args = @env.args()
   let program = if args.length() > 0 { args[0] } else { "bench" }
 
-  // Check for --blas and --fused flags
+  // Check for flags
   let mut use_blas = false
   let mut use_fused = false
+  let mut use_numbt = false
   let mut i = 1
   while i < args.length() {
     if args[i] == "--blas" {
@@ -697,6 +1121,9 @@ fn main {
     }
     if args[i] == "--fused" {
       use_fused = true
+    }
+    if args[i] == "--numbt" {
+      use_numbt = true
     }
     i = i + 1
   }
@@ -713,7 +1140,9 @@ fn main {
     }
   }
 
-  if use_fused {
+  if use_numbt {
+    run_numbt_bench(cfg)
+  } else if use_fused {
     run_blas_fused_bench(cfg)
   } else if use_blas {
     run_blas_bench(cfg)

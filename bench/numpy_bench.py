@@ -139,6 +139,33 @@ def main():
     bench("diag(100)", lambda: np.diag(v))
     bench("trace(100x100)", lambda: np.trace(sq))
 
+    print(f"\n--- Math functions (N={N_MED}) ---")
+    bench("floor", lambda: np.floor(a))
+    bench("ceil", lambda: np.ceil(a))
+    bench("round", lambda: np.round(a))
+
+    print(f"\n--- Statistics ---")
+    bench("median", lambda: np.median(a))
+    bench("percentile(50)", lambda: np.percentile(a, 50))
+    bench("unique", lambda: np.unique(a))
+
+    print(f"\n--- Search ---")
+    sorted_arr = np.sort(a)
+    bench("searchsorted", lambda: np.searchsorted(sorted_arr, 0.5))
+
+    print(f"\n--- Random (N={N_MED}) ---")
+    bench("rand", lambda: np.random.rand(N_MED).astype(np.float32))
+    bench("randn", lambda: np.random.randn(N_MED).astype(np.float32))
+
+    print(f"\n--- Linear algebra: inv/solve (N=100) ---")
+    # Create invertible matrix
+    inv_mat = np.random.randn(100, 100).astype(np.float32)
+    inv_mat = inv_mat @ inv_mat.T + np.eye(100, dtype=np.float32)  # Make positive definite
+    b_vec = np.random.randn(100).astype(np.float32)
+
+    bench("inv(100x100)", lambda: np.linalg.inv(inv_mat))
+    bench("solve(100x100)", lambda: np.linalg.solve(inv_mat, b_vec))
+
     print("\n" + "=" * 60)
     print("Benchmark complete")
     print("=" * 60)

@@ -8,6 +8,7 @@ enum TrainBackend {
   Cpu
   Gpu
   Auto
+  GpuTransformer
 } derive(Show, Eq)
 
 ///|
@@ -44,6 +45,7 @@ fn train_backend_label(backend : TrainBackend) -> String {
     Cpu => "cpu"
     Gpu => "gpu"
     Auto => "auto"
+    GpuTransformer => "gpu-transformer"
   }
 }
 
@@ -163,6 +165,11 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
     }
     if arg == "--gpu" {
       backend = Gpu
+      i = i + 1
+      continue
+    }
+    if arg == "--gpu-transformer" {
+      backend = GpuTransformer
       i = i + 1
       continue
     }
@@ -2077,16 +2084,13 @@ fn blas_train(
   // Batch arrays for input and labels
   let batch_input = Array::make(config.batch_size * spec.input_size, zero)
   let batch_labels = Array::make(config.batch_size, 0)
-
   for _epoch = 0; _epoch < config.epochs; _epoch = _epoch + 1 {
     if config.shuffle {
       shuffle_indices_blas(indices, config.seed + _epoch)
     }
-
     let mut loss_sum = zero
     let mut correct = 0
     let mut start = 0
-
     while start < dataset.count {
       let end = if start + config.batch_size <= dataset.count {
         start + config.batch_size
@@ -2102,7 +2106,8 @@ fn blas_train(
         batch_labels[bi] = dataset.labels[idx]
         let input_offset = idx * spec.input_size
         for i = 0; i < spec.input_size; i = i + 1 {
-          batch_input[bi * spec.input_size + i] = dataset.inputs[input_offset + i]
+          batch_input[bi * spec.input_size + i] = dataset.inputs[input_offset +
+            i]
         }
       }
 
@@ -2115,10 +2120,8 @@ fn blas_train(
       )
       loss_sum = loss_sum + batch_loss
       correct = correct + batch_correct
-
       start = end
     }
-
     let count_f = Float::from_int(dataset.count)
     let loss = loss_sum / count_f
     let accuracy = Float::from_int(correct) / count_f
@@ -2136,7 +2139,6 @@ fn blas_train(
 
   // Free C buffers
   @blas.mlp_train_buffers_free(bufs)
-
   Ok(@nn.mlp_train_result(params, metrics))
 }
 
@@ -2201,6 +2203,18 @@ async fn run_train(
         Ok(r) => Ok({ backend: Gpu, result: r })
         Err(err) => Err(err)
       }
+    }
+    GpuTransformer => {
+      gpu_transformer_test()
+      // Return a dummy result since this is a separate test mode
+      let dummy_params = match @nn.mlp_init_params(spec, 0) {
+        Ok(p) => p
+        Err(err) => return Err(err.to_string())
+      }
+      return Ok({
+        backend: GpuTransformer,
+        result: @nn.mlp_train_result(dummy_params, []),
+      })
     }
     Auto => {
       if @wgpu.is_supported() {
@@ -2336,6 +2350,7 @@ async fn train_main() -> Unit {
     Cpu => "full"
     Gpu => "drop"
     Auto => "auto"
+    GpuTransformer => "n/a"
   }
   print_train_config(
     args,
@@ -2370,7 +2385,7 @@ async fn train_main() -> Unit {
   }
   if args.bench_no_readback {
     match report.backend {
-      Gpu =>
+      Gpu | GpuTransformer =>
         if report.result.metrics.length() == 0 {
           print_warn_line(args.json, "metrics skipped: --bench-no-readback")
         }

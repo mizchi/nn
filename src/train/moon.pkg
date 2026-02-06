@@ -3,6 +3,7 @@ import {
   "mizchi/wgpu/nn" as @nn,
   "mizchi/wgpu/nn-cpu" as @nn_cpu,
   "mizchi/wgpu/mnist" as @mnist,
+  "mizchi/wgpu/tensor" as @tensor,
   "mizchi/wgpu" as @wgpu,
   "moonbitlang/async",
   "moonbitlang/async/fs" as @afs,
@@ -18,5 +19,5 @@ options(
       "cc-link-flags": "-Ldeps/wgpu-native/target/release -lwgpu_native -framework Accelerate",
     },
   },
-  targets: { "main.mbt": [ "not", "js" ], "main_js.mbt": [ "js" ] },
+  targets: { "main.mbt": [ "not", "js" ], "gpu_transformer.mbt": [ "not", "js" ], "main_js.mbt": [ "js" ] },
 )

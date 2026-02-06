@@ -23,13 +23,13 @@ fn bench_args_default() -> BenchArgs {
 ///|
 fn print_usage(program : String) -> Unit {
   println(
-    "Usage: " +
-    program +
-    " [--blas|--fused|--numbt] [--warmup N] [--iters N]",
+    "Usage: " + program + " [--blas|--fused|--numbt] [--warmup N] [--iters N]",
   )
   println("  --blas       BLAS MLP forward benchmark")
   println("  --fused      Fused BLAS MLP benchmark")
-  println("  --numbt      numbt operations benchmark (sort, cumsum, outer, etc.)")
+  println(
+    "  --numbt      numbt operations benchmark (sort, cumsum, outer, etc.)",
+  )
   println("  --input N    input size (default 784)")
   println("  --hidden N   hidden size (default 128)")
   println("  --output N   output size (default 10)")
@@ -516,10 +516,9 @@ fn run_blas_bench(cfg : BenchArgs) -> Unit {
   let sgemm_total_ms = Float::from_uint64(sgemm_end - sgemm_start)
 
   // Calculate per-batch time in microseconds
-  let sgemm_per_batch_us = sgemm_total_ms * Float::from_int(1000) / Float::from_int(
-      cfg.iters,
-    )
-
+  let sgemm_per_batch_us = sgemm_total_ms *
+    Float::from_int(1000) /
+    Float::from_int(cfg.iters)
   println(
     "{\"type\":\"blas_mlp_forward_bench\"" +
     ",\"input\":" +
@@ -558,12 +557,7 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
     cfg.output_size,
   )
   @blas.mlp_buffers_init(
-    bufs,
-    batch_input,
-    weight1_data,
-    bias1_data,
-    weight2_data,
-    bias2_data,
+    bufs, batch_input, weight1_data, bias1_data, weight2_data, bias2_data,
   )
 
   // Warmup
@@ -576,11 +570,7 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
   // Measure multiple batches to get meaningful timing
   // Run in groups of 1000 to accumulate timing
   let group_size = 1000
-  let groups = if cfg.iters >= group_size {
-    cfg.iters / group_size
-  } else {
-    1
-  }
+  let groups = if cfg.iters >= group_size { cfg.iters / group_size } else { 1 }
   let actual_iters = groups * group_size
 
   // Benchmark: Zero-copy forward pass
@@ -600,7 +590,6 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
   // Compare with old BLAS (with copy overhead)
   let batch_hidden = Array::make(cfg.batch_size * cfg.hidden_size, zero)
   let batch_output = Array::make(cfg.batch_size * cfg.output_size, zero)
-
   let copy_start = @env.now()
   i = 0
   while i < actual_iters {
@@ -642,12 +631,12 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
   }
 
   // Calculate per-batch time in microseconds
-  let fused_per_batch_us = fused_total_ms * Float::from_int(1000) / Float::from_int(
-      actual_iters,
-    )
-  let copy_per_batch_us = copy_total_ms * Float::from_int(1000) / Float::from_int(
-      actual_iters,
-    )
+  let fused_per_batch_us = fused_total_ms *
+    Float::from_int(1000) /
+    Float::from_int(actual_iters)
+  let copy_per_batch_us = copy_total_ms *
+    Float::from_int(1000) /
+    Float::from_int(actual_iters)
   let speedup = if fused_total_ms > Float::from_int(0) {
     copy_total_ms / fused_total_ms
   } else {
@@ -656,7 +645,6 @@ fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
 
   // Clean up
   @blas.mlp_buffers_free(bufs)
-
   println(
     "{\"type\":\"blas_fused_bench\"" +
     ",\"input\":" +
@@ -716,10 +704,8 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   let vec_data = seeded_values(0, n_small, 0)
   let vec_a = @numbt.vec_from_array(vec_data)
   let vec_b = @numbt.vec_from_array(seeded_values(1, n_small, 100))
-
   let mat_data = seeded_values(2, n_mat * n_mat, 200)
   let mat = @numbt.mat_view(mat_data, n_mat, n_mat)
-
   let vec_100 = @numbt.vec_from_array(seeded_values(3, n_mat, 300))
 
   // Warmup
@@ -728,7 +714,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     ignore(@numbt.vec_sort(vec_a))
     i = i + 1
   }
-
   println("============================================================")
   println("numbt Benchmark (MoonBit + BLAS)")
   println("============================================================")
@@ -744,7 +729,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let add_ms = Float::from_uint64(@env.now() - add_start)
   println("vec_add: " + format_time_ms(add_ms, cfg.iters) + " ms")
-
   let dot_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -753,7 +737,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let dot_ms = Float::from_uint64(@env.now() - dot_start)
   println("vec_dot: " + format_time_ms(dot_ms, cfg.iters) + " ms")
-
   let sum_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -762,7 +745,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let sum_ms = Float::from_uint64(@env.now() - sum_start)
   println("vec_sum: " + format_time_ms(sum_ms, cfg.iters) + " ms")
-
   let mean_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -771,7 +753,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let mean_ms = Float::from_uint64(@env.now() - mean_start)
   println("vec_mean: " + format_time_ms(mean_ms, cfg.iters) + " ms")
-
   let std_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -780,7 +761,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let std_ms = Float::from_uint64(@env.now() - std_start)
   println("vec_std: " + format_time_ms(std_ms, cfg.iters) + " ms")
-
   let exp_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -793,7 +773,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   // --- Sort operations ---
   println("")
   println("--- Sort operations (N=" + n_small.to_string() + ") ---")
-
   let sort_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -802,7 +781,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let sort_ms = Float::from_uint64(@env.now() - sort_start)
   println("vec_sort: " + format_time_ms(sort_ms, cfg.iters) + " ms")
-
   let argsort_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -815,7 +793,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   // --- Cumulative operations ---
   println("")
   println("--- Cumulative operations (N=" + n_small.to_string() + ") ---")
-
   let cumsum_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -824,7 +801,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let cumsum_ms = Float::from_uint64(@env.now() - cumsum_start)
   println("vec_cumsum: " + format_time_ms(cumsum_ms, cfg.iters) + " ms")
-
   let cumprod_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -837,7 +813,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   // --- Linear algebra extras ---
   println("")
   println("--- Linear algebra extras ---")
-
   let outer_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -845,8 +820,13 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let outer_ms = Float::from_uint64(@env.now() - outer_start)
-  println("vec_outer(" + n_mat.to_string() + "): " + format_time_ms(outer_ms, cfg.iters) + " ms")
-
+  println(
+    "vec_outer(" +
+    n_mat.to_string() +
+    "): " +
+    format_time_ms(outer_ms, cfg.iters) +
+    " ms",
+  )
   let diag_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -854,8 +834,13 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let diag_ms = Float::from_uint64(@env.now() - diag_start)
-  println("vec_diag(" + n_mat.to_string() + "): " + format_time_ms(diag_ms, cfg.iters) + " ms")
-
+  println(
+    "vec_diag(" +
+    n_mat.to_string() +
+    "): " +
+    format_time_ms(diag_ms, cfg.iters) +
+    " ms",
+  )
   let trace_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -863,12 +848,19 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let trace_ms = Float::from_uint64(@env.now() - trace_start)
-  println("mat_trace(" + n_mat.to_string() + "x" + n_mat.to_string() + "): " + format_time_ms(trace_ms, cfg.iters) + " ms")
+  println(
+    "mat_trace(" +
+    n_mat.to_string() +
+    "x" +
+    n_mat.to_string() +
+    "): " +
+    format_time_ms(trace_ms, cfg.iters) +
+    " ms",
+  )
 
   // --- Concatenate ---
   println("")
   println("--- Concatenate/Stack ---")
-
   let small_vecs : Array[@numbt.Vec] = [
     @numbt.vec_from_array(seeded_values(10, 256, 0)),
     @numbt.vec_from_array(seeded_values(11, 256, 0)),
@@ -882,12 +874,19 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let concat_ms = Float::from_uint64(@env.now() - concat_start)
-  println("vec_concatenate(4x256): " + format_time_ms(concat_ms, cfg.iters) + " ms")
+  println(
+    "vec_concatenate(4x256): " + format_time_ms(concat_ms, cfg.iters) + " ms",
+  )
 
   // --- Matrix ops ---
   println("")
-  println("--- Matrix operations (" + n_mat.to_string() + "x" + n_mat.to_string() + ") ---")
-
+  println(
+    "--- Matrix operations (" +
+    n_mat.to_string() +
+    "x" +
+    n_mat.to_string() +
+    ") ---",
+  )
   let mat_sum_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -900,7 +899,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   // --- New: Math functions ---
   println("")
   println("--- Math functions (N=" + n_small.to_string() + ") ---")
-
   let floor_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -909,7 +907,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let floor_ms = Float::from_uint64(@env.now() - floor_start)
   println("vec_floor: " + format_time_ms(floor_ms, cfg.iters) + " ms")
-
   let ceil_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -918,7 +915,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let ceil_ms = Float::from_uint64(@env.now() - ceil_start)
   println("vec_ceil: " + format_time_ms(ceil_ms, cfg.iters) + " ms")
-
   let round_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -931,7 +927,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   // --- New: Statistics ---
   println("")
   println("--- Statistics ---")
-
   let median_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -940,7 +935,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let median_ms = Float::from_uint64(@env.now() - median_start)
   println("vec_median: " + format_time_ms(median_ms, cfg.iters) + " ms")
-
   let percentile_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -948,8 +942,9 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let percentile_ms = Float::from_uint64(@env.now() - percentile_start)
-  println("vec_percentile(50): " + format_time_ms(percentile_ms, cfg.iters) + " ms")
-
+  println(
+    "vec_percentile(50): " + format_time_ms(percentile_ms, cfg.iters) + " ms",
+  )
   let unique_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -962,7 +957,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   // --- New: Search ---
   println("")
   println("--- Search ---")
-
   let sorted_vec = @numbt.vec_sort(vec_a)
   let searchsorted_start = @env.now()
   i = 0
@@ -971,12 +965,13 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let searchsorted_ms = Float::from_uint64(@env.now() - searchsorted_start)
-  println("vec_searchsorted: " + format_time_ms(searchsorted_ms, cfg.iters) + " ms")
+  println(
+    "vec_searchsorted: " + format_time_ms(searchsorted_ms, cfg.iters) + " ms",
+  )
 
   // --- New: Random ---
   println("")
   println("--- Random (N=" + n_small.to_string() + ") ---")
-
   let rand_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -985,7 +980,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let rand_ms = Float::from_uint64(@env.now() - rand_start)
   println("vec_rand: " + format_time_ms(rand_ms, cfg.iters) + " ms")
-
   let randn_start = @env.now()
   i = 0
   while i < cfg.iters {
@@ -1026,7 +1020,11 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
     i = i + 1
   }
   let mat_inv_ms = Float::from_uint64(@env.now() - mat_inv_start)
-  println("mat_inv: " + format_time_ms(mat_inv_ms, cfg.iters / 10) + " ms (with conversion)")
+  println(
+    "mat_inv: " +
+    format_time_ms(mat_inv_ms, cfg.iters / 10) +
+    " ms (with conversion)",
+  )
 
   // --- New: LAPACK functions ---
   println("")
@@ -1098,7 +1096,6 @@ fn run_numbt_bench(cfg : BenchArgs) -> Unit {
   }
   let lstsq_ms = Float::from_uint64(@env.now() - lstsq_start)
   println("fmat_lstsq: " + format_time_ms(lstsq_ms, cfg.iters / 10) + " ms")
-
   println("")
   println("============================================================")
   println("Benchmark complete")
@@ -1127,7 +1124,6 @@ fn main {
     }
     i = i + 1
   }
-
   let cfg_result = parse_args(args)
   let cfg = match cfg_result {
     Ok(c) => c
@@ -1139,7 +1135,6 @@ fn main {
       return
     }
   }
-
   if use_numbt {
     run_numbt_bench(cfg)
   } else if use_fused {

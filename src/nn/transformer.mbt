@@ -52,18 +52,16 @@ pub fn transformer_spec_new(
   if seq_len > max_seq_len {
     return Err(InvalidSpec("seq_len must be <= max_seq_len"))
   }
-  Ok(
-    TransformerSpec::{
-      vocab_size,
-      d_model,
-      num_heads,
-      num_layers,
-      d_ff,
-      max_seq_len,
-      batch_size,
-      seq_len,
-    },
-  )
+  Ok(TransformerSpec::{
+    vocab_size,
+    d_model,
+    num_heads,
+    num_layers,
+    d_ff,
+    max_seq_len,
+    batch_size,
+    seq_len,
+  })
 }
 
 ///|
@@ -140,9 +138,15 @@ pub fn transformer_plan_buffers(
     x_bytes: bytes_for_f32(bs * spec.d_model),
     x_tmp_bytes: bytes_for_f32(bs * spec.d_model),
     x_residual_bytes: bytes_for_f32(bs * spec.d_model),
-    q_bytes: bytes_for_f32(spec.batch_size * spec.num_heads * spec.seq_len * d_k),
-    k_bytes: bytes_for_f32(spec.batch_size * spec.num_heads * spec.seq_len * d_k),
-    v_bytes: bytes_for_f32(spec.batch_size * spec.num_heads * spec.seq_len * d_k),
+    q_bytes: bytes_for_f32(
+      spec.batch_size * spec.num_heads * spec.seq_len * d_k,
+    ),
+    k_bytes: bytes_for_f32(
+      spec.batch_size * spec.num_heads * spec.seq_len * d_k,
+    ),
+    v_bytes: bytes_for_f32(
+      spec.batch_size * spec.num_heads * spec.seq_len * d_k,
+    ),
     attn_out_bytes: bytes_for_f32(
       spec.batch_size * spec.num_heads * spec.seq_len * d_k,
     ),
@@ -295,26 +299,24 @@ pub fn transformer_dispatch_plan(
   let x_total = bs * spec.d_model
   let q_total = spec.batch_size * spec.num_heads * spec.seq_len * d_k
   let ff_total = bs * spec.d_ff
-  Ok(
-    TransformerGpuDispatchPlan::{
+  Ok(TransformerGpuDispatchPlan::{
+    workgroup_size,
+    embedding_dispatch_x: ceil_div(bs, workgroup_size),
+    add_pos_dispatch_x: ceil_div(x_total, workgroup_size),
+    x_elementwise_dispatch_x: ceil_div(x_total, workgroup_size),
+    layer_norm_dispatch_x: ceil_div(bs, workgroup_size),
+    attn_proj_dispatch_x: ceil_div(bs * spec.d_model, workgroup_size),
+    out_proj_dispatch_x: ceil_div(bs * spec.d_model, workgroup_size),
+    ffn_up_dispatch_x: ceil_div(bs * spec.d_ff, workgroup_size),
+    ffn_down_dispatch_x: ceil_div(bs * spec.d_model, workgroup_size),
+    reshape_dispatch_x: ceil_div(q_total, workgroup_size),
+    attention_dispatch_x: ceil_div(
+      spec.batch_size * spec.num_heads * spec.seq_len,
       workgroup_size,
-      embedding_dispatch_x: ceil_div(bs, workgroup_size),
-      add_pos_dispatch_x: ceil_div(x_total, workgroup_size),
-      x_elementwise_dispatch_x: ceil_div(x_total, workgroup_size),
-      layer_norm_dispatch_x: ceil_div(bs, workgroup_size),
-      attn_proj_dispatch_x: ceil_div(bs * spec.d_model, workgroup_size),
-      out_proj_dispatch_x: ceil_div(bs * spec.d_model, workgroup_size),
-      ffn_up_dispatch_x: ceil_div(bs * spec.d_ff, workgroup_size),
-      ffn_down_dispatch_x: ceil_div(bs * spec.d_model, workgroup_size),
-      reshape_dispatch_x: ceil_div(q_total, workgroup_size),
-      attention_dispatch_x: ceil_div(
-        spec.batch_size * spec.num_heads * spec.seq_len,
-        workgroup_size,
-      ),
-      lm_head_dispatch_x: ceil_div(bs * spec.vocab_size, workgroup_size),
-      ff_h_elementwise_dispatch_x: ceil_div(ff_total, workgroup_size),
-    },
-  )
+    ),
+    lm_head_dispatch_x: ceil_div(bs * spec.vocab_size, workgroup_size),
+    ff_h_elementwise_dispatch_x: ceil_div(ff_total, workgroup_size),
+  })
 }
 
 ///|
@@ -348,66 +350,64 @@ pub fn transformer_shader_plan(
   let d_k = transformer_d_k(spec)
   let x_total = bs * spec.d_model
   let ff_total = bs * spec.d_ff
-  Ok(
-    TransformerGpuShaderPlan::{
-      embedding_lookup_wgsl: wgsl_embedding_lookup(spec, workgroup_size),
-      add_vectors_wgsl: wgsl_add_vectors(x_total, workgroup_size),
-      layer_norm_wgsl: wgsl_layer_norm(
-        bs,
-        spec.d_model,
-        Float::from_double(0.00001),
-        workgroup_size,
-      ),
-      batched_matmul_attn_wgsl: wgsl_batched_matmul(
-        bs,
-        spec.d_model,
-        spec.d_model,
-        workgroup_size,
-      ),
-      batched_matmul_ffn_up_wgsl: wgsl_batched_matmul(
-        bs,
-        spec.d_model,
-        spec.d_ff,
-        workgroup_size,
-      ),
-      batched_matmul_ffn_down_wgsl: wgsl_batched_matmul(
-        bs,
-        spec.d_ff,
-        spec.d_model,
-        workgroup_size,
-      ),
-      batched_matmul_lm_head_wgsl: wgsl_batched_matmul(
-        bs,
-        spec.d_model,
-        spec.vocab_size,
-        workgroup_size,
-      ),
-      add_bias_ffn_up_wgsl: wgsl_add_bias(bs, spec.d_ff, workgroup_size),
-      add_bias_ffn_down_wgsl: wgsl_add_bias(bs, spec.d_model, workgroup_size),
-      gelu_wgsl: wgsl_gelu(ff_total, workgroup_size),
-      reshape_for_heads_wgsl: wgsl_reshape_for_heads(
-        spec.batch_size,
-        spec.seq_len,
-        spec.num_heads,
-        d_k,
-        workgroup_size,
-      ),
-      reshape_from_heads_wgsl: wgsl_reshape_from_heads(
-        spec.batch_size,
-        spec.seq_len,
-        spec.num_heads,
-        d_k,
-        workgroup_size,
-      ),
-      attention_core_wgsl: wgsl_attention_core(
-        spec.batch_size,
-        spec.num_heads,
-        spec.seq_len,
-        spec.seq_len,
-        d_k,
-        workgroup_size,
-      ),
-      copy_wgsl: wgsl_copy(x_total, workgroup_size),
-    },
-  )
+  Ok(TransformerGpuShaderPlan::{
+    embedding_lookup_wgsl: wgsl_embedding_lookup(spec, workgroup_size),
+    add_vectors_wgsl: wgsl_add_vectors(x_total, workgroup_size),
+    layer_norm_wgsl: wgsl_layer_norm(
+      bs,
+      spec.d_model,
+      Float::from_double(0.00001),
+      workgroup_size,
+    ),
+    batched_matmul_attn_wgsl: wgsl_batched_matmul(
+      bs,
+      spec.d_model,
+      spec.d_model,
+      workgroup_size,
+    ),
+    batched_matmul_ffn_up_wgsl: wgsl_batched_matmul(
+      bs,
+      spec.d_model,
+      spec.d_ff,
+      workgroup_size,
+    ),
+    batched_matmul_ffn_down_wgsl: wgsl_batched_matmul(
+      bs,
+      spec.d_ff,
+      spec.d_model,
+      workgroup_size,
+    ),
+    batched_matmul_lm_head_wgsl: wgsl_batched_matmul(
+      bs,
+      spec.d_model,
+      spec.vocab_size,
+      workgroup_size,
+    ),
+    add_bias_ffn_up_wgsl: wgsl_add_bias(bs, spec.d_ff, workgroup_size),
+    add_bias_ffn_down_wgsl: wgsl_add_bias(bs, spec.d_model, workgroup_size),
+    gelu_wgsl: wgsl_gelu(ff_total, workgroup_size),
+    reshape_for_heads_wgsl: wgsl_reshape_for_heads(
+      spec.batch_size,
+      spec.seq_len,
+      spec.num_heads,
+      d_k,
+      workgroup_size,
+    ),
+    reshape_from_heads_wgsl: wgsl_reshape_from_heads(
+      spec.batch_size,
+      spec.seq_len,
+      spec.num_heads,
+      d_k,
+      workgroup_size,
+    ),
+    attention_core_wgsl: wgsl_attention_core(
+      spec.batch_size,
+      spec.num_heads,
+      spec.seq_len,
+      spec.seq_len,
+      d_k,
+      workgroup_size,
+    ),
+    copy_wgsl: wgsl_copy(x_total, workgroup_size),
+  })
 }

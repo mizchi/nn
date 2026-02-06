@@ -200,11 +200,13 @@ test "forward_with_cache_matches_forward" {
   let tokens = [[0, 1, 2, 3, 1, 2, 3, 0]]
   let mask = causal_mask(8).unwrap()
   // forward (inference)
-  let logits_ref = transformer_forward(tokens, params, config, Some(mask))
-    .unwrap()
+  let logits_ref = transformer_forward(tokens, params, config, Some(mask)).unwrap()
   // forward_with_cache (training)
   let (logits_cached, _) = transformer_forward_with_cache(
-    tokens, params, config, Some(mask),
+    tokens,
+    params,
+    config,
+    Some(mask),
   )
   // Every element must match
   let n = logits_ref.numel()
@@ -261,7 +263,10 @@ test "trained_model_generates_learned_pattern" {
   for _epoch = 0; _epoch < 50; _epoch = _epoch + 1 {
     zero_grads(grads)
     let (_, cache) = transformer_forward_with_cache(
-      inputs, params, config, Some(mask),
+      inputs,
+      params,
+      config,
+      Some(mask),
     )
     let _ = transformer_backward(cache, params, config, grads, targets)
     sgd_update(params, grads, Float::from_double(0.01))

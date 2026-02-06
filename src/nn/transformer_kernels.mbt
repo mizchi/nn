@@ -1,7 +1,10 @@
 ///|
 /// Embedding lookup: token index -> embedding row copy
 /// Each workgroup thread handles one (batch, seq) position
-fn wgsl_embedding_lookup(spec : TransformerSpec, workgroup_size : Int) -> String {
+fn wgsl_embedding_lookup(
+  spec : TransformerSpec,
+  workgroup_size : Int,
+) -> String {
   let total = u32_lit(spec.batch_size * spec.seq_len)
   let d_model = u32_lit(spec.d_model)
   let ws = workgroup_size.to_string()
@@ -62,19 +65,14 @@ fn wgsl_gelu(total : Int, workgroup_size : Int) -> String {
   let s7 = s6 + "  let i = gid.x;\n"
   let s8 = s7 + "  if (i >= TOTAL) { return; }\n"
   let s9 = s8 + "  let v = x[i];\n"
-  let s10 = s9 +
-    "  let inner = SQRT_2_OVER_PI * (v + COEFF * v * v * v);\n"
+  let s10 = s9 + "  let inner = SQRT_2_OVER_PI * (v + COEFF * v * v * v);\n"
   let s11 = s10 + "  x[i] = 0.5 * v * (1.0 + tanh(inner));\n"
   s11 + "}\n"
 }
 
 ///|
 /// Add bias: x[i * dim + j] += bias[j]
-fn wgsl_add_bias(
-  batch_seq : Int,
-  dim : Int,
-  workgroup_size : Int,
-) -> String {
+fn wgsl_add_bias(batch_seq : Int, dim : Int, workgroup_size : Int) -> String {
   let total = u32_lit(batch_seq * dim)
   let d = u32_lit(dim)
   let ws = workgroup_size.to_string()
@@ -83,8 +81,7 @@ fn wgsl_add_bias(
   let s2 = s1 + "const DIM : u32 = " + d + ";\n"
   let s3 = s2 +
     "@group(0) @binding(0) var<storage, read_write> x : array<f32>;\n"
-  let s4 = s3 +
-    "@group(0) @binding(1) var<storage, read> bias : array<f32>;\n"
+  let s4 = s3 + "@group(0) @binding(1) var<storage, read> bias : array<f32>;\n"
   let s5 = s4 + "@compute @workgroup_size(" + ws + ")\n"
   let s6 = s5 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
   let s7 = s6 + "  let i = gid.x;\n"
@@ -130,10 +127,8 @@ fn wgsl_layer_norm(
   let s2 = s1 + "const D_MODEL : u32 = " + dm + ";\n"
   let s3 = s2 + "const EPS : f32 = " + eps_str + ";\n"
   let s4 = s3 + "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
-  let s5 = s4 +
-    "@group(0) @binding(1) var<storage, read> gamma : array<f32>;\n"
-  let s6 = s5 +
-    "@group(0) @binding(2) var<storage, read> beta : array<f32>;\n"
+  let s5 = s4 + "@group(0) @binding(1) var<storage, read> gamma : array<f32>;\n"
+  let s6 = s5 + "@group(0) @binding(2) var<storage, read> beta : array<f32>;\n"
   let s7 = s6 +
     "@group(0) @binding(3) var<storage, read_write> output : array<f32>;\n"
   let s8 = s7 + "@compute @workgroup_size(" + ws + ")\n"
@@ -158,8 +153,7 @@ fn wgsl_layer_norm(
   // Normalize
   let s25 = s24 + "  for (var d : u32 = 0u; d < D_MODEL; d = d + 1u) {\n"
   let s26 = s25 + "    let normalized = (input[base + d] - mean) * inv_std;\n"
-  let s27 = s26 +
-    "    output[base + d] = gamma[d] * normalized + beta[d];\n"
+  let s27 = s26 + "    output[base + d] = gamma[d] * normalized + beta[d];\n"
   let s28 = s27 + "  }\n"
   s28 + "}\n"
 }
@@ -264,8 +258,7 @@ fn wgsl_reshape_from_heads(
   let s3 = s2 + "const HEADS : u32 = " + heads_u + ";\n"
   let s4 = s3 + "const D_K : u32 = " + dk_u + ";\n"
   let s5 = s4 + "const D_MODEL : u32 = " + d_model_u + ";\n"
-  let s6 = s5 +
-    "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
+  let s6 = s5 + "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
   let s7 = s6 +
     "@group(0) @binding(1) var<storage, read_write> output : array<f32>;\n"
   let s8 = s7 + "@compute @workgroup_size(" + ws + ")\n"
@@ -318,8 +311,7 @@ fn wgsl_attention_core(
   let s7 = s6 + "@group(0) @binding(0) var<storage, read> q : array<f32>;\n"
   let s8 = s7 + "@group(0) @binding(1) var<storage, read> k : array<f32>;\n"
   let s9 = s8 + "@group(0) @binding(2) var<storage, read> v : array<f32>;\n"
-  let s10 = s9 +
-    "@group(0) @binding(3) var<storage, read> mask : array<f32>;\n"
+  let s10 = s9 + "@group(0) @binding(3) var<storage, read> mask : array<f32>;\n"
   let s11 = s10 +
     "@group(0) @binding(4) var<storage, read_write> output : array<f32>;\n"
   let s12 = s11 + "@compute @workgroup_size(" + ws + ")\n"
@@ -331,7 +323,8 @@ fn wgsl_attention_core(
   let s17 = s16 + "  let h = (idx / SEQ_Q) % HEADS;\n"
   let s18 = s17 + "  let b = idx / (SEQ_Q * HEADS);\n"
   // Base offsets for Q, K, V in [batch, heads, seq, d_k]
-  let s19 = s18 + "  let q_base = b * HEADS * SEQ_Q * D_K + h * SEQ_Q * D_K + sq * D_K;\n"
+  let s19 = s18 +
+    "  let q_base = b * HEADS * SEQ_Q * D_K + h * SEQ_Q * D_K + sq * D_K;\n"
   let s20 = s19 + "  let kv_base = b * HEADS * SEQ_K * D_K + h * SEQ_K * D_K;\n"
   // Compute Q @ K^T for this query position, apply scale and mask
   // Cache scores in a fixed-size array to avoid recomputation
@@ -341,10 +334,12 @@ fn wgsl_attention_core(
   let s23 = s22 + "  for (var sk : u32 = 0u; sk < SEQ_K; sk = sk + 1u) {\n"
   let s24 = s23 + "    var dot = 0.0;\n"
   let s25 = s24 + "    for (var d : u32 = 0u; d < D_K; d = d + 1u) {\n"
-  let s26 = s25 + "      dot = dot + q[q_base + d] * k[kv_base + sk * D_K + d];\n"
+  let s26 = s25 +
+    "      dot = dot + q[q_base + d] * k[kv_base + sk * D_K + d];\n"
   let s27 = s26 + "    }\n"
   let s28 = s27 + "    scores[sk] = dot * SCALE + mask[sq * SEQ_K + sk];\n"
-  let s29 = s28 + "    if (scores[sk] > max_score) { max_score = scores[sk]; }\n"
+  let s29 = s28 +
+    "    if (scores[sk] > max_score) { max_score = scores[sk]; }\n"
   let s30 = s29 + "  }\n"
   // Second pass: compute exp weights and sum
   let s31 = s30 + "  var weights : array<f32, " + seq_k_u + ">;\n"
@@ -358,7 +353,8 @@ fn wgsl_attention_core(
   let s38 = s37 + "    weights[sk] = weights[sk] / exp_sum;\n"
   let s39 = s38 + "  }\n"
   // Third pass: compute weighted sum of V
-  let s40 = s39 + "  let out_base = b * HEADS * SEQ_Q * D_K + h * SEQ_Q * D_K + sq * D_K;\n"
+  let s40 = s39 +
+    "  let out_base = b * HEADS * SEQ_Q * D_K + h * SEQ_Q * D_K + sq * D_K;\n"
   let s41 = s40 + "  for (var d : u32 = 0u; d < D_K; d = d + 1u) {\n"
   let s42 = s41 + "    var weighted = 0.0;\n"
   let s43 = s42 + "    for (var sk : u32 = 0u; sk < SEQ_K; sk = sk + 1u) {\n"

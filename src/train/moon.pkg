@@ -19,5 +19,9 @@ options(
       "cc-link-flags": "-Ldeps/wgpu-native/target/release -lwgpu_native -framework Accelerate",
     },
   },
-  targets: { "main.mbt": [ "not", "js" ], "gpu_transformer.mbt": [ "not", "js" ], "main_js.mbt": [ "js" ] },
+  targets: {
+    "gpu_transformer.mbt": [ "not", "js" ],
+    "main.mbt": [ "not", "js" ],
+    "main_js.mbt": [ "js" ],
+  },
 )

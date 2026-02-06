@@ -864,7 +864,11 @@ pub async fn run_mlp_loss() -> Unit {
                 let eps = Float::from_int(1) / Float::from_int(10000)
                 arrays_close_eps(expected, actual, eps)
               }
-              let reason = if ok { None } else { Some("loss/probs/logits mismatch") }
+              let reason = if ok {
+                None
+              } else {
+                Some("loss/probs/logits mismatch")
+              }
               set_e2e_result_js(ok, expected, actual, reason)
             }
             Err(err) =>

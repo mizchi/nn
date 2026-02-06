@@ -145,7 +145,9 @@ test "mlp_io_bytes" {
 ///|
 test "mlp_init_policy_zero" {
   let spec = @nn.mlp_spec_new(2, 2, 1, 1).unwrap()
-  let params = @nn.mlp_init_params_with_policy(spec, 0, @nn.mlp_init_policy_zeros).unwrap()
+  let params = @nn.mlp_init_params_with_policy(
+    spec, 0, @nn.mlp_init_policy_zeros,
+  ).unwrap()
   let zero = Float::from_int(0)
   let sum_w1 = params.weight1.fold(init=zero, fn(acc, v) { acc + v })
   let sum_b1 = params.bias1.fold(init=zero, fn(acc, v) { acc + v })

@@ -393,6 +393,81 @@ fn sum_along_dim(src : Tensor, dst : Array[Float], dim : Int) -> Unit {
 }
 
 ///|
+/// Log softmax along last dimension (numerically stable)
+pub fn tensor_log_softmax(t : Tensor) -> Result[Tensor, String] {
+  if t.ndim() == 0 {
+    return Err("log_softmax requires at least 1D tensor")
+  }
+  let tc = t.contiguous()
+  let result = Array::make(tc.numel(), Float::from_int(0))
+  let last_dim = t.dim(-1)
+  let outer = t.numel() / last_dim
+  for i = 0; i < outer; i = i + 1 {
+    let base = i * last_dim
+    // Find max for numerical stability
+    let mut max_val = tc.data[base]
+    for j = 1; j < last_dim; j = j + 1 {
+      if tc.data[base + j] > max_val {
+        max_val = tc.data[base + j]
+      }
+    }
+    // Compute log(sum(exp(x - max)))
+    let mut sum = Float::from_int(0)
+    for j = 0; j < last_dim; j = j + 1 {
+      let e = @math.exp((tc.data[base + j] - max_val).to_double())
+        |> Float::from_double
+      sum = sum + e
+    }
+    let log_sum = @math.ln(sum.to_double()) |> Float::from_double
+    // log_softmax = (x - max) - log(sum(exp(x - max)))
+    for j = 0; j < last_dim; j = j + 1 {
+      result[base + j] = tc.data[base + j] - max_val - log_sum
+    }
+  }
+  tensor_new(t.shape, result)
+}
+
+///|
+/// Cross-entropy loss: logits [batch, vocab_size], labels [batch]
+/// Returns average negative log-likelihood
+pub fn tensor_cross_entropy(
+  logits : Tensor,
+  labels : Array[Int],
+) -> Result[Float, String] {
+  if logits.ndim() != 2 {
+    return Err("cross_entropy expects 2D logits [batch, vocab_size]")
+  }
+  let batch = logits.dim(0)
+  if labels.length() != batch {
+    return Err("labels length must match batch size")
+  }
+  let log_probs = match tensor_log_softmax(logits) {
+    Ok(t) => t
+    Err(e) => return Err(e)
+  }
+  let mut loss = Float::from_int(0)
+  for i = 0; i < batch; i = i + 1 {
+    loss = loss - log_probs.at2(i, labels[i])
+  }
+  Ok(loss / Float::from_int(batch))
+}
+
+///|
+/// Argmax of a 1D tensor
+pub fn tensor_argmax(t : Tensor) -> Int {
+  let tc = t.contiguous()
+  let mut best = 0
+  let mut best_val = tc.data[0]
+  for i = 1; i < tc.numel(); i = i + 1 {
+    if tc.data[i] > best_val {
+      best_val = tc.data[i]
+      best = i
+    }
+  }
+  best
+}
+
+///|
 /// Mean along a dimension
 pub fn tensor_mean(t : Tensor, dim : Int) -> Result[Tensor, String] {
   let n = t.ndim()

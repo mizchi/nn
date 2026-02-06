@@ -61,14 +61,20 @@ fn embedding(indices: Tensor, weight: Tensor) -> Tensor
 - [x] Tests (22 tests passing)
 
 ### Phase 2: Multi-Head + FFN
-- [ ] Transpose/Reshape (head split)
-- [ ] Multi-Head Attention assembly
-- [ ] Single Transformer Block
+- [x] Transpose/Reshape (head split) (`reshape_for_heads`, `reshape_from_heads`)
+- [x] Multi-Head Attention assembly (`multi_head_attention`)
+- [x] Feed-Forward Network (`feed_forward`)
+- [x] Single Transformer Block (`transformer_block`)
+- [x] Embedding + Positional (`embedding`, `add_positional_embedding`)
+- [x] N-layer stack (`transformer_forward`)
+- [x] Parameter initialization (`transformer_init_params`)
+- [x] Tests (28 tests passing)
 
-### Phase 3: Stacking
-- [ ] Embedding + Positional
-- [ ] N-layer stack
-- [ ] Small LM (char-level etc.)
+### Phase 3: Small LM
+- [ ] Tokenizer (char-level or BPE)
+- [ ] Greedy/sampling generation
+- [ ] Training loop (cross-entropy loss)
+- [ ] Small LM demo (char-level)
 
 ### Phase 4: Inference Optimization
 - [ ] KV Cache

@@ -845,20 +845,30 @@ async fn gpu_train(
     Ok(p) => p
     Err(err) => return Err(err.to_string())
   }
-  let indices_dispatch_x = ceil_div(segment_samples, workgroup_size)
   let upload_usage = buffer_usage_storage_upload()
-  let input_buf = match
-    @wgpu.device_create_buffer(
-      device,
-      buffer_desc(
-        dataset_buffers.dataset_input_bytes,
-        upload_usage,
-        "mlp_input",
-      ),
-    ) {
-    Ok(b) => b
-    Err(err) => return Err(wgpu_error_to_string(err))
+  // Pre-compute segment info: (segment_offset, segment_effective)
+  let segment_count = ceil_div(effective_count, segment_samples)
+  let segment_info : Array[(Int, Int)] = []
+  for seg = 0; seg < segment_count; seg = seg + 1 {
+    let offset = seg * segment_samples
+    let remaining = effective_count - offset
+    let effective = (if remaining < segment_samples {
+        remaining
+      } else {
+        segment_samples
+      }) /
+      spec.batch_size *
+      spec.batch_size
+    if effective > 0 {
+      segment_info.push((offset, effective))
+    }
   }
+  // Create per-segment buffers and upload data ONCE
+  let seg_input_bufs : Array[@wgpu.Buffer] = []
+  let seg_labels_bufs : Array[@wgpu.Buffer] = []
+  let seg_indices_bufs : Array[@wgpu.Buffer] = []
+  let seg_dataset_buffers_arr : Array[@nn.MlpDatasetBufferPlan] = []
+  let seg_loss_resources_arr : Array[@nn.MlpLossResourcePlan] = []
   let hidden_buf = match @wgpu.device_create_buffer(device, resources.hidden) {
     Ok(b) => b
     Err(err) => return Err(wgpu_error_to_string(err))
@@ -882,19 +892,6 @@ async fn gpu_train(
     Err(err) => return Err(wgpu_error_to_string(err))
   }
   let bias2_buf = match @wgpu.device_create_buffer(device, resources.bias2) {
-    Ok(b) => b
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  let labels_buf = match
-    @wgpu.device_create_buffer(device, loss_resources.labels) {
-    Ok(b) => b
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  let indices_buf = match
-    @wgpu.device_create_buffer(
-      device,
-      buffer_desc(dataset_buffers.indices_bytes, upload_usage, "mlp_indices"),
-    ) {
     Ok(b) => b
     Err(err) => return Err(wgpu_error_to_string(err))
   }
@@ -943,6 +940,57 @@ async fn gpu_train(
     @wgpu.device_create_buffer(device, buffer_desc(4, upload_usage, "mlp_lr")) {
     Ok(b) => b
     Err(err) => return Err(wgpu_error_to_string(err))
+  }
+  // Create per-segment buffers and upload data ONCE (before epoch loop)
+  for si = 0; si < segment_info.length(); si = si + 1 {
+    let (seg_offset, seg_effective) = segment_info[si]
+    let seg_db = match @nn.mlp_plan_dataset_buffers(spec, seg_effective) {
+      Ok(p) => p
+      Err(err) => return Err(err.to_string())
+    }
+    let seg_lr = match
+      @nn.mlp_plan_loss_resources_for_dataset(spec, seg_effective) {
+      Ok(r) => r
+      Err(err) => return Err(err.to_string())
+    }
+    let s_input_buf = match
+      @wgpu.device_create_buffer(
+        device,
+        buffer_desc(seg_db.dataset_input_bytes, upload_usage, "mlp_input_seg"),
+      ) {
+      Ok(b) => b
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let s_labels_buf = match @wgpu.device_create_buffer(device, seg_lr.labels) {
+      Ok(b) => b
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let s_indices_buf = match
+      @wgpu.device_create_buffer(
+        device,
+        buffer_desc(seg_db.indices_bytes, upload_usage, "mlp_indices_seg"),
+      ) {
+      Ok(b) => b
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    // Upload data ONCE
+    let input_offset = seg_offset * spec.input_size
+    let input_len = seg_effective * spec.input_size
+    let seg_inputs = slice_f32_offset(all_inputs, input_offset, input_len)
+    let seg_labels = slice_i32_offset(all_labels, seg_offset, seg_effective)
+    let input_bytes = float_array_to_bytes(seg_inputs)
+    let label_bytes = labels_array_to_bytes(seg_labels)
+    ignore(
+      @wgpu.queue_write_buffer(queue, s_input_buf, 0, input_bytes.to_array()),
+    )
+    ignore(
+      @wgpu.queue_write_buffer(queue, s_labels_buf, 0, label_bytes.to_array()),
+    )
+    seg_input_bufs.push(s_input_buf)
+    seg_labels_bufs.push(s_labels_buf)
+    seg_indices_bufs.push(s_indices_buf)
+    seg_dataset_buffers_arr.push(seg_db)
+    seg_loss_resources_arr.push(seg_lr)
   }
   let layer1_module = match
     @wgpu.device_create_shader_module(
@@ -1262,145 +1310,368 @@ async fn gpu_train(
     Ok(l) => l
     Err(err) => return Err(wgpu_error_to_string(err))
   }
-  let layer1_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        layer1_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(
-              input_buf,
+  // Per-segment bind groups (segment-specific: input, labels, indices buffers differ)
+  let seg_layer1_groups : Array[@wgpu.BindGroup] = []
+  let seg_layer2_loss_groups : Array[@wgpu.BindGroup] = []
+  let seg_indices_groups : Array[@wgpu.BindGroup] = []
+  let seg_grad_update_w1_groups : Array[@wgpu.BindGroup] = []
+  let seg_grad_update_b1_groups : Array[@wgpu.BindGroup] = []
+  let seg_grad_update_w2_groups : Array[@wgpu.BindGroup] = []
+  let seg_grad_update_b2_groups : Array[@wgpu.BindGroup] = []
+  for si = 0; si < segment_info.length(); si = si + 1 {
+    let seg_ib = seg_input_bufs[si]
+    let seg_lb = seg_labels_bufs[si]
+    let seg_idx = seg_indices_bufs[si]
+    let seg_db = seg_dataset_buffers_arr[si]
+    let seg_lr = seg_loss_resources_arr[si]
+    let g_layer1 = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          layer1_layout,
+          [
+            @wgpu.bind_group_entry(
               0,
-              dataset_buffers.dataset_input_bytes,
+              @wgpu.binding_resource_buffer(
+                seg_ib,
+                0,
+                seg_db.dataset_input_bytes,
+              ),
             ),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
+            ),
+            @wgpu.bind_group_entry(
+              2,
+              @wgpu.binding_resource_buffer(
+                weight1_buf,
+                0,
+                resources.weight1.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              3,
+              @wgpu.binding_resource_buffer(bias1_buf, 0, resources.bias1.size),
+            ),
+            @wgpu.bind_group_entry(
+              4,
+              @wgpu.binding_resource_buffer(
+                hidden_buf,
+                0,
+                resources.hidden.size,
+              ),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let g_layer2_loss = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          layer2_loss_layout,
+          [
+            @wgpu.bind_group_entry(
               0,
-              dataset_buffers.indices_bytes,
+              @wgpu.binding_resource_buffer(
+                hidden_buf,
+                0,
+                resources.hidden.size,
+              ),
             ),
-          ),
-          @wgpu.bind_group_entry(
-            2,
-            @wgpu.binding_resource_buffer(
-              weight1_buf,
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(
+                weight2_buf,
+                0,
+                resources.weight2.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              2,
+              @wgpu.binding_resource_buffer(bias2_buf, 0, resources.bias2.size),
+            ),
+            @wgpu.bind_group_entry(
+              3,
+              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
+            ),
+            @wgpu.bind_group_entry(
+              4,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
+            ),
+            @wgpu.bind_group_entry(
+              5,
+              @wgpu.binding_resource_buffer(
+                loss_buf,
+                0,
+                loss_resources.loss.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              6,
+              @wgpu.binding_resource_buffer(
+                probs_buf,
+                0,
+                loss_resources.probs.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              7,
+              @wgpu.binding_resource_buffer(
+                correct_buf,
+                0,
+                loss_resources.correct.size,
+              ),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let g_indices = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          indices_layout,
+          [
+            @wgpu.bind_group_entry(
               0,
-              resources.weight1.size,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
             ),
-          ),
-          @wgpu.bind_group_entry(
-            3,
-            @wgpu.binding_resource_buffer(bias1_buf, 0, resources.bias1.size),
-          ),
-          @wgpu.bind_group_entry(
-            4,
-            @wgpu.binding_resource_buffer(hidden_buf, 0, resources.hidden.size),
-          ),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(
+                shuffle_params_buf,
+                0,
+                seg_db.shuffle_params_bytes,
+              ),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let g_grad_w1 = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          grad_update_w1_layout,
+          [
+            @wgpu.bind_group_entry(
+              0,
+              @wgpu.binding_resource_buffer(
+                seg_ib,
+                0,
+                seg_db.dataset_input_bytes,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(
+                hidden_buf,
+                0,
+                resources.hidden.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              2,
+              @wgpu.binding_resource_buffer(
+                probs_buf,
+                0,
+                loss_resources.probs.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              3,
+              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
+            ),
+            @wgpu.bind_group_entry(
+              4,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
+            ),
+            @wgpu.bind_group_entry(
+              5,
+              @wgpu.binding_resource_buffer(
+                weight2_buf,
+                0,
+                resources.weight2.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              6,
+              @wgpu.binding_resource_buffer(
+                weight1_buf,
+                0,
+                resources.weight1.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              7,
+              @wgpu.binding_resource_buffer(lr_buf, 0, 4),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let g_grad_b1 = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          grad_update_b1_layout,
+          [
+            @wgpu.bind_group_entry(
+              0,
+              @wgpu.binding_resource_buffer(
+                hidden_buf,
+                0,
+                resources.hidden.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(
+                probs_buf,
+                0,
+                loss_resources.probs.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              2,
+              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
+            ),
+            @wgpu.bind_group_entry(
+              3,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
+            ),
+            @wgpu.bind_group_entry(
+              4,
+              @wgpu.binding_resource_buffer(
+                weight2_buf,
+                0,
+                resources.weight2.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              5,
+              @wgpu.binding_resource_buffer(bias1_buf, 0, resources.bias1.size),
+            ),
+            @wgpu.bind_group_entry(
+              6,
+              @wgpu.binding_resource_buffer(lr_buf, 0, 4),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let g_grad_w2 = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          grad_update_w2_layout,
+          [
+            @wgpu.bind_group_entry(
+              0,
+              @wgpu.binding_resource_buffer(
+                hidden_buf,
+                0,
+                resources.hidden.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(
+                probs_buf,
+                0,
+                loss_resources.probs.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              2,
+              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
+            ),
+            @wgpu.bind_group_entry(
+              3,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
+            ),
+            @wgpu.bind_group_entry(
+              4,
+              @wgpu.binding_resource_buffer(
+                weight2_buf,
+                0,
+                resources.weight2.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              5,
+              @wgpu.binding_resource_buffer(lr_buf, 0, 4),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    let g_grad_b2 = match
+      @wgpu.device_create_bind_group(
+        device,
+        @wgpu.bind_group_descriptor(
+          grad_update_b2_layout,
+          [
+            @wgpu.bind_group_entry(
+              0,
+              @wgpu.binding_resource_buffer(
+                probs_buf,
+                0,
+                loss_resources.probs.size,
+              ),
+            ),
+            @wgpu.bind_group_entry(
+              1,
+              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
+            ),
+            @wgpu.bind_group_entry(
+              2,
+              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
+            ),
+            @wgpu.bind_group_entry(
+              3,
+              @wgpu.binding_resource_buffer(bias2_buf, 0, resources.bias2.size),
+            ),
+            @wgpu.bind_group_entry(
+              4,
+              @wgpu.binding_resource_buffer(lr_buf, 0, 4),
+            ),
+          ],
+          None,
+        ),
+      ) {
+      Ok(g) => g
+      Err(err) => return Err(wgpu_error_to_string(err))
+    }
+    seg_layer1_groups.push(g_layer1)
+    seg_layer2_loss_groups.push(g_layer2_loss)
+    seg_indices_groups.push(g_indices)
+    seg_grad_update_w1_groups.push(g_grad_w1)
+    seg_grad_update_b1_groups.push(g_grad_b1)
+    seg_grad_update_w2_groups.push(g_grad_w2)
+    seg_grad_update_b2_groups.push(g_grad_b2)
   }
-  let layer2_loss_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        layer2_loss_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(hidden_buf, 0, resources.hidden.size),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(
-              weight2_buf,
-              0,
-              resources.weight2.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            2,
-            @wgpu.binding_resource_buffer(bias2_buf, 0, resources.bias2.size),
-          ),
-          @wgpu.bind_group_entry(
-            3,
-            @wgpu.binding_resource_buffer(
-              labels_buf,
-              0,
-              loss_resources.labels.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            4,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
-              0,
-              dataset_buffers.indices_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            5,
-            @wgpu.binding_resource_buffer(loss_buf, 0, loss_resources.loss.size),
-          ),
-          @wgpu.bind_group_entry(
-            6,
-            @wgpu.binding_resource_buffer(
-              probs_buf,
-              0,
-              loss_resources.probs.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            7,
-            @wgpu.binding_resource_buffer(
-              correct_buf,
-              0,
-              loss_resources.correct.size,
-            ),
-          ),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  let indices_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        indices_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
-              0,
-              dataset_buffers.indices_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(
-              shuffle_params_buf,
-              0,
-              dataset_buffers.shuffle_params_bytes,
-            ),
-          ),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
+  // loss_epoch_reduce_group is shared (no segment-specific buffers)
   let loss_epoch_reduce_group = match
     @wgpu.device_create_bind_group(
       device,
@@ -1443,222 +1714,6 @@ async fn gpu_train(
               loss_resources.epoch_seen.size,
             ),
           ),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  // grad_update_w1: input, hidden, probs, labels, indices, weight2[r], weight1[rw], lr
-  let grad_update_w1_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        grad_update_w1_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(
-              input_buf,
-              0,
-              dataset_buffers.dataset_input_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(hidden_buf, 0, resources.hidden.size),
-          ),
-          @wgpu.bind_group_entry(
-            2,
-            @wgpu.binding_resource_buffer(
-              probs_buf,
-              0,
-              loss_resources.probs.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            3,
-            @wgpu.binding_resource_buffer(
-              labels_buf,
-              0,
-              loss_resources.labels.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            4,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
-              0,
-              dataset_buffers.indices_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            5,
-            @wgpu.binding_resource_buffer(
-              weight2_buf,
-              0,
-              resources.weight2.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            6,
-            @wgpu.binding_resource_buffer(
-              weight1_buf,
-              0,
-              resources.weight1.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(7, @wgpu.binding_resource_buffer(lr_buf, 0, 4)),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  // grad_update_b1: hidden, probs, labels, indices, weight2[r], bias1[rw], lr
-  let grad_update_b1_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        grad_update_b1_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(hidden_buf, 0, resources.hidden.size),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(
-              probs_buf,
-              0,
-              loss_resources.probs.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            2,
-            @wgpu.binding_resource_buffer(
-              labels_buf,
-              0,
-              loss_resources.labels.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            3,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
-              0,
-              dataset_buffers.indices_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            4,
-            @wgpu.binding_resource_buffer(
-              weight2_buf,
-              0,
-              resources.weight2.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            5,
-            @wgpu.binding_resource_buffer(bias1_buf, 0, resources.bias1.size),
-          ),
-          @wgpu.bind_group_entry(6, @wgpu.binding_resource_buffer(lr_buf, 0, 4)),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  // grad_update_w2: hidden, probs, labels, indices, weight2[rw], lr
-  let grad_update_w2_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        grad_update_w2_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(hidden_buf, 0, resources.hidden.size),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(
-              probs_buf,
-              0,
-              loss_resources.probs.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            2,
-            @wgpu.binding_resource_buffer(
-              labels_buf,
-              0,
-              loss_resources.labels.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            3,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
-              0,
-              dataset_buffers.indices_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            4,
-            @wgpu.binding_resource_buffer(
-              weight2_buf,
-              0,
-              resources.weight2.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(5, @wgpu.binding_resource_buffer(lr_buf, 0, 4)),
-        ],
-        None,
-      ),
-    ) {
-    Ok(g) => g
-    Err(err) => return Err(wgpu_error_to_string(err))
-  }
-  // grad_update_b2: probs, labels, indices, bias2[rw], lr
-  let grad_update_b2_group = match
-    @wgpu.device_create_bind_group(
-      device,
-      @wgpu.bind_group_descriptor(
-        grad_update_b2_layout,
-        [
-          @wgpu.bind_group_entry(
-            0,
-            @wgpu.binding_resource_buffer(
-              probs_buf,
-              0,
-              loss_resources.probs.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            1,
-            @wgpu.binding_resource_buffer(
-              labels_buf,
-              0,
-              loss_resources.labels.size,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            2,
-            @wgpu.binding_resource_buffer(
-              indices_buf,
-              0,
-              dataset_buffers.indices_bytes,
-            ),
-          ),
-          @wgpu.bind_group_entry(
-            3,
-            @wgpu.binding_resource_buffer(bias2_buf, 0, resources.bias2.size),
-          ),
-          @wgpu.bind_group_entry(4, @wgpu.binding_resource_buffer(lr_buf, 0, 4)),
         ],
         None,
       ),
@@ -1826,6 +1881,43 @@ async fn gpu_train(
     Ok(p) => p
     Err(err) => return Err(wgpu_error_to_string(err))
   }
+  // Per-segment indices pipelines and dispatch_x
+  let seg_indices_pipelines : Array[@wgpu.ComputePipeline] = []
+  let seg_indices_dispatch_x : Array[Int] = []
+  for si = 0; si < segment_info.length(); si = si + 1 {
+    let (_, seg_effective) = segment_info[si]
+    seg_indices_dispatch_x.push(ceil_div(seg_effective, workgroup_size))
+    if seg_effective == segment_samples {
+      seg_indices_pipelines.push(indices_pipeline)
+    } else {
+      let small_shader = match
+        @nn.mlp_dataset_shader_plan(spec, seg_effective, workgroup_size) {
+        Ok(p) => p
+        Err(err) => return Err(err.to_string())
+      }
+      let small_module = match
+        @wgpu.device_create_shader_module(
+          device,
+          @wgpu.shader_module_descriptor(small_shader.indices_wgsl, None),
+        ) {
+        Ok(m) => m
+        Err(err) => return Err(wgpu_error_to_string(err))
+      }
+      let small_pipeline = match
+        @wgpu.device_create_compute_pipeline(
+          device,
+          @wgpu.compute_pipeline_descriptor(
+            indices_pipeline_layout,
+            @wgpu.programmable_stage(small_module, "main"),
+            None,
+          ),
+        ) {
+        Ok(p) => p
+        Err(err) => return Err(wgpu_error_to_string(err))
+      }
+      seg_indices_pipelines.push(small_pipeline)
+    }
+  }
   let w1_bytes = float_array_to_bytes(params.weight1)
   let b1_bytes = float_array_to_bytes(params.bias1)
   let w2_bytes = float_array_to_bytes(params.weight2)
@@ -1838,7 +1930,6 @@ async fn gpu_train(
   ignore(@wgpu.queue_write_buffer(queue, lr_buf, 0, lr_bytes.to_array()))
   let zero_f32_bytes = float_array_to_bytes([Float::from_int(0)])
   let metrics : Array[@nn.MlpTrainMetrics] = []
-  let segment_count = ceil_div(effective_count, segment_samples)
   // Profile accumulators (in ms via UInt64)
   let mut prof_data_upload = 0UL
   let mut prof_forward = 0UL
@@ -1873,33 +1964,10 @@ async fn gpu_train(
       )
     }
     let epoch_seed = if config.shuffle { config.seed + epoch } else { 0 }
-    for segment = 0; segment < segment_count; segment = segment + 1 {
-      let segment_offset = segment * segment_samples
-      let remaining = effective_count - segment_offset
-      let mut segment_effective = if remaining < segment_samples {
-        remaining
-      } else {
-        segment_samples
-      }
-      segment_effective = segment_effective / spec.batch_size * spec.batch_size
-      if segment_effective <= 0 {
-        continue
-      }
-      let input_offset = segment_offset * spec.input_size
-      let input_len = segment_effective * spec.input_size
-      let segment_inputs = slice_f32_offset(all_inputs, input_offset, input_len)
-      let segment_labels = slice_i32_offset(
-        all_labels, segment_offset, segment_effective,
-      )
+    for segment = 0; segment < segment_info.length(); segment = segment + 1 {
+      let (_, segment_effective) = segment_info[segment]
+      // Only shuffle_params + indices dispatch per epoch/segment (no data re-upload)
       let t_upload_start = if profile { @env.now() } else { 0UL }
-      let input_bytes = float_array_to_bytes(segment_inputs)
-      let label_bytes = labels_array_to_bytes(segment_labels)
-      ignore(
-        @wgpu.queue_write_buffer(queue, input_buf, 0, input_bytes.to_array()),
-      )
-      ignore(
-        @wgpu.queue_write_buffer(queue, labels_buf, 0, label_bytes.to_array()),
-      )
       let stride = if config.shuffle && segment_effective == segment_samples {
         shuffle_stride(segment_samples, epoch_seed + segment)
       } else {
@@ -1921,7 +1989,10 @@ async fn gpu_train(
       )
       ignore(
         @wgpu.device_dispatch_compute(
-          device, indices_pipeline, indices_group, indices_dispatch_x,
+          device,
+          seg_indices_pipelines[segment],
+          seg_indices_groups[segment],
+          seg_indices_dispatch_x[segment],
         ),
       )
       if profile {
@@ -1935,7 +2006,7 @@ async fn gpu_train(
         ignore(
           @wgpu.queue_write_buffer(
             queue,
-            indices_buf,
+            seg_indices_bufs[segment],
             0,
             labels_array_to_bytes([batch_start]).to_array(),
           ),
@@ -1948,11 +2019,13 @@ async fn gpu_train(
         @wgpu.dispatch_batch_begin()
         @wgpu.dispatch_batch_add(
           layer1_pipeline,
-          layer1_group,
+          seg_layer1_groups[segment],
           dispatch.layer1_dispatch_x,
         )
         @wgpu.dispatch_batch_add(
-          layer2_loss_pipeline, layer2_loss_group, loss_dispatch_x,
+          layer2_loss_pipeline,
+          seg_layer2_loss_groups[segment],
+          loss_dispatch_x,
         )
         @wgpu.dispatch_batch_submit(device)
         if profile {
@@ -1977,22 +2050,22 @@ async fn gpu_train(
         @wgpu.dispatch_batch_begin()
         @wgpu.dispatch_batch_add(
           grad_update_w1_pipeline,
-          grad_update_w1_group,
+          seg_grad_update_w1_groups[segment],
           train_dispatch.grad_update_w1_dispatch_x,
         )
         @wgpu.dispatch_batch_add(
           grad_update_b1_pipeline,
-          grad_update_b1_group,
+          seg_grad_update_b1_groups[segment],
           train_dispatch.grad_update_b1_dispatch_x,
         )
         @wgpu.dispatch_batch_add(
           grad_update_w2_pipeline,
-          grad_update_w2_group,
+          seg_grad_update_w2_groups[segment],
           train_dispatch.grad_update_w2_dispatch_x,
         )
         @wgpu.dispatch_batch_add(
           grad_update_b2_pipeline,
-          grad_update_b2_group,
+          seg_grad_update_b2_groups[segment],
           train_dispatch.grad_update_b2_dispatch_x,
         )
         @wgpu.dispatch_batch_submit(device)

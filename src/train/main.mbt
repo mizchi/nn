@@ -2000,15 +2000,22 @@ async fn gpu_train(
         prof_data_upload = prof_data_upload + (@env.now() - t_upload_start)
       }
       let segment_steps = segment_effective / spec.batch_size
+      // Reusable 4-byte buffer for batch_start (avoid per-step allocation)
+      let batch_start_bytes : Array[Byte] = [b'\x00', b'\x00', b'\x00', b'\x00']
       for step = 0; step < segment_steps; step = step + 1 {
         let batch_start = step * spec.batch_size
+        let bs = Int::reinterpret_as_uint(batch_start)
+        batch_start_bytes[0] = (bs >> 0).to_byte()
+        batch_start_bytes[1] = (bs >> 8).to_byte()
+        batch_start_bytes[2] = (bs >> 16).to_byte()
+        batch_start_bytes[3] = (bs >> 24).to_byte()
         let t_step_upload = if profile { @env.now() } else { 0UL }
         ignore(
           @wgpu.queue_write_buffer(
             queue,
             seg_indices_bufs[segment],
             0,
-            labels_array_to_bytes([batch_start]).to_array(),
+            batch_start_bytes,
           ),
         )
         if profile {

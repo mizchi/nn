@@ -1934,7 +1934,7 @@ async fn gpu_train(
   let mut prof_data_upload = 0UL
   let mut prof_forward = 0UL
   let prof_loss_reduce = 0UL
-  let mut prof_backward = 0UL
+  let prof_backward = 0UL
   let mut prof_readback = 0UL
   for epoch = 0; epoch < config.epochs; epoch = epoch + 1 {
     if !bench_no_readback {
@@ -2014,9 +2014,10 @@ async fn gpu_train(
         if profile {
           prof_data_upload = prof_data_upload + (@env.now() - t_step_upload)
         }
-        // Forward pass (layer1 + layer2_loss) via batch dispatch
+        // Forward + backward + loss reduce in single batch dispatch
         let t_fwd = if profile { @env.now() } else { 0UL }
         @wgpu.dispatch_batch_begin()
+        // Forward: layer1 → layer2_loss
         @wgpu.dispatch_batch_add(
           layer1_pipeline,
           seg_layer1_groups[segment],
@@ -2027,14 +2028,7 @@ async fn gpu_train(
           seg_layer2_loss_groups[segment],
           loss_dispatch_x,
         )
-        @wgpu.dispatch_batch_submit(device)
-        if profile {
-          @wgpu.device_poll(device, true)
-          prof_forward = prof_forward + (@env.now() - t_fwd)
-        }
-        // Backward pass (grad updates + loss reduce) via single batch dispatch
-        let t_bwd = if profile { @env.now() } else { 0UL }
-        @wgpu.dispatch_batch_begin()
+        // Loss reduce (accumulate epoch metrics)
         if !bench_no_readback {
           @wgpu.dispatch_batch_add(
             loss_epoch_reduce_pipeline,
@@ -2042,6 +2036,7 @@ async fn gpu_train(
             loss_reduce_dispatch_x,
           )
         }
+        // Backward: grad updates
         @wgpu.dispatch_batch_add(
           grad_update_w1_pipeline,
           seg_grad_update_w1_groups[segment],
@@ -2065,7 +2060,7 @@ async fn gpu_train(
         @wgpu.dispatch_batch_submit(device)
         if profile {
           @wgpu.device_poll(device, true)
-          prof_backward = prof_backward + (@env.now() - t_bwd)
+          prof_forward = prof_forward + (@env.now() - t_fwd)
         }
       }
     }

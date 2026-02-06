@@ -76,5 +76,13 @@ info:
 clean:
     moon clean
 
+# Golden data: generate (requires Python + numpy)
+golden-gen:
+    python3 tools/gen_golden.py
+
+# Golden data: verify MoonBit forward pass against PyTorch
+golden-check:
+    moon run --target native src/golden-check
+
 # Pre-release check
 release-check: fmt info check test

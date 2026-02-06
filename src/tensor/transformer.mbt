@@ -35,7 +35,7 @@ pub fn transformer_config(
 
 ///|
 /// Parameters for a single Transformer block
-pub struct TransformerBlockParams {
+pub(all) struct TransformerBlockParams {
   // LayerNorm 1
   ln1_gamma : Tensor
   ln1_beta : Tensor
@@ -56,7 +56,7 @@ pub struct TransformerBlockParams {
 
 ///|
 /// Full Transformer model parameters
-pub struct TransformerParams {
+pub(all) struct TransformerParams {
   token_embedding : Tensor // [vocab_size, d_model]
   pos_embedding : Tensor // [max_seq_len, d_model]
   blocks : Array[TransformerBlockParams]

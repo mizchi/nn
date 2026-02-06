@@ -1933,7 +1933,7 @@ async fn gpu_train(
   // Profile accumulators (in ms via UInt64)
   let mut prof_data_upload = 0UL
   let mut prof_forward = 0UL
-  let mut prof_loss_reduce = 0UL
+  let prof_loss_reduce = 0UL
   let mut prof_backward = 0UL
   let mut prof_readback = 0UL
   for epoch = 0; epoch < config.epochs; epoch = epoch + 1 {
@@ -2032,22 +2032,16 @@ async fn gpu_train(
           @wgpu.device_poll(device, true)
           prof_forward = prof_forward + (@env.now() - t_fwd)
         }
-        // Loss reduce
-        if !bench_no_readback {
-          let t_lr = if profile { @env.now() } else { 0UL }
-          ignore(
-            @wgpu.device_dispatch_compute(
-              device, loss_epoch_reduce_pipeline, loss_epoch_reduce_group, loss_reduce_dispatch_x,
-            ),
-          )
-          if profile {
-            @wgpu.device_poll(device, true)
-            prof_loss_reduce = prof_loss_reduce + (@env.now() - t_lr)
-          }
-        }
-        // Backward pass (grad updates) via batch dispatch
+        // Backward pass (grad updates + loss reduce) via single batch dispatch
         let t_bwd = if profile { @env.now() } else { 0UL }
         @wgpu.dispatch_batch_begin()
+        if !bench_no_readback {
+          @wgpu.dispatch_batch_add(
+            loss_epoch_reduce_pipeline,
+            loss_epoch_reduce_group,
+            loss_reduce_dispatch_x,
+          )
+        }
         @wgpu.dispatch_batch_add(
           grad_update_w1_pipeline,
           seg_grad_update_w1_groups[segment],

@@ -23,8 +23,8 @@ fn forward_single(
   )
   let bias1 = @numbt.vec_view(params.bias1, 0, spec.hidden_size)
   let bias2 = @numbt.vec_view(params.bias2, 0, spec.output_size)
-  @numbt.matmul_vec_bias_relu_into(weight1, input, bias1, hidden_vec)
-  @numbt.matmul_vec_bias_into(weight2, hidden_vec, bias2, logits_vec)
+  @numbt.matmul_vec_bias_relu_into(weight1, input, bias1, output=hidden_vec)
+  @numbt.matmul_vec_bias_into(weight2, hidden_vec, bias2, output=logits_vec)
 }
 
 ///|
@@ -46,7 +46,7 @@ pub fn mlp_eval(
     let mut correct = 0
     for i = 0; i < dataset.count; i = i + 1 {
       forward_single(spec, params, dataset, i, hidden, logits)
-      @numbt.softmax_into(logits_vec, probs_vec)
+      @numbt.softmax_into(input=logits_vec, output=probs_vec)
       let label = dataset.labels[i]
       loss_sum = loss_sum + @numbt.cross_entropy_loss(probs_vec, label)
       let pred = @numbt.vec_argmax(logits_vec)
@@ -133,7 +133,7 @@ pub fn mlp_train(
         for bi = 0; bi < batch_count; bi = bi + 1 {
           let idx = indices[start + bi]
           forward_single(spec, params, dataset, idx, hidden, logits)
-          @numbt.softmax_into(logits_vec, probs_vec)
+          @numbt.softmax_into(input=logits_vec, output=probs_vec)
           let label = dataset.labels[idx]
           loss_sum = loss_sum + @numbt.cross_entropy_loss(probs_vec, label)
           let pred = @numbt.vec_argmax(logits_vec)

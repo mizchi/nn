@@ -36,8 +36,13 @@ pub fn mlp_forward(
       let input_vec = @numbt.vec_view(input, input_offset, spec.input_size)
       let hidden_vec = @numbt.vec_view(hidden, hidden_offset, spec.hidden_size)
       let output_vec = @numbt.vec_view(output, output_offset, spec.output_size)
-      @numbt.matmul_vec_bias_relu_into(weight1, input_vec, bias1, hidden_vec)
-      @numbt.matmul_vec_bias_into(weight2, hidden_vec, bias2, output_vec)
+      @numbt.matmul_vec_bias_relu_into(
+        weight1,
+        input_vec,
+        bias1,
+        output=hidden_vec,
+      )
+      @numbt.matmul_vec_bias_into(weight2, hidden_vec, bias2, output=output_vec)
     }
     { hidden, output }
   })

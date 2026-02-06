@@ -20,20 +20,20 @@ test "vec_ops_basic" {
 
 ///|
 test "matmul_vec_bias_relu" {
-  let mat = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
-  let vec = vec_from_array([10.0, 20.0])
+  let weight = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
+  let input = vec_from_array([10.0, 20.0])
   let bias = vec_from_array([1.0, 1.0, 1.0])
-  let out = vec_new(3, 0.0)
-  matmul_vec_bias_relu_into(mat, vec, bias, out)
-  assert_eq(vec_to_array(out), [91.0, 121.0, 151.0])
+  let output = vec_new(3, 0.0)
+  matmul_vec_bias_relu_into(weight, input, bias, output~)
+  assert_eq(vec_to_array(output), [91.0, 121.0, 151.0])
 }
 
 ///|
 test "softmax_into" {
-  let logits = vec_from_array([0.0, 1.0])
-  let probs = vec_new(2, 0.0)
-  softmax_into(logits, probs)
-  let values = vec_to_array(probs)
+  let input = vec_from_array([0.0, 1.0])
+  let output = vec_new(2, 0.0)
+  softmax_into(input~, output~)
+  let values = vec_to_array(output)
   assert_near(values[0], 0.26894, 0.0001)
   assert_near(values[1], 0.73105, 0.0001)
 }
@@ -67,25 +67,25 @@ test "vec_nrm2" {
 
 ///|
 test "matmul_vec_blas_into" {
-  let mat = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
-  let vec = vec_from_array([10.0, 20.0])
-  let out = vec_new(3, 0.0)
-  matmul_vec_blas_into(mat, vec, out)
-  // out[j] = sum_i(vec[i] * mat[i, j])
-  // out[0] = 10*1 + 20*4 = 90
-  // out[1] = 10*2 + 20*5 = 120
-  // out[2] = 10*3 + 20*6 = 150
-  assert_eq(vec_to_array(out), [90.0, 120.0, 150.0])
+  let weight = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
+  let input = vec_from_array([10.0, 20.0])
+  let output = vec_new(3, 0.0)
+  matmul_vec_blas_into(weight, input, output~)
+  // output[j] = sum_i(input[i] * weight[i, j])
+  // output[0] = 10*1 + 20*4 = 90
+  // output[1] = 10*2 + 20*5 = 120
+  // output[2] = 10*3 + 20*6 = 150
+  assert_eq(vec_to_array(output), [90.0, 120.0, 150.0])
 }
 
 ///|
 test "matmul_vec_bias_relu_blas" {
-  let mat = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
-  let vec = vec_from_array([10.0, 20.0])
+  let weight = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
+  let input = vec_from_array([10.0, 20.0])
   let bias = vec_from_array([1.0, 1.0, 1.0])
-  let out = vec_new(3, 0.0)
-  matmul_vec_bias_relu_blas_into(mat, vec, bias, out)
-  assert_eq(vec_to_array(out), [91.0, 121.0, 151.0])
+  let output = vec_new(3, 0.0)
+  matmul_vec_bias_relu_blas_into(weight, input, bias, output~)
+  assert_eq(vec_to_array(output), [91.0, 121.0, 151.0])
 }
 
 ///|
@@ -695,11 +695,7 @@ test "np_vector_norm_3x3" {
   // From NumPy: x = np.arange(9).reshape((3, 3))
   // actual = np.linalg.vector_norm(x) ≈ 14.2828
   // ||[0,1,2,3,4,5,6,7,8]|| = sqrt(0+1+4+9+16+25+36+49+64) = sqrt(204) ≈ 14.2828
-  let x = mat_view(
-    [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-    3,
-    3,
-  )
+  let x = mat_view([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 3, 3)
   let v = mat_flatten(x)
   let norm = vec_nrm2(v)
   assert_near(norm, 14.2828, 0.001)
@@ -1223,7 +1219,7 @@ test "fmat_svd_2x2" {
       // U and Vt should be orthogonal (U @ U^T = I)
       assert_near(
         mat_at(u_mat, 0, 0) * mat_at(u_mat, 0, 0) +
-          mat_at(u_mat, 0, 1) * mat_at(u_mat, 0, 1),
+        mat_at(u_mat, 0, 1) * mat_at(u_mat, 0, 1),
         1.0,
         0.001,
       )

@@ -9,10 +9,20 @@ extern "C" fn numbt_vsort_asc(data : FixedArray[Byte], n : Int) -> Unit = "numbt
 extern "C" fn numbt_vsort_desc(data : FixedArray[Byte], n : Int) -> Unit = "numbt_vsort_desc"
 
 ///|
-extern "C" fn numbt_vexp(src : FixedArray[Byte], dst : FixedArray[Byte], n : Int) -> Unit = "numbt_vexp"
+extern "C" fn numbt_vexp(
+  src : FixedArray[Byte],
+  dst : FixedArray[Byte],
+  n : Int,
+) -> Unit = "numbt_vexp"
 
 ///|
-extern "C" fn numbt_outer(a : FixedArray[Byte], b : FixedArray[Byte], out : FixedArray[Byte], m : Int, n : Int) -> Unit = "numbt_outer"
+extern "C" fn numbt_outer(
+  a : FixedArray[Byte],
+  b : FixedArray[Byte],
+  out : FixedArray[Byte],
+  m : Int,
+  n : Int,
+) -> Unit = "numbt_outer"
 
 ///|
 extern "C" fn numbt_seed(seed : Int) -> Unit = "numbt_seed"
@@ -27,7 +37,11 @@ extern "C" fn numbt_randn(out : FixedArray[Byte], n : Int) -> Unit = "numbt_rand
 extern "C" fn numbt_inv(a : FixedArray[Byte], n : Int) -> Int = "numbt_inv"
 
 ///|
-extern "C" fn numbt_solve(a : FixedArray[Byte], b : FixedArray[Byte], n : Int) -> Int = "numbt_solve"
+extern "C" fn numbt_solve(
+  a : FixedArray[Byte],
+  b : FixedArray[Byte],
+  n : Int,
+) -> Int = "numbt_solve"
 
 ///|
 extern "C" fn numbt_svd(
@@ -36,11 +50,15 @@ extern "C" fn numbt_svd(
   s : FixedArray[Byte],
   vt : FixedArray[Byte],
   m : Int,
-  n : Int
+  n : Int,
 ) -> Int = "numbt_svd"
 
 ///|
-extern "C" fn numbt_eig_symmetric(a : FixedArray[Byte], w : FixedArray[Byte], n : Int) -> Int = "numbt_eig_symmetric"
+extern "C" fn numbt_eig_symmetric(
+  a : FixedArray[Byte],
+  w : FixedArray[Byte],
+  n : Int,
+) -> Int = "numbt_eig_symmetric"
 
 ///|
 extern "C" fn numbt_cholesky(a : FixedArray[Byte], n : Int) -> Int = "numbt_cholesky"
@@ -51,14 +69,23 @@ extern "C" fn numbt_qr(
   q : FixedArray[Byte],
   r : FixedArray[Byte],
   m : Int,
-  n : Int
+  n : Int,
 ) -> Int = "numbt_qr"
 
 ///|
-extern "C" fn numbt_det(a : FixedArray[Byte], det : FixedArray[Byte], n : Int) -> Int = "numbt_det"
+extern "C" fn numbt_det(
+  a : FixedArray[Byte],
+  det : FixedArray[Byte],
+  n : Int,
+) -> Int = "numbt_det"
 
 ///|
-extern "C" fn numbt_lstsq(a : FixedArray[Byte], b : FixedArray[Byte], m : Int, n : Int) -> Int = "numbt_lstsq"
+extern "C" fn numbt_lstsq(
+  a : FixedArray[Byte],
+  b : FixedArray[Byte],
+  m : Int,
+  n : Int,
+) -> Int = "numbt_lstsq"
 
 ///|
 fn float_arr_to_bytes(arr : Array[Float]) -> FixedArray[Byte] {
@@ -87,36 +114,42 @@ fn bytes_to_float_arr(bytes : FixedArray[Byte], count : Int) -> Array[Float] {
 }
 
 // ============================================================================
-// Fast Matrix (FMat) - FixedArray[Byte] based for LAPACK operations
+// LapackMat - FixedArray[Byte] based for LAPACK operations
 // ============================================================================
 
 ///|
-/// Fast Matrix using FixedArray[Byte] for zero-copy LAPACK operations
-pub struct FMat {
+/// Matrix type optimized for LAPACK operations (SVD, eigenvalues, etc).
+///
+/// Uses FixedArray[Byte] for zero-copy interop with C LAPACK functions.
+/// Convert from Mat using `fmat_from_mat`, back to Mat using `fmat_to_mat`.
+pub struct LapackMat {
   data : FixedArray[Byte]
   rows : Int
   cols : Int
 }
 
+// Note: FMat has been renamed to LapackMat for clarity.
+// The old name is kept as a deprecated alias in the documentation.
+
 ///|
-pub fn fmat_zeros(rows : Int, cols : Int) -> FMat {
+pub fn fmat_zeros(rows : Int, cols : Int) -> LapackMat {
   { data: FixedArray::make(rows * cols * 4, b'\x00'), rows, cols }
 }
 
 ///|
-pub fn fmat_from_mat(m : Mat) -> FMat {
+pub fn fmat_from_mat(m : Mat) -> LapackMat {
   let bytes = float_arr_to_bytes(m.data)
   { data: bytes, rows: m.rows, cols: m.cols }
 }
 
 ///|
-pub fn fmat_to_mat(fm : FMat) -> Mat {
+pub fn fmat_to_mat(fm : LapackMat) -> Mat {
   let arr = bytes_to_float_arr(fm.data, fm.rows * fm.cols)
   mat_view(arr, fm.rows, fm.cols)
 }
 
 ///|
-pub fn fmat_clone(fm : FMat) -> FMat {
+pub fn fmat_clone(fm : LapackMat) -> LapackMat {
   let new_data : FixedArray[Byte] = FixedArray::make(fm.data.length(), b'\x00')
   for i = 0; i < fm.data.length(); i = i + 1 {
     new_data[i] = fm.data[i]
@@ -125,18 +158,18 @@ pub fn fmat_clone(fm : FMat) -> FMat {
 }
 
 ///|
-pub fn fmat_rows(fm : FMat) -> Int {
+pub fn fmat_rows(fm : LapackMat) -> Int {
   fm.rows
 }
 
 ///|
-pub fn fmat_cols(fm : FMat) -> Int {
+pub fn fmat_cols(fm : LapackMat) -> Int {
   fm.cols
 }
 
 ///|
-/// Matrix inverse on FMat (in-place, returns success)
-pub fn fmat_inv(fm : FMat) -> Bool {
+/// Matrix inverse on LapackMat (in-place, returns success)
+pub fn fmat_inv(fm : LapackMat) -> Bool {
   if fm.rows != fm.cols {
     return false
   }
@@ -144,9 +177,9 @@ pub fn fmat_inv(fm : FMat) -> Bool {
 }
 
 ///|
-/// Solve A @ x = b on FMat (modifies both a and b in-place)
+/// Solve A @ x = b on LapackMat (modifies both a and b in-place)
 /// After call, b contains solution x
-pub fn fmat_solve(a : FMat, b : FixedArray[Byte]) -> Bool {
+pub fn fmat_solve(a : LapackMat, b : FixedArray[Byte]) -> Bool {
   if a.rows != a.cols {
     return false
   }
@@ -154,8 +187,8 @@ pub fn fmat_solve(a : FMat, b : FixedArray[Byte]) -> Bool {
 }
 
 ///|
-/// Create FMat identity matrix
-pub fn fmat_eye(n : Int) -> FMat {
+/// Create LapackMat identity matrix
+pub fn fmat_eye(n : Int) -> LapackMat {
   let fm = fmat_zeros(n, n)
   let one_bits = (1.0 : Float).reinterpret_as_int()
   for i = 0; i < n; i = i + 1 {
@@ -169,8 +202,8 @@ pub fn fmat_eye(n : Int) -> FMat {
 }
 
 ///|
-/// Create FMat from random values
-pub fn fmat_randn(rows : Int, cols : Int) -> FMat {
+/// Create LapackMat from random values
+pub fn fmat_randn(rows : Int, cols : Int) -> LapackMat {
   let n = rows * cols
   let data : FixedArray[Byte] = FixedArray::make(n * 4, b'\x00')
   numbt_randn(data, n)
@@ -178,18 +211,18 @@ pub fn fmat_randn(rows : Int, cols : Int) -> FMat {
 }
 
 ///|
-/// FMat matrix multiply using BLAS (C = A @ B)
+/// LapackMat matrix multiply using BLAS (C = A @ B)
 extern "C" fn numbt_sgemm(
   a : FixedArray[Byte],
   b : FixedArray[Byte],
   c : FixedArray[Byte],
   m : Int,
   n : Int,
-  k : Int
+  k : Int,
 ) -> Unit = "numbt_sgemm"
 
 ///|
-pub fn fmat_matmul(a : FMat, b : FMat) -> FMat {
+pub fn fmat_matmul(a : LapackMat, b : LapackMat) -> LapackMat {
   if a.cols != b.rows {
     panic()
   }
@@ -199,8 +232,8 @@ pub fn fmat_matmul(a : FMat, b : FMat) -> FMat {
 }
 
 ///|
-/// FMat add (C = A + B)
-pub fn fmat_add(a : FMat, b : FMat) -> FMat {
+/// LapackMat add (C = A + B)
+pub fn fmat_add(a : LapackMat, b : LapackMat) -> LapackMat {
   if a.rows != b.rows || a.cols != b.cols {
     panic()
   }
@@ -216,7 +249,8 @@ pub fn fmat_add(a : FMat, b : FMat) -> FMat {
       (b.data[idx + 1].to_int() << 8) |
       (b.data[idx + 2].to_int() << 16) |
       (b.data[idx + 3].to_int() << 24)
-    let sum = Float::reinterpret_from_int(a_bits) + Float::reinterpret_from_int(b_bits)
+    let sum = Float::reinterpret_from_int(a_bits) +
+      Float::reinterpret_from_int(b_bits)
     let sum_bits = sum.reinterpret_as_int()
     c.data[idx] = (sum_bits & 0xFF).to_byte()
     c.data[idx + 1] = ((sum_bits >> 8) & 0xFF).to_byte()
@@ -227,8 +261,8 @@ pub fn fmat_add(a : FMat, b : FMat) -> FMat {
 }
 
 ///|
-/// FMat transpose
-pub fn fmat_transpose(a : FMat) -> FMat {
+/// LapackMat transpose
+pub fn fmat_transpose(a : LapackMat) -> LapackMat {
   let t = fmat_zeros(a.cols, a.rows)
   for i = 0; i < a.rows; i = i + 1 {
     for j = 0; j < a.cols; j = j + 1 {
@@ -281,7 +315,7 @@ fn fvec_to_vec(data : FixedArray[Byte], n : Int) -> Vec {
 ///|
 /// SVD decomposition: A = U @ diag(S) @ Vt
 /// Returns (U, S, Vt) or None if failed
-pub fn fmat_svd(a : FMat) -> (FMat, Vec, FMat)? {
+pub fn fmat_svd(a : LapackMat) -> (LapackMat, Vec, LapackMat)? {
   let m = a.rows
   let n = a.cols
   let k = if m < n { m } else { n }
@@ -300,7 +334,7 @@ pub fn fmat_svd(a : FMat) -> (FMat, Vec, FMat)? {
 /// Eigenvalue decomposition for symmetric matrix
 /// Returns (eigenvalues, eigenvectors) or None if failed
 /// Note: input matrix must be symmetric
-pub fn fmat_eig(a : FMat) -> (Vec, FMat)? {
+pub fn fmat_eig(a : LapackMat) -> (Vec, LapackMat)? {
   if a.rows != a.cols {
     return None
   }
@@ -319,7 +353,7 @@ pub fn fmat_eig(a : FMat) -> (Vec, FMat)? {
 /// Cholesky decomposition: A = L @ L^T
 /// Returns lower triangular L or None if failed
 /// Note: input matrix must be symmetric positive definite
-pub fn fmat_cholesky(a : FMat) -> FMat? {
+pub fn fmat_cholesky(a : LapackMat) -> LapackMat? {
   if a.rows != a.cols {
     return None
   }
@@ -341,7 +375,7 @@ pub fn fmat_cholesky(a : FMat) -> FMat? {
 ///|
 /// QR decomposition: A = Q @ R
 /// Returns (Q, R) or None if failed
-pub fn fmat_qr(a : FMat) -> (FMat, FMat)? {
+pub fn fmat_qr(a : LapackMat) -> (LapackMat, LapackMat)? {
   let m = a.rows
   let n = a.cols
   let a_copy = fmat_clone(a)
@@ -357,7 +391,7 @@ pub fn fmat_qr(a : FMat) -> (FMat, FMat)? {
 ///|
 /// Compute determinant of square matrix
 /// Returns determinant or None if failed
-pub fn fmat_det(a : FMat) -> Float? {
+pub fn fmat_det(a : LapackMat) -> Float? {
   if a.rows != a.cols {
     return None
   }
@@ -374,7 +408,7 @@ pub fn fmat_det(a : FMat) -> Float? {
 ///|
 /// Least squares solution: minimize ||A @ x - b||
 /// Returns solution x or None if failed
-pub fn fmat_lstsq(a : FMat, b : Vec) -> Vec? {
+pub fn fmat_lstsq(a : LapackMat, b : Vec) -> Vec? {
   let m = a.rows
   let n = a.cols
   if b.len != m {
@@ -512,10 +546,19 @@ pub fn vec_set(vec : Vec, index : Int, value : Float) -> Unit {
 }
 
 ///|
-pub fn vec_fill(vec : Vec, value : Float) -> Unit {
+/// Fill all elements with a constant value (in-place modification).
+///
+/// Example: `vec_fill_inplace(v, 0.0)` sets all elements to zero.
+pub fn vec_fill_inplace(vec : Vec, value : Float) -> Unit {
   for i = 0; i < vec.len; i = i + 1 {
     vec_set(vec, i, value)
   }
+}
+
+///|
+/// @deprecated Use `vec_fill_inplace` instead.
+pub fn vec_fill(vec : Vec, value : Float) -> Unit {
+  vec_fill_inplace(vec, value)
 }
 
 ///|
@@ -524,71 +567,75 @@ pub fn vec_to_array(vec : Vec) -> Array[Float] {
 }
 
 ///|
-pub fn vec_add_into(out : Vec, left : Vec, right : Vec) -> Unit {
-  vec_check_same_len(out, left)
+/// Element-wise addition: output[i] = left[i] + right[i]
+pub fn vec_add_into(left : Vec, right : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, left)
   vec_check_same_len(left, right)
   for i = 0; i < left.len; i = i + 1 {
-    vec_set(out, i, vec_at(left, i) + vec_at(right, i))
+    vec_set(output, i, vec_at(left, i) + vec_at(right, i))
   }
 }
 
 ///|
-pub fn vec_sub_into(out : Vec, left : Vec, right : Vec) -> Unit {
-  vec_check_same_len(out, left)
+/// Element-wise subtraction: output[i] = left[i] - right[i]
+pub fn vec_sub_into(left : Vec, right : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, left)
   vec_check_same_len(left, right)
   for i = 0; i < left.len; i = i + 1 {
-    vec_set(out, i, vec_at(left, i) - vec_at(right, i))
+    vec_set(output, i, vec_at(left, i) - vec_at(right, i))
   }
 }
 
 ///|
-pub fn vec_mul_into(out : Vec, left : Vec, right : Vec) -> Unit {
-  vec_check_same_len(out, left)
+/// Element-wise multiplication: output[i] = left[i] * right[i]
+pub fn vec_mul_into(left : Vec, right : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, left)
   vec_check_same_len(left, right)
   for i = 0; i < left.len; i = i + 1 {
-    vec_set(out, i, vec_at(left, i) * vec_at(right, i))
+    vec_set(output, i, vec_at(left, i) * vec_at(right, i))
   }
 }
 
 ///|
-pub fn vec_div_into(out : Vec, left : Vec, right : Vec) -> Unit {
-  vec_check_same_len(out, left)
+/// Element-wise division: output[i] = left[i] / right[i]
+pub fn vec_div_into(left : Vec, right : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, left)
   vec_check_same_len(left, right)
   for i = 0; i < left.len; i = i + 1 {
-    vec_set(out, i, vec_at(left, i) / vec_at(right, i))
+    vec_set(output, i, vec_at(left, i) / vec_at(right, i))
   }
 }
 
 ///|
 pub fn vec_add(left : Vec, right : Vec) -> Vec {
   vec_check_same_len(left, right)
-  let out = vec_new(left.len, Float::from_int(0))
-  vec_add_into(out, left, right)
-  out
+  let output = vec_new(left.len, Float::from_int(0))
+  vec_add_into(left, right, output~)
+  output
 }
 
 ///|
 pub fn vec_sub(left : Vec, right : Vec) -> Vec {
   vec_check_same_len(left, right)
-  let out = vec_new(left.len, Float::from_int(0))
-  vec_sub_into(out, left, right)
-  out
+  let output = vec_new(left.len, Float::from_int(0))
+  vec_sub_into(left, right, output~)
+  output
 }
 
 ///|
 pub fn vec_mul(left : Vec, right : Vec) -> Vec {
   vec_check_same_len(left, right)
-  let out = vec_new(left.len, Float::from_int(0))
-  vec_mul_into(out, left, right)
-  out
+  let output = vec_new(left.len, Float::from_int(0))
+  vec_mul_into(left, right, output~)
+  output
 }
 
 ///|
 pub fn vec_div(left : Vec, right : Vec) -> Vec {
   vec_check_same_len(left, right)
-  let out = vec_new(left.len, Float::from_int(0))
-  vec_div_into(out, left, right)
-  out
+  let output = vec_new(left.len, Float::from_int(0))
+  vec_div_into(left, right, output~)
+  output
 }
 
 ///|
@@ -693,6 +740,9 @@ pub fn vec_prod(vec : Vec) -> Float {
 }
 
 ///|
+/// Multiply all elements by a scalar (in-place modification).
+///
+/// Example: `vec_scale_inplace(v, 2.0)` doubles all elements.
 pub fn vec_scale_inplace(vec : Vec, scale : Float) -> Unit {
   for i = 0; i < vec.len; i = i + 1 {
     vec_set(vec, i, vec_at(vec, i) * scale)
@@ -700,10 +750,13 @@ pub fn vec_scale_inplace(vec : Vec, scale : Float) -> Unit {
 }
 
 ///|
-pub fn vec_exp_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise exponential: output[i] = exp(input[i])
+///
+/// Note: For BLAS-accelerated version, use `vec_exp` which uses vvexpf.
+pub fn vec_exp_into(output~ : Vec, input : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, @math.expf(vec_at(input, i)))
+    vec_set(output, i, @math.expf(vec_at(input, i)))
   }
 }
 
@@ -719,126 +772,138 @@ pub fn vec_exp(input : Vec) -> Vec {
 }
 
 ///|
-pub fn vec_log_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise natural logarithm: output[i] = ln(input[i])
+pub fn vec_log_into(output~ : Vec, input : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, @math.lnf(vec_at(input, i)))
+    vec_set(output, i, @math.lnf(vec_at(input, i)))
   }
 }
 
 ///|
 pub fn vec_log(input : Vec) -> Vec {
   let out = vec_zeros(input.len)
-  vec_log_into(out, input)
+  vec_log_into(output=out, input)
   out
 }
 
 ///|
-pub fn vec_sqrt_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise square root: output[i] = sqrt(input[i])
+pub fn vec_sqrt_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, vec_at(input, i).sqrt())
+    vec_set(output, i, vec_at(input, i).sqrt())
   }
 }
 
 ///|
 pub fn vec_sqrt(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_sqrt_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_sqrt_into(input, output~)
+  output
 }
 
 ///|
-pub fn vec_abs_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise absolute value: output[i] = |input[i]|
+pub fn vec_abs_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, vec_at(input, i).abs())
+    vec_set(output, i, vec_at(input, i).abs())
   }
 }
 
 ///|
 pub fn vec_abs(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_abs_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_abs_into(input, output~)
+  output
 }
 
 ///|
-pub fn vec_pow_into(out : Vec, input : Vec, exp : Float) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise power: output[i] = input[i]^exp
+pub fn vec_pow_into(input : Vec, exp : Float, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, @math.powf(vec_at(input, i), exp))
+    vec_set(output, i, @math.powf(vec_at(input, i), exp))
   }
 }
 
 ///|
 pub fn vec_pow(input : Vec, exp : Float) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_pow_into(out, input, exp)
-  out
+  let output = vec_zeros(input.len)
+  vec_pow_into(input, exp, output~)
+  output
 }
 
 ///|
-/// Clip values to [min, max] range
-pub fn vec_clip_into(out : Vec, input : Vec, min : Float, max : Float) -> Unit {
-  vec_check_same_len(out, input)
+/// Clip values to [min, max] range: output[i] = clamp(input[i], min, max)
+pub fn vec_clip_into(
+  input : Vec,
+  min : Float,
+  max : Float,
+  output~ : Vec,
+) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
     let v = vec_at(input, i)
     let clipped = if v < min { min } else if v > max { max } else { v }
-    vec_set(out, i, clipped)
+    vec_set(output, i, clipped)
   }
 }
 
 ///|
 pub fn vec_clip(input : Vec, min : Float, max : Float) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_clip_into(out, input, min, max)
-  out
+  let output = vec_zeros(input.len)
+  vec_clip_into(input, min, max, output~)
+  output
 }
 
 ///|
-pub fn vec_sin_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise sine: output[i] = sin(input[i])
+pub fn vec_sin_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, @math.sinf(vec_at(input, i)))
+    vec_set(output, i, @math.sinf(vec_at(input, i)))
   }
 }
 
 ///|
 pub fn vec_sin(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_sin_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_sin_into(input, output~)
+  output
 }
 
 ///|
-pub fn vec_cos_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise cosine: output[i] = cos(input[i])
+pub fn vec_cos_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, @math.cosf(vec_at(input, i)))
+    vec_set(output, i, @math.cosf(vec_at(input, i)))
   }
 }
 
 ///|
 pub fn vec_cos(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_cos_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_cos_into(input, output~)
+  output
 }
 
 ///|
-pub fn vec_tanh_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise hyperbolic tangent: output[i] = tanh(input[i])
+pub fn vec_tanh_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, @math.tanhf(vec_at(input, i)))
+    vec_set(output, i, @math.tanhf(vec_at(input, i)))
   }
 }
 
 ///|
 pub fn vec_tanh(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_tanh_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_tanh_into(input, output~)
+  output
 }
 
 ///|
@@ -862,17 +927,25 @@ pub fn relu_grad(value : Float) -> Float {
 }
 
 ///|
-pub fn softmax_into(logits : Vec, probs : Vec) -> Unit {
-  vec_check_same_len(logits, probs)
-  let max = vec_max(logits)
+/// Compute softmax probabilities from logits (writes to output buffer).
+///
+/// Parameters:
+/// - `input`: Raw logits (unnormalized scores)
+/// - `output`: Output buffer for normalized probabilities (same length as input)
+///
+/// The softmax is computed with numerical stability (subtracting max).
+/// Result: `output[i] = exp(input[i] - max) / sum(exp(input - max))`
+pub fn softmax_into(input~ : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(input, output)
+  let max = vec_max(input)
   let mut sum = Float::from_int(0)
-  for i = 0; i < logits.len; i = i + 1 {
-    let v = @math.expf(vec_at(logits, i) - max)
-    vec_set(probs, i, v)
+  for i = 0; i < input.len; i = i + 1 {
+    let v = @math.expf(vec_at(input, i) - max)
+    vec_set(output, i, v)
     sum = sum + v
   }
-  for i = 0; i < logits.len; i = i + 1 {
-    vec_set(probs, i, vec_at(probs, i) / sum)
+  for i = 0; i < input.len; i = i + 1 {
+    vec_set(output, i, vec_at(output, i) / sum)
   }
 }
 
@@ -965,10 +1038,17 @@ pub fn mat_set(mat : Mat, row : Int, col : Int, value : Float) -> Unit {
 }
 
 ///|
-pub fn mat_fill(mat : Mat, value : Float) -> Unit {
+/// Fill all elements with a constant value (in-place modification).
+pub fn mat_fill_inplace(mat : Mat, value : Float) -> Unit {
   for i = 0; i < mat.data.length(); i = i + 1 {
     mat.data[i] = value
   }
+}
+
+///|
+/// @deprecated Use `mat_fill_inplace` instead.
+pub fn mat_fill(mat : Mat, value : Float) -> Unit {
+  mat_fill_inplace(mat, value)
 }
 
 ///|
@@ -1000,71 +1080,75 @@ pub fn mat_transpose(mat : Mat) -> Mat {
 }
 
 ///|
-pub fn mat_add_into(out : Mat, a : Mat, b : Mat) -> Unit {
-  mat_check_same_shape(out, a)
+/// Element-wise matrix addition: output[i,j] = a[i,j] + b[i,j]
+pub fn mat_add_into(a : Mat, b : Mat, output~ : Mat) -> Unit {
+  mat_check_same_shape(output, a)
   mat_check_same_shape(a, b)
   for i = 0; i < a.data.length(); i = i + 1 {
-    out.data[i] = a.data[i] + b.data[i]
+    output.data[i] = a.data[i] + b.data[i]
   }
 }
 
 ///|
-pub fn mat_sub_into(out : Mat, a : Mat, b : Mat) -> Unit {
-  mat_check_same_shape(out, a)
+/// Element-wise matrix subtraction: output[i,j] = a[i,j] - b[i,j]
+pub fn mat_sub_into(a : Mat, b : Mat, output~ : Mat) -> Unit {
+  mat_check_same_shape(output, a)
   mat_check_same_shape(a, b)
   for i = 0; i < a.data.length(); i = i + 1 {
-    out.data[i] = a.data[i] - b.data[i]
+    output.data[i] = a.data[i] - b.data[i]
   }
 }
 
 ///|
-pub fn mat_mul_into(out : Mat, a : Mat, b : Mat) -> Unit {
-  mat_check_same_shape(out, a)
+/// Element-wise matrix multiplication: output[i,j] = a[i,j] * b[i,j]
+pub fn mat_mul_into(a : Mat, b : Mat, output~ : Mat) -> Unit {
+  mat_check_same_shape(output, a)
   mat_check_same_shape(a, b)
   for i = 0; i < a.data.length(); i = i + 1 {
-    out.data[i] = a.data[i] * b.data[i]
+    output.data[i] = a.data[i] * b.data[i]
   }
 }
 
 ///|
-pub fn mat_div_into(out : Mat, a : Mat, b : Mat) -> Unit {
-  mat_check_same_shape(out, a)
+/// Element-wise matrix division: output[i,j] = a[i,j] / b[i,j]
+pub fn mat_div_into(a : Mat, b : Mat, output~ : Mat) -> Unit {
+  mat_check_same_shape(output, a)
   mat_check_same_shape(a, b)
   for i = 0; i < a.data.length(); i = i + 1 {
-    out.data[i] = a.data[i] / b.data[i]
+    output.data[i] = a.data[i] / b.data[i]
   }
 }
 
 ///|
 pub fn mat_add(a : Mat, b : Mat) -> Mat {
   mat_check_same_shape(a, b)
-  let out = mat_zeros(a.rows, a.cols)
-  mat_add_into(out, a, b)
-  out
+  let output = mat_zeros(a.rows, a.cols)
+  mat_add_into(a, b, output~)
+  output
 }
 
 ///|
 pub fn mat_sub(a : Mat, b : Mat) -> Mat {
   mat_check_same_shape(a, b)
-  let out = mat_zeros(a.rows, a.cols)
-  mat_sub_into(out, a, b)
-  out
+  let output = mat_zeros(a.rows, a.cols)
+  mat_sub_into(a, b, output~)
+  output
 }
 
 ///|
 pub fn mat_mul(a : Mat, b : Mat) -> Mat {
   mat_check_same_shape(a, b)
-  let out = mat_zeros(a.rows, a.cols)
-  mat_mul_into(out, a, b)
-  out
+  let output = mat_zeros(a.rows, a.cols)
+  mat_mul_into(a, b, output~)
+  output
 }
 
 ///|
 pub fn mat_div(a : Mat, b : Mat) -> Mat {
   mat_check_same_shape(a, b)
-  let out = mat_zeros(a.rows, a.cols)
-  mat_div_into(out, a, b)
-  out
+  let output = mat_zeros(a.rows, a.cols)
+  mat_div_into(a, b, output~)
+  output
 }
 
 ///|
@@ -1146,6 +1230,9 @@ pub fn mat_scale_inplace(mat : Mat, scalar : Float) -> Unit {
 
 ///|
 /// Matrix multiplication using BLAS: C = A @ B
+///
+/// Equivalent to NumPy's `@` operator or `np.matmul`.
+/// Requires: a.cols == b.rows
 pub fn mat_matmul(a : Mat, b : Mat) -> Mat {
   if a.cols != b.rows {
     panic()
@@ -1153,6 +1240,14 @@ pub fn mat_matmul(a : Mat, b : Mat) -> Mat {
   let out = mat_zeros(a.rows, b.cols)
   @blas.sgemm(a.data, b.data, out.data, a.rows, b.cols, a.cols)
   out
+}
+
+///|
+/// Matrix multiplication method: self @ other
+///
+/// Example: `let c = a.matmul(b)` is equivalent to `mat_matmul(a, b)`
+pub fn Mat::matmul(self : Mat, other : Mat) -> Mat {
+  mat_matmul(self, other)
 }
 
 ///|
@@ -1327,67 +1422,61 @@ pub fn vec_all(v : Vec) -> Bool {
 
 ///|
 /// Element-wise sign: -1 for negative, 0 for zero, 1 for positive
-pub fn vec_sign_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+pub fn vec_sign_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   let one : Float = 1.0
   let neg_one : Float = -1.0
   let zero : Float = 0.0
   for i = 0; i < input.len; i = i + 1 {
     let v = vec_at(input, i)
-    let s = if v > zero {
-      one
-    } else if v < zero {
-      neg_one
-    } else {
-      zero
-    }
-    vec_set(out, i, s)
+    let s = if v > zero { one } else if v < zero { neg_one } else { zero }
+    vec_set(output, i, s)
   }
 }
 
 ///|
 pub fn vec_sign(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_sign_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_sign_into(input, output~)
+  output
 }
 
 ///|
-/// Element-wise maximum of two vectors
-pub fn vec_maximum_into(out : Vec, a : Vec, b : Vec) -> Unit {
-  vec_check_same_len(out, a)
+/// Element-wise maximum of two vectors: output[i] = max(a[i], b[i])
+pub fn vec_maximum_into(a : Vec, b : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, a)
   vec_check_same_len(a, b)
   for i = 0; i < a.len; i = i + 1 {
     let va = vec_at(a, i)
     let vb = vec_at(b, i)
-    vec_set(out, i, if va > vb { va } else { vb })
+    vec_set(output, i, if va > vb { va } else { vb })
   }
 }
 
 ///|
 pub fn vec_maximum(a : Vec, b : Vec) -> Vec {
-  let out = vec_zeros(a.len)
-  vec_maximum_into(out, a, b)
-  out
+  let output = vec_zeros(a.len)
+  vec_maximum_into(a, b, output~)
+  output
 }
 
 ///|
-/// Element-wise minimum of two vectors
-pub fn vec_minimum_into(out : Vec, a : Vec, b : Vec) -> Unit {
-  vec_check_same_len(out, a)
+/// Element-wise minimum of two vectors: output[i] = min(a[i], b[i])
+pub fn vec_minimum_into(a : Vec, b : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, a)
   vec_check_same_len(a, b)
   for i = 0; i < a.len; i = i + 1 {
     let va = vec_at(a, i)
     let vb = vec_at(b, i)
-    vec_set(out, i, if va < vb { va } else { vb })
+    vec_set(output, i, if va < vb { va } else { vb })
   }
 }
 
 ///|
 pub fn vec_minimum(a : Vec, b : Vec) -> Vec {
-  let out = vec_zeros(a.len)
-  vec_minimum_into(out, a, b)
-  out
+  let output = vec_zeros(a.len)
+  vec_minimum_into(a, b, output~)
+  output
 }
 
 // ============================================================================
@@ -1419,50 +1508,76 @@ pub fn vec_reshape(v : Vec, rows : Int, cols : Int) -> Mat {
 }
 
 ///|
-pub fn matmul_vec_into(mat : Mat, vec : Vec, out : Vec) -> Unit {
-  mat_check_vec_dims(mat, vec, out)
-  for j = 0; j < mat.cols; j = j + 1 {
+/// Matrix-vector multiply: output = weight^T @ input
+///
+/// Parameters:
+/// - `weight`: Matrix of shape (in_dim, out_dim)
+/// - `input`: Input vector of length in_dim
+/// - `output`: Output buffer of length out_dim
+///
+/// Computes: `output[j] = sum_i(input[i] * weight[i, j])`
+pub fn matmul_vec_into(weight : Mat, input : Vec, output~ : Vec) -> Unit {
+  mat_check_vec_dims(weight, input, output)
+  for j = 0; j < weight.cols; j = j + 1 {
     let mut acc = Float::from_int(0)
-    for i = 0; i < mat.rows; i = i + 1 {
-      acc = acc + vec_at(vec, i) * mat.data[i * mat.cols + j]
+    for i = 0; i < weight.rows; i = i + 1 {
+      acc = acc + vec_at(input, i) * weight.data[i * weight.cols + j]
     }
-    vec_set(out, j, acc)
+    vec_set(output, j, acc)
   }
 }
 
 ///|
+/// Matrix-vector multiply with bias: output = weight^T @ input + bias
+///
+/// Parameters:
+/// - `weight`: Matrix of shape (in_dim, out_dim)
+/// - `input`: Input vector of length in_dim
+/// - `bias`: Bias vector of length out_dim
+/// - `output`: Output buffer of length out_dim
+///
+/// Computes: `output[j] = bias[j] + sum_i(input[i] * weight[i, j])`
 pub fn matmul_vec_bias_into(
-  mat : Mat,
-  vec : Vec,
+  weight : Mat,
+  input : Vec,
   bias : Vec,
-  out : Vec,
+  output~ : Vec,
 ) -> Unit {
-  mat_check_vec_dims(mat, vec, out)
-  vec_check_same_len(bias, out)
-  for j = 0; j < mat.cols; j = j + 1 {
+  mat_check_vec_dims(weight, input, output)
+  vec_check_same_len(bias, output)
+  for j = 0; j < weight.cols; j = j + 1 {
     let mut acc = vec_at(bias, j)
-    for i = 0; i < mat.rows; i = i + 1 {
-      acc = acc + vec_at(vec, i) * mat.data[i * mat.cols + j]
+    for i = 0; i < weight.rows; i = i + 1 {
+      acc = acc + vec_at(input, i) * weight.data[i * weight.cols + j]
     }
-    vec_set(out, j, acc)
+    vec_set(output, j, acc)
   }
 }
 
 ///|
+/// Matrix-vector multiply with bias and ReLU: output = relu(weight^T @ input + bias)
+///
+/// Parameters:
+/// - `weight`: Matrix of shape (in_dim, out_dim)
+/// - `input`: Input vector of length in_dim
+/// - `bias`: Bias vector of length out_dim
+/// - `output`: Output buffer of length out_dim
+///
+/// Computes: `output[j] = max(0, bias[j] + sum_i(input[i] * weight[i, j]))`
 pub fn matmul_vec_bias_relu_into(
-  mat : Mat,
-  vec : Vec,
+  weight : Mat,
+  input : Vec,
   bias : Vec,
-  out : Vec,
+  output~ : Vec,
 ) -> Unit {
-  mat_check_vec_dims(mat, vec, out)
-  vec_check_same_len(bias, out)
-  for j = 0; j < mat.cols; j = j + 1 {
+  mat_check_vec_dims(weight, input, output)
+  vec_check_same_len(bias, output)
+  for j = 0; j < weight.cols; j = j + 1 {
     let mut acc = vec_at(bias, j)
-    for i = 0; i < mat.rows; i = i + 1 {
-      acc = acc + vec_at(vec, i) * mat.data[i * mat.cols + j]
+    for i = 0; i < weight.rows; i = i + 1 {
+      acc = acc + vec_at(input, i) * weight.data[i * weight.cols + j]
     }
-    vec_set(out, j, relu(acc))
+    vec_set(output, j, relu(acc))
   }
 }
 
@@ -1614,37 +1729,50 @@ pub fn vec_axpy(alpha : Float, x : Vec, y : Vec) -> Unit {
 // ============================================================================
 
 ///|
-/// Matrix-vector multiply using BLAS sgemv: out = mat^T @ vec
-pub fn matmul_vec_blas_into(mat : Mat, vec : Vec, out : Vec) -> Unit {
-  mat_check_vec_dims(mat, vec, out)
-  @blas.sgemv_trans(mat.data, vec.data, out.data, mat.rows, mat.cols)
+/// Matrix-vector multiply using BLAS sgemv: output = weight^T @ input
+///
+/// Uses Accelerate framework's BLAS for optimal performance.
+pub fn matmul_vec_blas_into(weight : Mat, input : Vec, output~ : Vec) -> Unit {
+  mat_check_vec_dims(weight, input, output)
+  @blas.sgemv_trans(
+    weight.data,
+    input.data,
+    output.data,
+    weight.rows,
+    weight.cols,
+  )
 }
 
 ///|
-/// Matrix-vector multiply + bias using BLAS
+/// Matrix-vector multiply + bias using BLAS: output = weight^T @ input + bias
+///
+/// Uses Accelerate framework's BLAS for optimal performance.
 pub fn matmul_vec_bias_blas_into(
-  mat : Mat,
-  vec : Vec,
+  weight : Mat,
+  input : Vec,
   bias : Vec,
-  out : Vec,
+  output~ : Vec,
 ) -> Unit {
-  matmul_vec_blas_into(mat, vec, out)
-  for i = 0; i < out.len; i = i + 1 {
-    vec_set(out, i, vec_at(out, i) + vec_at(bias, i))
+  matmul_vec_blas_into(weight, input, output~)
+  for i = 0; i < output.len; i = i + 1 {
+    vec_set(output, i, vec_at(output, i) + vec_at(bias, i))
   }
 }
 
 ///|
 /// Matrix-vector multiply + bias + ReLU using BLAS
+///
+/// Computes: `output = relu(weight^T @ input + bias)`
+/// Uses Accelerate framework's BLAS for optimal performance.
 pub fn matmul_vec_bias_relu_blas_into(
-  mat : Mat,
-  vec : Vec,
+  weight : Mat,
+  input : Vec,
   bias : Vec,
-  out : Vec,
+  output~ : Vec,
 ) -> Unit {
-  matmul_vec_blas_into(mat, vec, out)
-  for i = 0; i < out.len; i = i + 1 {
-    vec_set(out, i, relu(vec_at(out, i) + vec_at(bias, i)))
+  matmul_vec_blas_into(weight, input, output~)
+  for i = 0; i < output.len; i = i + 1 {
+    vec_set(output, i, relu(vec_at(output, i) + vec_at(bias, i)))
   }
 }
 
@@ -1737,7 +1865,7 @@ fn argsort_quicksort(
   values : Vec,
   lo : Int,
   hi : Int,
-  ascending : Bool
+  ascending : Bool,
 ) -> Unit {
   if lo < hi {
     let pivot_idx = argsort_partition(indices, values, lo, hi, ascending)
@@ -1752,7 +1880,7 @@ fn argsort_partition(
   values : Vec,
   lo : Int,
   hi : Int,
-  ascending : Bool
+  ascending : Bool,
 ) -> Int {
   let pivot_val = vec_at(values, indices[hi])
   let mut i = lo - 1
@@ -1956,7 +2084,10 @@ pub fn vec_diff(v : Vec) -> Vec {
 pub fn vec_outer(a : Vec, b : Vec) -> Mat {
   let a_bytes = float_arr_to_bytes(vec_to_array(a))
   let b_bytes = float_arr_to_bytes(vec_to_array(b))
-  let out_bytes : FixedArray[Byte] = FixedArray::make(a.len * b.len * 4, b'\x00')
+  let out_bytes : FixedArray[Byte] = FixedArray::make(
+    a.len * b.len * 4,
+    b'\x00',
+  )
   numbt_outer(a_bytes, b_bytes, out_bytes, a.len, b.len)
   let out_arr = bytes_to_float_arr(out_bytes, a.len * b.len)
   mat_view(out_arr, a.len, b.len)
@@ -2109,48 +2240,51 @@ pub fn mat_tile(m : Mat, rows_repeat : Int, cols_repeat : Int) -> Mat {
 // ============================================================================
 
 ///|
-pub fn vec_floor_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise floor: output[i] = floor(input[i])
+pub fn vec_floor_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, vec_at(input, i).floor())
+    vec_set(output, i, vec_at(input, i).floor())
   }
 }
 
 ///|
 pub fn vec_floor(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_floor_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_floor_into(input, output~)
+  output
 }
 
 ///|
-pub fn vec_ceil_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise ceiling: output[i] = ceil(input[i])
+pub fn vec_ceil_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, vec_at(input, i).ceil())
+    vec_set(output, i, vec_at(input, i).ceil())
   }
 }
 
 ///|
 pub fn vec_ceil(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_ceil_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_ceil_into(input, output~)
+  output
 }
 
 ///|
-pub fn vec_round_into(out : Vec, input : Vec) -> Unit {
-  vec_check_same_len(out, input)
+/// Element-wise rounding: output[i] = round(input[i])
+pub fn vec_round_into(input : Vec, output~ : Vec) -> Unit {
+  vec_check_same_len(output, input)
   for i = 0; i < input.len; i = i + 1 {
-    vec_set(out, i, vec_at(input, i).round())
+    vec_set(output, i, vec_at(input, i).round())
   }
 }
 
 ///|
 pub fn vec_round(input : Vec) -> Vec {
-  let out = vec_zeros(input.len)
-  vec_round_into(out, input)
-  out
+  let output = vec_zeros(input.len)
+  vec_round_into(input, output~)
+  output
 }
 
 // ============================================================================
@@ -2189,13 +2323,14 @@ pub fn vec_percentile(v : Vec, p : Float) -> Float {
     p
   }
   // Linear interpolation
-  let pos = (Float::from_int(n - 1) * p_clamped) / Float::from_int(100)
+  let pos = Float::from_int(n - 1) * p_clamped / Float::from_int(100)
   let idx = pos.floor().to_int()
   let frac = pos - Float::from_int(idx)
   if idx >= n - 1 {
     vec_at(sorted, n - 1)
   } else {
-    vec_at(sorted, idx) * (Float::from_int(1) - frac) + vec_at(sorted, idx + 1) * frac
+    vec_at(sorted, idx) * (Float::from_int(1) - frac) +
+    vec_at(sorted, idx + 1) * frac
   }
 }
 

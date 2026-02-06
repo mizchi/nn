@@ -767,6 +767,7 @@ pub fn mlp_loss_reduce_dispatch_x(
 ///|
 pub struct MlpTrainDispatchPlan {
   workgroup_size : Int
+  compute_dh_dispatch_x : Int
   grad_update_w1_dispatch_x : Int
   grad_update_b1_dispatch_x : Int
   grad_update_w2_dispatch_x : Int
@@ -786,8 +787,10 @@ pub fn mlp_train_dispatch_plan(
       let b1 = elements_bias1(spec)
       let w2 = elements_weight2(spec)
       let b2 = elements_bias2(spec)
+      let dh = spec.batch_size * spec.hidden_size
       {
         workgroup_size,
+        compute_dh_dispatch_x: ceil_div(dh, workgroup_size),
         grad_update_w1_dispatch_x: ceil_div(w1, workgroup_size),
         grad_update_b1_dispatch_x: ceil_div(b1, workgroup_size),
         grad_update_w2_dispatch_x: ceil_div(w2, workgroup_size),
@@ -1234,66 +1237,12 @@ fn wgsl_grad_update_b2(spec : MlpSpec, workgroup_size : Int) -> String {
 }
 
 ///|
-fn wgsl_grad_update_w1(spec : MlpSpec, workgroup_size : Int) -> String {
-  let input = u32_lit(spec.input_size)
+fn wgsl_compute_dh(spec : MlpSpec, workgroup_size : Int) -> String {
   let hidden = u32_lit(spec.hidden_size)
   let output = u32_lit(spec.output_size)
   let batch = u32_lit(spec.batch_size)
   let workgroup = workgroup_size.to_string()
-  let s0 = "// MLP grad+update w1 (fused)\n"
-  let s1 = s0 + "const INPUT_SIZE : u32 = " + input + ";\n"
-  let s2 = s1 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
-  let s3 = s2 + "const OUTPUT_SIZE : u32 = " + output + ";\n"
-  let s4 = s3 + "const BATCH_SIZE : u32 = " + batch + ";\n"
-  let s5 = s4 + "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
-  let s6 = s5 +
-    "@group(0) @binding(1) var<storage, read> hidden : array<f32>;\n"
-  let s7 = s6 + "@group(0) @binding(2) var<storage, read> probs : array<f32>;\n"
-  let s8 = s7 +
-    "@group(0) @binding(3) var<storage, read> labels : array<u32>;\n"
-  let s9 = s8 +
-    "@group(0) @binding(4) var<storage, read> indices : array<u32>;\n"
-  let s10 = s9 +
-    "@group(0) @binding(5) var<storage, read> weight2 : array<f32>;\n"
-  let s11 = s10 +
-    "@group(0) @binding(6) var<storage, read_write> weight1 : array<f32>;\n"
-  let s12 = s11 + "@group(0) @binding(7) var<storage, read> lr : array<f32>;\n"
-  let s13 = s12 + "@compute @workgroup_size(" + workgroup + ")\n"
-  let s14 = s13 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
-  let s15 = s14 + "  let index = gid.x;\n"
-  let s16 = s15 + "  if (index >= INPUT_SIZE * HIDDEN_SIZE) { return; }\n"
-  let s17 = s16 + "  let i = index / HIDDEN_SIZE;\n"
-  let s18 = s17 + "  let j = index % HIDDEN_SIZE;\n"
-  let s19 = s18 + "  var acc = 0.0;\n"
-  let s20 = s19 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
-  let s21 = s20 + "    let hidden_idx = b * HIDDEN_SIZE + j;\n"
-  let s22 = s21 + "    let h = hidden[hidden_idx];\n"
-  let s23 = s22 + "    if (h <= 0.0) { continue; }\n"
-  let s24 = s23 + "    var sum = 0.0;\n"
-  let s25 = s24 + "    let base = b * OUTPUT_SIZE;\n"
-  let s26 = s25 + "    let sample = indices[1u + indices[0] + b];\n"
-  let s27 = s26 + "    let label = labels[sample];\n"
-  let s28 = s27 + "    for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
-  let s29 = s28 + "      var dlogit = probs[base + k];\n"
-  let s30 = s29 + "      if (label == k) { dlogit = dlogit - 1.0; }\n"
-  let s31 = s30 + "      let w2_idx = j * OUTPUT_SIZE + k;\n"
-  let s32 = s31 + "      sum = sum + dlogit * weight2[w2_idx];\n"
-  let s33 = s32 + "    }\n"
-  let s34 = s33 + "    let input_idx = sample * INPUT_SIZE + i;\n"
-  let s35 = s34 + "    acc = acc + input[input_idx] * sum;\n"
-  let s36 = s35 + "  }\n"
-  let s37 = s36 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
-  let s38 = s37 + "  weight1[index] = weight1[index] - acc * scale;\n"
-  s38 + "}\n"
-}
-
-///|
-fn wgsl_grad_update_b1(spec : MlpSpec, workgroup_size : Int) -> String {
-  let hidden = u32_lit(spec.hidden_size)
-  let output = u32_lit(spec.output_size)
-  let batch = u32_lit(spec.batch_size)
-  let workgroup = workgroup_size.to_string()
-  let s0 = "// MLP grad+update b1 (fused)\n"
+  let s0 = "// MLP compute dh (hidden gradient)\n"
   let s1 = s0 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
   let s2 = s1 + "const OUTPUT_SIZE : u32 = " + output + ";\n"
   let s3 = s2 + "const BATCH_SIZE : u32 = " + batch + ";\n"
@@ -1307,32 +1256,88 @@ fn wgsl_grad_update_b1(spec : MlpSpec, workgroup_size : Int) -> String {
   let s8 = s7 +
     "@group(0) @binding(4) var<storage, read> weight2 : array<f32>;\n"
   let s9 = s8 +
-    "@group(0) @binding(5) var<storage, read_write> bias1 : array<f32>;\n"
-  let s10 = s9 + "@group(0) @binding(6) var<storage, read> lr : array<f32>;\n"
-  let s11 = s10 + "@compute @workgroup_size(" + workgroup + ")\n"
-  let s12 = s11 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
-  let s13 = s12 + "  let j = gid.x;\n"
-  let s14 = s13 + "  if (j >= HIDDEN_SIZE) { return; }\n"
+    "@group(0) @binding(5) var<storage, read_write> dh : array<f32>;\n"
+  let s10 = s9 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s11 = s10 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
+  let s12 = s11 + "  let index = gid.x;\n"
+  let s13 = s12 + "  if (index >= BATCH_SIZE * HIDDEN_SIZE) { return; }\n"
+  let s14 = s13 + "  let b = index / HIDDEN_SIZE;\n"
+  let s15 = s14 + "  let j = index % HIDDEN_SIZE;\n"
+  let s16 = s15 + "  let h = hidden[index];\n"
+  let s17 = s16 + "  if (h <= 0.0) { dh[index] = 0.0; return; }\n"
+  let s18 = s17 + "  var sum = 0.0;\n"
+  let s19 = s18 + "  let base = b * OUTPUT_SIZE;\n"
+  let s20 = s19 + "  let sample = indices[1u + indices[0] + b];\n"
+  let s21 = s20 + "  let label = labels[sample];\n"
+  let s22 = s21 + "  for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
+  let s23 = s22 + "    var dlogit = probs[base + k];\n"
+  let s24 = s23 + "    if (label == k) { dlogit = dlogit - 1.0; }\n"
+  let s25 = s24 + "    let w2_idx = j * OUTPUT_SIZE + k;\n"
+  let s26 = s25 + "    sum = sum + dlogit * weight2[w2_idx];\n"
+  let s27 = s26 + "  }\n"
+  let s28 = s27 + "  dh[index] = sum;\n"
+  s28 + "}\n"
+}
+
+///|
+fn wgsl_grad_update_w1(spec : MlpSpec, workgroup_size : Int) -> String {
+  let input = u32_lit(spec.input_size)
+  let hidden = u32_lit(spec.hidden_size)
+  let batch = u32_lit(spec.batch_size)
+  let workgroup = workgroup_size.to_string()
+  let s0 = "// MLP grad+update w1 (uses precomputed dh)\n"
+  let s1 = s0 + "const INPUT_SIZE : u32 = " + input + ";\n"
+  let s2 = s1 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
+  let s3 = s2 + "const BATCH_SIZE : u32 = " + batch + ";\n"
+  let s4 = s3 + "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
+  let s5 = s4 + "@group(0) @binding(1) var<storage, read> dh : array<f32>;\n"
+  let s6 = s5 +
+    "@group(0) @binding(2) var<storage, read> indices : array<u32>;\n"
+  let s7 = s6 +
+    "@group(0) @binding(3) var<storage, read_write> weight1 : array<f32>;\n"
+  let s8 = s7 + "@group(0) @binding(4) var<storage, read> lr : array<f32>;\n"
+  let s9 = s8 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s10 = s9 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
+  let s11 = s10 + "  let index = gid.x;\n"
+  let s12 = s11 + "  if (index >= INPUT_SIZE * HIDDEN_SIZE) { return; }\n"
+  let s13 = s12 + "  let i = index / HIDDEN_SIZE;\n"
+  let s14 = s13 + "  let j = index % HIDDEN_SIZE;\n"
   let s15 = s14 + "  var acc = 0.0;\n"
   let s16 = s15 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
-  let s17 = s16 + "    let hidden_idx = b * HIDDEN_SIZE + j;\n"
-  let s18 = s17 + "    let h = hidden[hidden_idx];\n"
-  let s19 = s18 + "    if (h <= 0.0) { continue; }\n"
-  let s20 = s19 + "    var sum = 0.0;\n"
-  let s21 = s20 + "    let base = b * OUTPUT_SIZE;\n"
-  let s22 = s21 + "    let sample = indices[1u + indices[0] + b];\n"
-  let s23 = s22 + "    let label = labels[sample];\n"
-  let s24 = s23 + "    for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
-  let s25 = s24 + "      var dlogit = probs[base + k];\n"
-  let s26 = s25 + "      if (label == k) { dlogit = dlogit - 1.0; }\n"
-  let s27 = s26 + "      let w2_idx = j * OUTPUT_SIZE + k;\n"
-  let s28 = s27 + "      sum = sum + dlogit * weight2[w2_idx];\n"
-  let s29 = s28 + "    }\n"
-  let s30 = s29 + "    acc = acc + sum;\n"
-  let s31 = s30 + "  }\n"
-  let s32 = s31 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
-  let s33 = s32 + "  bias1[j] = bias1[j] - acc * scale;\n"
-  s33 + "}\n"
+  let s17 = s16 + "    let dh_val = dh[b * HIDDEN_SIZE + j];\n"
+  let s18 = s17 + "    if (dh_val == 0.0) { continue; }\n"
+  let s19 = s18 + "    let sample = indices[1u + indices[0] + b];\n"
+  let s20 = s19 + "    let input_idx = sample * INPUT_SIZE + i;\n"
+  let s21 = s20 + "    acc = acc + input[input_idx] * dh_val;\n"
+  let s22 = s21 + "  }\n"
+  let s23 = s22 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
+  let s24 = s23 + "  weight1[index] = weight1[index] - acc * scale;\n"
+  s24 + "}\n"
+}
+
+///|
+fn wgsl_grad_update_b1(spec : MlpSpec, workgroup_size : Int) -> String {
+  let hidden = u32_lit(spec.hidden_size)
+  let batch = u32_lit(spec.batch_size)
+  let workgroup = workgroup_size.to_string()
+  let s0 = "// MLP grad+update b1 (uses precomputed dh)\n"
+  let s1 = s0 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
+  let s2 = s1 + "const BATCH_SIZE : u32 = " + batch + ";\n"
+  let s3 = s2 + "@group(0) @binding(0) var<storage, read> dh : array<f32>;\n"
+  let s4 = s3 +
+    "@group(0) @binding(1) var<storage, read_write> bias1 : array<f32>;\n"
+  let s5 = s4 + "@group(0) @binding(2) var<storage, read> lr : array<f32>;\n"
+  let s6 = s5 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s7 = s6 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
+  let s8 = s7 + "  let j = gid.x;\n"
+  let s9 = s8 + "  if (j >= HIDDEN_SIZE) { return; }\n"
+  let s10 = s9 + "  var acc = 0.0;\n"
+  let s11 = s10 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
+  let s12 = s11 + "    acc = acc + dh[b * HIDDEN_SIZE + j];\n"
+  let s13 = s12 + "  }\n"
+  let s14 = s13 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
+  let s15 = s14 + "  bias1[j] = bias1[j] - acc * scale;\n"
+  s15 + "}\n"
 }
 
 ///|
@@ -1409,6 +1414,7 @@ pub struct MlpDatasetShaderPlan {
 ///|
 pub struct MlpTrainShaderPlan {
   workgroup_size : Int
+  compute_dh_wgsl : String
   grad_update_w1_wgsl : String
   grad_update_b1_wgsl : String
   grad_update_w2_wgsl : String
@@ -1487,6 +1493,7 @@ pub fn mlp_train_shader_plan(
     mlp_validate_spec(spec).map(fn(_) {
       {
         workgroup_size,
+        compute_dh_wgsl: wgsl_compute_dh(spec, workgroup_size),
         grad_update_w1_wgsl: wgsl_grad_update_w1(spec, workgroup_size),
         grad_update_b1_wgsl: wgsl_grad_update_b1(spec, workgroup_size),
         grad_update_w2_wgsl: wgsl_grad_update_w2(spec, workgroup_size),

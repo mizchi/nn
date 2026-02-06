@@ -3,3 +3,11 @@ import {
   "mizchi/wgpu/numbt" as @numbt,
   "moonbitlang/core/math" as @math,
 }
+
+options(
+  targets: {
+    "mlp_cpu.mbt": [ "native" ],
+    "train_cpu.mbt": [ "native" ],
+    "train_test.mbt": [ "native" ],
+  },
+)

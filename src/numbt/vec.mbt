@@ -333,3 +333,123 @@ pub impl Div for Vec with div(self : Vec, other : Vec) -> Vec {
   vec_div(self, other)
 }
 
+// ============================================================================
+// BLAS Level 1 (vector-vector)
+// ============================================================================
+
+///|
+/// Dot product: x · y
+pub fn vec_dot(x : Vec, y : Vec) -> Float {
+  vec_check_same_len(x, y)
+  @blas.sdot(x.data, y.data)
+}
+
+///|
+/// L2 norm: ||x||_2
+pub fn vec_nrm2(x : Vec) -> Float {
+  @blas.snrm2(x.data)
+}
+
+///|
+/// AXPY: y = α*x + y
+pub fn vec_axpy(alpha : Float, x : Vec, y : Vec) -> Unit {
+  vec_check_same_len(x, y)
+  @blas.saxpy(alpha, x.data, y.data)
+}
+
+// ============================================================================
+// BLAS Level 2 (matrix-vector)
+// ============================================================================
+
+///|
+/// Matrix-vector multiply using BLAS sgemv: out = mat^T @ vec
+pub fn matmul_vec_blas_into(mat : Mat, vec : Vec, out : Vec) -> Unit {
+  mat_check_vec_dims(mat, vec, out)
+  @blas.sgemv_trans(mat.data, vec.data, out.data, mat.rows, mat.cols)
+}
+
+///|
+/// Matrix-vector multiply + bias using BLAS
+pub fn matmul_vec_bias_blas_into(
+  mat : Mat,
+  vec : Vec,
+  bias : Vec,
+  out : Vec,
+) -> Unit {
+  matmul_vec_blas_into(mat, vec, out)
+  for i = 0; i < out.len; i = i + 1 {
+    vec_set(out, i, vec_at(out, i) + vec_at(bias, i))
+  }
+}
+
+///|
+/// Matrix-vector multiply + bias + ReLU using BLAS
+pub fn matmul_vec_bias_relu_blas_into(
+  mat : Mat,
+  vec : Vec,
+  bias : Vec,
+  out : Vec,
+) -> Unit {
+  matmul_vec_blas_into(mat, vec, out)
+  for i = 0; i < out.len; i = i + 1 {
+    vec_set(out, i, relu(vec_at(out, i) + vec_at(bias, i)))
+  }
+}
+
+// ============================================================================
+// BLAS Level 3 (matrix-matrix) - Batch operations
+// ============================================================================
+
+///|
+/// Batch matrix multiply using BLAS sgemm: Out = Input @ Weight
+/// Input: batch x in_dim, Weight: in_dim x out_dim, Out: batch x out_dim
+pub fn batch_matmul(
+  input : Array[Float],
+  weight : Array[Float],
+  out : Array[Float],
+  batch : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit {
+  @blas.sgemm(input, weight, out, batch, out_dim, in_dim)
+}
+
+///|
+/// Batch matrix multiply + bias
+pub fn batch_matmul_bias(
+  input : Array[Float],
+  weight : Array[Float],
+  bias : Array[Float],
+  out : Array[Float],
+  batch : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit {
+  batch_matmul(input, weight, out, batch, in_dim, out_dim)
+  for b = 0; b < batch; b = b + 1 {
+    for j = 0; j < out_dim; j = j + 1 {
+      out[b * out_dim + j] = out[b * out_dim + j] + bias[j]
+    }
+  }
+}
+
+///|
+/// Batch matrix multiply + bias + ReLU
+pub fn batch_matmul_bias_relu(
+  input : Array[Float],
+  weight : Array[Float],
+  bias : Array[Float],
+  out : Array[Float],
+  batch : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit {
+  batch_matmul(input, weight, out, batch, in_dim, out_dim)
+  for b = 0; b < batch; b = b + 1 {
+    for j = 0; j < out_dim; j = j + 1 {
+      let idx = b * out_dim + j
+      out[idx] = relu(out[idx] + bias[j])
+    }
+  }
+}
+

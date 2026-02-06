@@ -1197,7 +1197,7 @@ async fn gpu_train(
     Ok(l) => l
     Err(err) => return Err(wgpu_error_to_string(err))
   }
-  // compute_dh: 6 bindings (hidden[r], probs[r], labels[r], indices[r], weight2[r], dh[rw])
+  // compute_dh: 4 bindings (hidden[r], dlogit[r], weight2[r], dh[rw])
   let compute_dh_layout = match
     @wgpu.device_create_bind_group_layout(
       device,
@@ -1213,13 +1213,7 @@ async fn gpu_train(
             2, stage, @wgpu.binding_type_read_only_storage_buffer,
           ),
           @wgpu.bind_group_layout_entry(
-            3, stage, @wgpu.binding_type_read_only_storage_buffer,
-          ),
-          @wgpu.bind_group_layout_entry(
-            4, stage, @wgpu.binding_type_read_only_storage_buffer,
-          ),
-          @wgpu.bind_group_layout_entry(
-            5, stage, @wgpu.binding_type_storage_buffer,
+            3, stage, @wgpu.binding_type_storage_buffer,
           ),
         ],
         None,
@@ -1278,7 +1272,7 @@ async fn gpu_train(
     Ok(l) => l
     Err(err) => return Err(wgpu_error_to_string(err))
   }
-  // grad_update_w2: 6 bindings (hidden, probs, labels, indices, weight2[rw], lr)
+  // grad_update_w2: 4 bindings (hidden[r], dlogit[r], weight2[rw], lr[r])
   let grad_update_w2_layout = match
     @wgpu.device_create_bind_group_layout(
       device,
@@ -1291,16 +1285,10 @@ async fn gpu_train(
             1, stage, @wgpu.binding_type_read_only_storage_buffer,
           ),
           @wgpu.bind_group_layout_entry(
-            2, stage, @wgpu.binding_type_read_only_storage_buffer,
+            2, stage, @wgpu.binding_type_storage_buffer,
           ),
           @wgpu.bind_group_layout_entry(
             3, stage, @wgpu.binding_type_read_only_storage_buffer,
-          ),
-          @wgpu.bind_group_layout_entry(
-            4, stage, @wgpu.binding_type_storage_buffer,
-          ),
-          @wgpu.bind_group_layout_entry(
-            5, stage, @wgpu.binding_type_read_only_storage_buffer,
           ),
         ],
         None,
@@ -1309,7 +1297,7 @@ async fn gpu_train(
     Ok(l) => l
     Err(err) => return Err(wgpu_error_to_string(err))
   }
-  // grad_update_b2: 5 bindings (probs, labels, indices, bias2[rw], lr)
+  // grad_update_b2: 3 bindings (dlogit[r], bias2[rw], lr[r])
   let grad_update_b2_layout = match
     @wgpu.device_create_bind_group_layout(
       device,
@@ -1319,16 +1307,10 @@ async fn gpu_train(
             0, stage, @wgpu.binding_type_read_only_storage_buffer,
           ),
           @wgpu.bind_group_layout_entry(
-            1, stage, @wgpu.binding_type_read_only_storage_buffer,
+            1, stage, @wgpu.binding_type_storage_buffer,
           ),
           @wgpu.bind_group_layout_entry(
             2, stage, @wgpu.binding_type_read_only_storage_buffer,
-          ),
-          @wgpu.bind_group_layout_entry(
-            3, stage, @wgpu.binding_type_storage_buffer,
-          ),
-          @wgpu.bind_group_layout_entry(
-            4, stage, @wgpu.binding_type_read_only_storage_buffer,
           ),
         ],
         None,
@@ -1487,7 +1469,7 @@ async fn gpu_train(
       Ok(g) => g
       Err(err) => return Err(wgpu_error_to_string(err))
     }
-    // compute_dh: hidden[r], probs[r], labels[r], indices[r], weight2[r], dh[rw]
+    // compute_dh: hidden[r], dlogit(=probs)[r], weight2[r], dh[rw]
     let g_compute_dh = match
       @wgpu.device_create_bind_group(
         device,
@@ -1512,14 +1494,6 @@ async fn gpu_train(
             ),
             @wgpu.bind_group_entry(
               2,
-              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
-            ),
-            @wgpu.bind_group_entry(
-              3,
-              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
-            ),
-            @wgpu.bind_group_entry(
-              4,
               @wgpu.binding_resource_buffer(
                 weight2_buf,
                 0,
@@ -1527,7 +1501,7 @@ async fn gpu_train(
               ),
             ),
             @wgpu.bind_group_entry(
-              5,
+              3,
               @wgpu.binding_resource_buffer(dh_buf, 0, dh_bytes),
             ),
           ],
@@ -1605,6 +1579,7 @@ async fn gpu_train(
       Ok(g) => g
       Err(err) => return Err(wgpu_error_to_string(err))
     }
+    // grad_update_w2: hidden[r], dlogit(=probs)[r], weight2[rw], lr[r]
     let g_grad_w2 = match
       @wgpu.device_create_bind_group(
         device,
@@ -1629,14 +1604,6 @@ async fn gpu_train(
             ),
             @wgpu.bind_group_entry(
               2,
-              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
-            ),
-            @wgpu.bind_group_entry(
-              3,
-              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
-            ),
-            @wgpu.bind_group_entry(
-              4,
               @wgpu.binding_resource_buffer(
                 weight2_buf,
                 0,
@@ -1644,7 +1611,7 @@ async fn gpu_train(
               ),
             ),
             @wgpu.bind_group_entry(
-              5,
+              3,
               @wgpu.binding_resource_buffer(lr_buf, 0, 4),
             ),
           ],
@@ -1654,6 +1621,7 @@ async fn gpu_train(
       Ok(g) => g
       Err(err) => return Err(wgpu_error_to_string(err))
     }
+    // grad_update_b2: dlogit(=probs)[r], bias2[rw], lr[r]
     let g_grad_b2 = match
       @wgpu.device_create_bind_group(
         device,
@@ -1670,18 +1638,10 @@ async fn gpu_train(
             ),
             @wgpu.bind_group_entry(
               1,
-              @wgpu.binding_resource_buffer(seg_lb, 0, seg_lr.labels.size),
-            ),
-            @wgpu.bind_group_entry(
-              2,
-              @wgpu.binding_resource_buffer(seg_idx, 0, seg_db.indices_bytes),
-            ),
-            @wgpu.bind_group_entry(
-              3,
               @wgpu.binding_resource_buffer(bias2_buf, 0, resources.bias2.size),
             ),
             @wgpu.bind_group_entry(
-              4,
+              2,
               @wgpu.binding_resource_buffer(lr_buf, 0, 4),
             ),
           ],
@@ -1982,8 +1942,8 @@ async fn gpu_train(
   // Profile accumulators (in ms via UInt64)
   let mut prof_data_upload = 0UL
   let mut prof_forward = 0UL
-  let prof_loss_reduce = 0UL
-  let prof_backward = 0UL
+  let mut prof_loss_reduce = 0UL
+  let mut prof_backward = 0UL
   let mut prof_readback = 0UL
   for epoch = 0; epoch < config.epochs; epoch = epoch + 1 {
     if !bench_no_readback {
@@ -2070,56 +2030,107 @@ async fn gpu_train(
         if profile {
           prof_data_upload = prof_data_upload + (@env.now() - t_step_upload)
         }
-        // Forward + backward + loss reduce in single batch dispatch
-        let t_fwd = if profile { @env.now() } else { 0UL }
-        @wgpu.dispatch_batch_begin()
-        // Forward: layer1 → layer2_loss
-        @wgpu.dispatch_batch_add(
-          layer1_pipeline,
-          seg_layer1_groups[segment],
-          dispatch.layer1_dispatch_x,
-        )
-        @wgpu.dispatch_batch_add(
-          layer2_loss_pipeline,
-          seg_layer2_loss_groups[segment],
-          loss_dispatch_x,
-        )
-        // Loss reduce (accumulate epoch metrics)
-        if !bench_no_readback {
-          @wgpu.dispatch_batch_add(
-            loss_epoch_reduce_pipeline, loss_epoch_reduce_group, loss_reduce_dispatch_x,
-          )
-        }
-        // Backward: compute dh, then grad updates
-        @wgpu.dispatch_batch_add(
-          compute_dh_pipeline,
-          seg_compute_dh_groups[segment],
-          train_dispatch.compute_dh_dispatch_x,
-        )
-        @wgpu.dispatch_batch_add(
-          grad_update_w1_pipeline,
-          seg_grad_update_w1_groups[segment],
-          train_dispatch.grad_update_w1_dispatch_x,
-        )
-        @wgpu.dispatch_batch_add(
-          grad_update_b1_pipeline,
-          seg_grad_update_b1_groups[segment],
-          train_dispatch.grad_update_b1_dispatch_x,
-        )
-        @wgpu.dispatch_batch_add(
-          grad_update_w2_pipeline,
-          seg_grad_update_w2_groups[segment],
-          train_dispatch.grad_update_w2_dispatch_x,
-        )
-        @wgpu.dispatch_batch_add(
-          grad_update_b2_pipeline,
-          seg_grad_update_b2_groups[segment],
-          train_dispatch.grad_update_b2_dispatch_x,
-        )
-        @wgpu.dispatch_batch_submit(device)
         if profile {
+          // Profile mode: separate dispatches for per-phase timing
+          let t_fwd = @env.now()
+          @wgpu.dispatch_batch_begin()
+          @wgpu.dispatch_batch_add(
+            layer1_pipeline,
+            seg_layer1_groups[segment],
+            dispatch.layer1_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            layer2_loss_pipeline,
+            seg_layer2_loss_groups[segment],
+            loss_dispatch_x,
+          )
+          @wgpu.dispatch_batch_submit(device)
           @wgpu.device_poll(device, true)
           prof_forward = prof_forward + (@env.now() - t_fwd)
+          if !bench_no_readback {
+            let t_lr = @env.now()
+            @wgpu.dispatch_batch_begin()
+            @wgpu.dispatch_batch_add(
+              loss_epoch_reduce_pipeline, loss_epoch_reduce_group, loss_reduce_dispatch_x,
+            )
+            @wgpu.dispatch_batch_submit(device)
+            @wgpu.device_poll(device, true)
+            prof_loss_reduce = prof_loss_reduce + (@env.now() - t_lr)
+          }
+          let t_bwd = @env.now()
+          @wgpu.dispatch_batch_begin()
+          @wgpu.dispatch_batch_add(
+            compute_dh_pipeline,
+            seg_compute_dh_groups[segment],
+            train_dispatch.compute_dh_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_w1_pipeline,
+            seg_grad_update_w1_groups[segment],
+            train_dispatch.grad_update_w1_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_b1_pipeline,
+            seg_grad_update_b1_groups[segment],
+            train_dispatch.grad_update_b1_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_w2_pipeline,
+            seg_grad_update_w2_groups[segment],
+            train_dispatch.grad_update_w2_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_b2_pipeline,
+            seg_grad_update_b2_groups[segment],
+            train_dispatch.grad_update_b2_dispatch_x,
+          )
+          @wgpu.dispatch_batch_submit(device)
+          @wgpu.device_poll(device, true)
+          prof_backward = prof_backward + (@env.now() - t_bwd)
+        } else {
+          // Normal mode: single batch dispatch for all phases
+          @wgpu.dispatch_batch_begin()
+          @wgpu.dispatch_batch_add(
+            layer1_pipeline,
+            seg_layer1_groups[segment],
+            dispatch.layer1_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            layer2_loss_pipeline,
+            seg_layer2_loss_groups[segment],
+            loss_dispatch_x,
+          )
+          if !bench_no_readback {
+            @wgpu.dispatch_batch_add(
+              loss_epoch_reduce_pipeline, loss_epoch_reduce_group, loss_reduce_dispatch_x,
+            )
+          }
+          @wgpu.dispatch_batch_add(
+            compute_dh_pipeline,
+            seg_compute_dh_groups[segment],
+            train_dispatch.compute_dh_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_w1_pipeline,
+            seg_grad_update_w1_groups[segment],
+            train_dispatch.grad_update_w1_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_b1_pipeline,
+            seg_grad_update_b1_groups[segment],
+            train_dispatch.grad_update_b1_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_w2_pipeline,
+            seg_grad_update_w2_groups[segment],
+            train_dispatch.grad_update_w2_dispatch_x,
+          )
+          @wgpu.dispatch_batch_add(
+            grad_update_b2_pipeline,
+            seg_grad_update_b2_groups[segment],
+            train_dispatch.grad_update_b2_dispatch_x,
+          )
+          @wgpu.dispatch_batch_submit(device)
         }
       }
     }

@@ -1117,12 +1117,12 @@ pub async fn run_mlp_train_step() -> Unit {
   let grad_update_w2_bind = create_bind_group_js(
     device_any,
     grad_update_w2_pipeline,
-    [hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf, lr_buf],
+    [hidden_buf, probs_buf_any, weight2_buf, lr_buf],
   )
   let grad_update_b2_bind = create_bind_group_js(
     device_any,
     grad_update_b2_pipeline,
-    [probs_buf_any, labels_buf, indices_buf, bias2_buf, lr_buf],
+    [probs_buf_any, bias2_buf, lr_buf],
   )
   let enc = begin_encoder_js(device_any)
   encode_dispatch_js(
@@ -1515,12 +1515,12 @@ pub async fn run_mnist_train() -> Unit {
   let grad_update_w2_bind = create_bind_group_js(
     device_any,
     grad_update_w2_pipeline,
-    [hidden_buf, probs_buf_any, labels_buf, indices_buf, weight2_buf, lr_buf],
+    [hidden_buf, probs_buf_any, weight2_buf, lr_buf],
   )
   let grad_update_b2_bind = create_bind_group_js(
     device_any,
     grad_update_b2_pipeline,
-    [probs_buf_any, labels_buf, indices_buf, bias2_buf, lr_buf],
+    [probs_buf_any, bias2_buf, lr_buf],
   )
   let steps = effective_count / batch_size
   let indices_dispatch_x = ceil_div(effective_count, workgroup_size)

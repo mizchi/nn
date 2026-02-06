@@ -69,7 +69,7 @@ test "mlp_dispatch_plan_tiled_grid" {
 test "mlp_train_dispatch_plan" {
   let spec = @nn.mlp_spec_new(4, 3, 2, 2).unwrap()
   let plan = @nn.mlp_train_dispatch_plan(spec, 4).unwrap()
-  inspect(plan.grad_update_w1_dispatch_x, content="3")
+  inspect(plan.grad_update_w1_dispatch_x, content="4")
   inspect(plan.grad_update_b1_dispatch_x, content="1")
   inspect(plan.grad_update_w2_dispatch_x, content="2")
   inspect(plan.grad_update_b2_dispatch_x, content="1")

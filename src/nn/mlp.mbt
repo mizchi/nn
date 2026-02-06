@@ -782,20 +782,24 @@ pub fn mlp_train_dispatch_plan(
   if workgroup_size <= 0 {
     Err(InvalidSpec("workgroup_size must be > 0"))
   } else {
-    mlp_validate_spec(spec).map(fn(_) {
-      let w1 = elements_weight1(spec)
-      let b1 = elements_bias1(spec)
-      let w2 = elements_weight2(spec)
-      let b2 = elements_bias2(spec)
-      let dh = spec.batch_size * spec.hidden_size
-      {
-        workgroup_size,
-        compute_dh_dispatch_x: ceil_div(dh, workgroup_size),
-        grad_update_w1_dispatch_x: ceil_div(w1, workgroup_size),
-        grad_update_b1_dispatch_x: ceil_div(b1, workgroup_size),
-        grad_update_w2_dispatch_x: ceil_div(w2, workgroup_size),
-        grad_update_b2_dispatch_x: ceil_div(b2, workgroup_size),
-      }
+    mlp_validate_spec(spec).bind(fn(_) {
+      workgroup_tile_dim(workgroup_size).map(fn(tile_dim) {
+        let b1 = elements_bias1(spec)
+        let b2 = elements_bias2(spec)
+        let dh = spec.batch_size * spec.hidden_size
+        {
+          workgroup_size,
+          compute_dh_dispatch_x: ceil_div(dh, workgroup_size),
+          grad_update_w1_dispatch_x: tiles_for(
+            spec.input_size, spec.hidden_size, tile_dim,
+          ),
+          grad_update_b1_dispatch_x: ceil_div(b1, workgroup_size),
+          grad_update_w2_dispatch_x: tiles_for(
+            spec.hidden_size, spec.output_size, tile_dim,
+          ),
+          grad_update_b2_dispatch_x: ceil_div(b2, workgroup_size),
+        }
+      })
     })
   }
 }
@@ -1062,7 +1066,13 @@ fn wgsl_layer2_loss(spec : MlpSpec, workgroup_size : Int) -> String {
   let s40 = s39 + "  let prob = probs[base + label];\n"
   let s41 = s40 + "  loss[b] = -log(prob + EPS);\n"
   let s42 = s41 + "  correct[b] = select(0.0, 1.0, best_k == label);\n"
-  s42 + "}\n"
+  let s43 = s42 +
+    "  for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
+  let s44 = s43 + "    var dl = probs[base + k];\n"
+  let s45 = s44 + "    if (label == k) { dl = dl - 1.0; }\n"
+  let s46 = s45 + "    probs[base + k] = dl;\n"
+  let s47 = s46 + "  }\n"
+  s47 + "}\n"
 }
 
 ///|
@@ -1162,44 +1172,84 @@ fn wgsl_loss_epoch_reduce(spec : MlpSpec, workgroup_size : Int) -> String {
 }
 
 ///|
-fn wgsl_grad_update_w2(spec : MlpSpec, workgroup_size : Int) -> String {
+fn wgsl_grad_update_w2(
+  spec : MlpSpec,
+  workgroup_size : Int,
+  tile_dim : Int,
+) -> String {
   let hidden = u32_lit(spec.hidden_size)
   let output = u32_lit(spec.output_size)
   let batch = u32_lit(spec.batch_size)
   let workgroup = workgroup_size.to_string()
-  let s0 = "// MLP grad+update w2 (fused)\n"
+  let workgroup_u = u32_lit(workgroup_size)
+  let tile = u32_lit(tile_dim)
+  // Tiled matmul: ΔW2 = H^T × dlogit, then W2 -= lr * ΔW2 / BATCH
+  // H^T is [hidden_size, batch_size], dlogit is [batch_size, output_size]
+  let s0 = "// MLP grad+update w2 (tiled matmul)\n"
   let s1 = s0 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
   let s2 = s1 + "const OUTPUT_SIZE : u32 = " + output + ";\n"
   let s3 = s2 + "const BATCH_SIZE : u32 = " + batch + ";\n"
-  let s4 = s3 +
-    "@group(0) @binding(0) var<storage, read> hidden : array<f32>;\n"
-  let s5 = s4 + "@group(0) @binding(1) var<storage, read> probs : array<f32>;\n"
+  let s4 = s3 + "const TILE_DIM : u32 = " + tile + ";\n"
+  let s5 = s4 + "const WORKGROUP_SIZE : u32 = " + workgroup_u + ";\n"
   let s6 = s5 +
-    "@group(0) @binding(2) var<storage, read> labels : array<u32>;\n"
+    "@group(0) @binding(0) var<storage, read> hidden : array<f32>;\n"
   let s7 = s6 +
-    "@group(0) @binding(3) var<storage, read> indices : array<u32>;\n"
+    "@group(0) @binding(1) var<storage, read> dlogit : array<f32>;\n"
   let s8 = s7 +
-    "@group(0) @binding(4) var<storage, read_write> weight2 : array<f32>;\n"
-  let s9 = s8 + "@group(0) @binding(5) var<storage, read> lr : array<f32>;\n"
-  let s10 = s9 + "@compute @workgroup_size(" + workgroup + ")\n"
-  let s11 = s10 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
-  let s12 = s11 + "  let index = gid.x;\n"
-  let s13 = s12 + "  if (index >= HIDDEN_SIZE * OUTPUT_SIZE) { return; }\n"
-  let s14 = s13 + "  let j = index / OUTPUT_SIZE;\n"
-  let s15 = s14 + "  let k = index % OUTPUT_SIZE;\n"
-  let s16 = s15 + "  var acc = 0.0;\n"
-  let s17 = s16 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
-  let s18 = s17 + "    let base = b * OUTPUT_SIZE;\n"
-  let s19 = s18 + "    var dlogit = probs[base + k];\n"
-  let s20 = s19 + "    let sample = indices[1u + indices[0] + b];\n"
-  let s21 = s20 + "    let label = labels[sample];\n"
-  let s22 = s21 + "    if (label == k) { dlogit = dlogit - 1.0; }\n"
-  let s23 = s22 + "    let hidden_idx = b * HIDDEN_SIZE + j;\n"
-  let s24 = s23 + "    acc = acc + hidden[hidden_idx] * dlogit;\n"
-  let s25 = s24 + "  }\n"
-  let s26 = s25 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
-  let s27 = s26 + "  weight2[index] = weight2[index] - acc * scale;\n"
-  s27 + "}\n"
+    "@group(0) @binding(2) var<storage, read_write> weight2 : array<f32>;\n"
+  let s9 = s8 + "@group(0) @binding(3) var<storage, read> lr : array<f32>;\n"
+  let s10 = s9 + "var<workgroup> hidden_tile : array<f32, WORKGROUP_SIZE>;\n"
+  let s11 = s10 + "var<workgroup> dlogit_tile : array<f32, WORKGROUP_SIZE>;\n"
+  let s12 = s11 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s13 = s12 +
+    "fn main(@builtin(workgroup_id) gid : vec3<u32>, @builtin(local_invocation_id) lid : vec3<u32>) {\n"
+  let s14 = s13 + "  let tile_id = gid.x;\n"
+  let s15 = s14 + "  let local = lid.x;\n"
+  let s16 = s15 +
+    "  let tiles_per_row = (OUTPUT_SIZE + TILE_DIM - 1u) / TILE_DIM;\n"
+  let s17 = s16 + "  let tile_row = tile_id / tiles_per_row;\n"
+  let s18 = s17 + "  let tile_col = tile_id % tiles_per_row;\n"
+  let s19 = s18 + "  let row_in_tile = local / TILE_DIM;\n"
+  let s20 = s19 + "  let col_in_tile = local % TILE_DIM;\n"
+  let s21 = s20 + "  let j = tile_row * TILE_DIM + row_in_tile;\n"
+  let s22 = s21 + "  let k = tile_col * TILE_DIM + col_in_tile;\n"
+  let s23 = s22 + "  var acc = 0.0;\n"
+  let s24 = s23 + "  var kk : u32 = 0u;\n"
+  let s25 = s24 + "  loop {\n"
+  let s26 = s25 + "    if (kk >= BATCH_SIZE) { break; }\n"
+  // Load H^T tile: H^T[j, kk+col_in_tile] = hidden[kk+col_in_tile, j]
+  let s27 = s26 + "    let batch_col = kk + col_in_tile;\n"
+  let s28 = s27 +
+    "    if (j < HIDDEN_SIZE && batch_col < BATCH_SIZE) {\n"
+  let s29 = s28 +
+    "      hidden_tile[local] = hidden[batch_col * HIDDEN_SIZE + j];\n"
+  let s30 = s29 + "    } else {\n"
+  let s31 = s30 + "      hidden_tile[local] = 0.0;\n"
+  let s32 = s31 + "    }\n"
+  // Load dlogit tile: dlogit[kk+row_in_tile, k] — direct read
+  let s33 = s32 + "    let batch_row = kk + row_in_tile;\n"
+  let s34 = s33 +
+    "    if (batch_row < BATCH_SIZE && k < OUTPUT_SIZE) {\n"
+  let s35 = s34 +
+    "      dlogit_tile[local] = dlogit[batch_row * OUTPUT_SIZE + k];\n"
+  let s36 = s35 + "    } else {\n"
+  let s37 = s36 + "      dlogit_tile[local] = 0.0;\n"
+  let s38 = s37 + "    }\n"
+  let s39 = s38 + "    workgroupBarrier();\n"
+  let s40 = s39 + "    for (var t : u32 = 0u; t < TILE_DIM; t = t + 1u) {\n"
+  let s41 = s40 +
+    "      acc = acc + hidden_tile[row_in_tile * TILE_DIM + t] * dlogit_tile[t * TILE_DIM + col_in_tile];\n"
+  let s42 = s41 + "    }\n"
+  let s43 = s42 + "    workgroupBarrier();\n"
+  let s44 = s43 + "    kk = kk + TILE_DIM;\n"
+  let s45 = s44 + "  }\n"
+  let s46 = s45 +
+    "  if (j < HIDDEN_SIZE && k < OUTPUT_SIZE) {\n"
+  let s47 = s46 + "    let scale = lr[0] / f32(BATCH_SIZE);\n"
+  let s48 = s47 +
+    "    weight2[j * OUTPUT_SIZE + k] = weight2[j * OUTPUT_SIZE + k] - acc * scale;\n"
+  let s49 = s48 + "  }\n"
+  s49 + "}\n"
 }
 
 ///|
@@ -1210,30 +1260,22 @@ fn wgsl_grad_update_b2(spec : MlpSpec, workgroup_size : Int) -> String {
   let s0 = "// MLP grad+update b2 (fused)\n"
   let s1 = s0 + "const OUTPUT_SIZE : u32 = " + output + ";\n"
   let s2 = s1 + "const BATCH_SIZE : u32 = " + batch + ";\n"
-  let s3 = s2 + "@group(0) @binding(0) var<storage, read> probs : array<f32>;\n"
+  let s3 = s2 +
+    "@group(0) @binding(0) var<storage, read> dlogit : array<f32>;\n"
   let s4 = s3 +
-    "@group(0) @binding(1) var<storage, read> labels : array<u32>;\n"
-  let s5 = s4 +
-    "@group(0) @binding(2) var<storage, read> indices : array<u32>;\n"
-  let s6 = s5 +
-    "@group(0) @binding(3) var<storage, read_write> bias2 : array<f32>;\n"
-  let s7 = s6 + "@group(0) @binding(4) var<storage, read> lr : array<f32>;\n"
-  let s8 = s7 + "@compute @workgroup_size(" + workgroup + ")\n"
-  let s9 = s8 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
-  let s10 = s9 + "  let k = gid.x;\n"
-  let s11 = s10 + "  if (k >= OUTPUT_SIZE) { return; }\n"
-  let s12 = s11 + "  var acc = 0.0;\n"
-  let s13 = s12 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
-  let s14 = s13 + "    let base = b * OUTPUT_SIZE;\n"
-  let s15 = s14 + "    var dlogit = probs[base + k];\n"
-  let s16 = s15 + "    let sample = indices[1u + indices[0] + b];\n"
-  let s17 = s16 + "    let label = labels[sample];\n"
-  let s18 = s17 + "    if (label == k) { dlogit = dlogit - 1.0; }\n"
-  let s19 = s18 + "    acc = acc + dlogit;\n"
-  let s20 = s19 + "  }\n"
-  let s21 = s20 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
-  let s22 = s21 + "  bias2[k] = bias2[k] - acc * scale;\n"
-  s22 + "}\n"
+    "@group(0) @binding(1) var<storage, read_write> bias2 : array<f32>;\n"
+  let s5 = s4 + "@group(0) @binding(2) var<storage, read> lr : array<f32>;\n"
+  let s6 = s5 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s7 = s6 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
+  let s8 = s7 + "  let k = gid.x;\n"
+  let s9 = s8 + "  if (k >= OUTPUT_SIZE) { return; }\n"
+  let s10 = s9 + "  var acc = 0.0;\n"
+  let s11 = s10 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
+  let s12 = s11 + "    acc = acc + dlogit[b * OUTPUT_SIZE + k];\n"
+  let s13 = s12 + "  }\n"
+  let s14 = s13 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
+  let s15 = s14 + "  bias2[k] = bias2[k] - acc * scale;\n"
+  s15 + "}\n"
 }
 
 ///|
@@ -1242,77 +1284,118 @@ fn wgsl_compute_dh(spec : MlpSpec, workgroup_size : Int) -> String {
   let output = u32_lit(spec.output_size)
   let batch = u32_lit(spec.batch_size)
   let workgroup = workgroup_size.to_string()
-  let s0 = "// MLP compute dh (hidden gradient)\n"
+  let s0 = "// MLP compute dh (hidden gradient, uses precomputed dlogit)\n"
   let s1 = s0 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
   let s2 = s1 + "const OUTPUT_SIZE : u32 = " + output + ";\n"
   let s3 = s2 + "const BATCH_SIZE : u32 = " + batch + ";\n"
   let s4 = s3 +
     "@group(0) @binding(0) var<storage, read> hidden : array<f32>;\n"
-  let s5 = s4 + "@group(0) @binding(1) var<storage, read> probs : array<f32>;\n"
+  let s5 = s4 +
+    "@group(0) @binding(1) var<storage, read> dlogit : array<f32>;\n"
   let s6 = s5 +
-    "@group(0) @binding(2) var<storage, read> labels : array<u32>;\n"
+    "@group(0) @binding(2) var<storage, read> weight2 : array<f32>;\n"
   let s7 = s6 +
-    "@group(0) @binding(3) var<storage, read> indices : array<u32>;\n"
-  let s8 = s7 +
-    "@group(0) @binding(4) var<storage, read> weight2 : array<f32>;\n"
-  let s9 = s8 +
-    "@group(0) @binding(5) var<storage, read_write> dh : array<f32>;\n"
-  let s10 = s9 + "@compute @workgroup_size(" + workgroup + ")\n"
-  let s11 = s10 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
-  let s12 = s11 + "  let index = gid.x;\n"
-  let s13 = s12 + "  if (index >= BATCH_SIZE * HIDDEN_SIZE) { return; }\n"
-  let s14 = s13 + "  let b = index / HIDDEN_SIZE;\n"
-  let s15 = s14 + "  let j = index % HIDDEN_SIZE;\n"
-  let s16 = s15 + "  let h = hidden[index];\n"
-  let s17 = s16 + "  if (h <= 0.0) { dh[index] = 0.0; return; }\n"
-  let s18 = s17 + "  var sum = 0.0;\n"
-  let s19 = s18 + "  let base = b * OUTPUT_SIZE;\n"
-  let s20 = s19 + "  let sample = indices[1u + indices[0] + b];\n"
-  let s21 = s20 + "  let label = labels[sample];\n"
-  let s22 = s21 + "  for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
-  let s23 = s22 + "    var dlogit = probs[base + k];\n"
-  let s24 = s23 + "    if (label == k) { dlogit = dlogit - 1.0; }\n"
-  let s25 = s24 + "    let w2_idx = j * OUTPUT_SIZE + k;\n"
-  let s26 = s25 + "    sum = sum + dlogit * weight2[w2_idx];\n"
-  let s27 = s26 + "  }\n"
-  let s28 = s27 + "  dh[index] = sum;\n"
-  s28 + "}\n"
+    "@group(0) @binding(3) var<storage, read_write> dh : array<f32>;\n"
+  let s8 = s7 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s9 = s8 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
+  let s10 = s9 + "  let index = gid.x;\n"
+  let s11 = s10 + "  if (index >= BATCH_SIZE * HIDDEN_SIZE) { return; }\n"
+  let s12 = s11 + "  let b = index / HIDDEN_SIZE;\n"
+  let s13 = s12 + "  let j = index % HIDDEN_SIZE;\n"
+  let s14 = s13 + "  let h = hidden[index];\n"
+  let s15 = s14 + "  if (h <= 0.0) { dh[index] = 0.0; return; }\n"
+  let s16 = s15 + "  var sum = 0.0;\n"
+  let s17 = s16 + "  let base = b * OUTPUT_SIZE;\n"
+  let s18 = s17 + "  for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
+  let s19 = s18 + "    let dl = dlogit[base + k];\n"
+  let s20 = s19 + "    let w2_idx = j * OUTPUT_SIZE + k;\n"
+  let s21 = s20 + "    sum = sum + dl * weight2[w2_idx];\n"
+  let s22 = s21 + "  }\n"
+  let s23 = s22 + "  dh[index] = sum;\n"
+  s23 + "}\n"
 }
 
 ///|
-fn wgsl_grad_update_w1(spec : MlpSpec, workgroup_size : Int) -> String {
+fn wgsl_grad_update_w1(
+  spec : MlpSpec,
+  workgroup_size : Int,
+  tile_dim : Int,
+) -> String {
   let input = u32_lit(spec.input_size)
   let hidden = u32_lit(spec.hidden_size)
   let batch = u32_lit(spec.batch_size)
   let workgroup = workgroup_size.to_string()
-  let s0 = "// MLP grad+update w1 (uses precomputed dh)\n"
+  let workgroup_u = u32_lit(workgroup_size)
+  let tile = u32_lit(tile_dim)
+  // Tiled matmul: ΔW1 = X^T × dh, then W1 -= lr * ΔW1 / BATCH
+  // X^T is [input_size, batch_size], dh is [batch_size, hidden_size]
+  let s0 = "// MLP grad+update w1 (tiled matmul, uses precomputed dh)\n"
   let s1 = s0 + "const INPUT_SIZE : u32 = " + input + ";\n"
   let s2 = s1 + "const HIDDEN_SIZE : u32 = " + hidden + ";\n"
   let s3 = s2 + "const BATCH_SIZE : u32 = " + batch + ";\n"
-  let s4 = s3 + "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
-  let s5 = s4 + "@group(0) @binding(1) var<storage, read> dh : array<f32>;\n"
-  let s6 = s5 +
+  let s4 = s3 + "const TILE_DIM : u32 = " + tile + ";\n"
+  let s5 = s4 + "const WORKGROUP_SIZE : u32 = " + workgroup_u + ";\n"
+  let s6 = s5 + "@group(0) @binding(0) var<storage, read> input : array<f32>;\n"
+  let s7 = s6 + "@group(0) @binding(1) var<storage, read> dh : array<f32>;\n"
+  let s8 = s7 +
     "@group(0) @binding(2) var<storage, read> indices : array<u32>;\n"
-  let s7 = s6 +
+  let s9 = s8 +
     "@group(0) @binding(3) var<storage, read_write> weight1 : array<f32>;\n"
-  let s8 = s7 + "@group(0) @binding(4) var<storage, read> lr : array<f32>;\n"
-  let s9 = s8 + "@compute @workgroup_size(" + workgroup + ")\n"
-  let s10 = s9 + "fn main(@builtin(global_invocation_id) gid : vec3<u32>) {\n"
-  let s11 = s10 + "  let index = gid.x;\n"
-  let s12 = s11 + "  if (index >= INPUT_SIZE * HIDDEN_SIZE) { return; }\n"
-  let s13 = s12 + "  let i = index / HIDDEN_SIZE;\n"
-  let s14 = s13 + "  let j = index % HIDDEN_SIZE;\n"
-  let s15 = s14 + "  var acc = 0.0;\n"
-  let s16 = s15 + "  for (var b : u32 = 0u; b < BATCH_SIZE; b = b + 1u) {\n"
-  let s17 = s16 + "    let dh_val = dh[b * HIDDEN_SIZE + j];\n"
-  let s18 = s17 + "    if (dh_val == 0.0) { continue; }\n"
-  let s19 = s18 + "    let sample = indices[1u + indices[0] + b];\n"
-  let s20 = s19 + "    let input_idx = sample * INPUT_SIZE + i;\n"
-  let s21 = s20 + "    acc = acc + input[input_idx] * dh_val;\n"
-  let s22 = s21 + "  }\n"
-  let s23 = s22 + "  let scale = lr[0] / f32(BATCH_SIZE);\n"
-  let s24 = s23 + "  weight1[index] = weight1[index] - acc * scale;\n"
-  s24 + "}\n"
+  let s10 = s9 + "@group(0) @binding(4) var<storage, read> lr : array<f32>;\n"
+  let s11 = s10 + "var<workgroup> input_tile : array<f32, WORKGROUP_SIZE>;\n"
+  let s12 = s11 + "var<workgroup> dh_tile : array<f32, WORKGROUP_SIZE>;\n"
+  let s13 = s12 + "@compute @workgroup_size(" + workgroup + ")\n"
+  let s14 = s13 +
+    "fn main(@builtin(workgroup_id) gid : vec3<u32>, @builtin(local_invocation_id) lid : vec3<u32>) {\n"
+  let s15 = s14 + "  let tile_id = gid.x;\n"
+  let s16 = s15 + "  let local = lid.x;\n"
+  let s17 = s16 +
+    "  let tiles_per_row = (HIDDEN_SIZE + TILE_DIM - 1u) / TILE_DIM;\n"
+  let s18 = s17 + "  let tile_row = tile_id / tiles_per_row;\n"
+  let s19 = s18 + "  let tile_col = tile_id % tiles_per_row;\n"
+  let s20 = s19 + "  let row_in_tile = local / TILE_DIM;\n"
+  let s21 = s20 + "  let col_in_tile = local % TILE_DIM;\n"
+  let s22 = s21 + "  let i = tile_row * TILE_DIM + row_in_tile;\n"
+  let s23 = s22 + "  let j = tile_col * TILE_DIM + col_in_tile;\n"
+  let s24 = s23 + "  var acc = 0.0;\n"
+  let s25 = s24 + "  var kk : u32 = 0u;\n"
+  let s26 = s25 + "  loop {\n"
+  let s27 = s26 + "    if (kk >= BATCH_SIZE) { break; }\n"
+  // Load X^T tile: X^T[i, kk+col_in_tile] = input[sample_{kk+col_in_tile}, i]
+  let s28 = s27 + "    let batch_col = kk + col_in_tile;\n"
+  let s29 = s28 +
+    "    if (i < INPUT_SIZE && batch_col < BATCH_SIZE) {\n"
+  let s30 = s29 +
+    "      let sample = indices[1u + indices[0] + batch_col];\n"
+  let s31 = s30 +
+    "      input_tile[local] = input[sample * INPUT_SIZE + i];\n"
+  let s32 = s31 + "    } else {\n"
+  let s33 = s32 + "      input_tile[local] = 0.0;\n"
+  let s34 = s33 + "    }\n"
+  // Load dh tile: dh[kk+row_in_tile, j]
+  let s35 = s34 + "    let batch_row = kk + row_in_tile;\n"
+  let s36 = s35 +
+    "    if (batch_row < BATCH_SIZE && j < HIDDEN_SIZE) {\n"
+  let s37 = s36 +
+    "      dh_tile[local] = dh[batch_row * HIDDEN_SIZE + j];\n"
+  let s38 = s37 + "    } else {\n"
+  let s39 = s38 + "      dh_tile[local] = 0.0;\n"
+  let s40 = s39 + "    }\n"
+  let s41 = s40 + "    workgroupBarrier();\n"
+  let s42 = s41 + "    for (var k : u32 = 0u; k < TILE_DIM; k = k + 1u) {\n"
+  let s43 = s42 +
+    "      acc = acc + input_tile[row_in_tile * TILE_DIM + k] * dh_tile[k * TILE_DIM + col_in_tile];\n"
+  let s44 = s43 + "    }\n"
+  let s45 = s44 + "    workgroupBarrier();\n"
+  let s46 = s45 + "    kk = kk + TILE_DIM;\n"
+  let s47 = s46 + "  }\n"
+  let s48 = s47 +
+    "  if (i < INPUT_SIZE && j < HIDDEN_SIZE) {\n"
+  let s49 = s48 + "    let scale = lr[0] / f32(BATCH_SIZE);\n"
+  let s50 = s49 +
+    "    weight1[i * HIDDEN_SIZE + j] = weight1[i * HIDDEN_SIZE + j] - acc * scale;\n"
+  let s51 = s50 + "  }\n"
+  s51 + "}\n"
 }
 
 ///|
@@ -1490,16 +1573,22 @@ pub fn mlp_train_shader_plan(
   if workgroup_size <= 0 {
     Err(InvalidSpec("workgroup_size must be > 0"))
   } else {
-    mlp_validate_spec(spec).map(fn(_) {
-      {
-        workgroup_size,
-        compute_dh_wgsl: wgsl_compute_dh(spec, workgroup_size),
-        grad_update_w1_wgsl: wgsl_grad_update_w1(spec, workgroup_size),
-        grad_update_b1_wgsl: wgsl_grad_update_b1(spec, workgroup_size),
-        grad_update_w2_wgsl: wgsl_grad_update_w2(spec, workgroup_size),
-        grad_update_b2_wgsl: wgsl_grad_update_b2(spec, workgroup_size),
-        epoch_accum_wgsl: wgsl_epoch_accum(spec, workgroup_size),
-      }
+    mlp_validate_spec(spec).bind(fn(_) {
+      workgroup_tile_dim(workgroup_size).map(fn(tile_dim) {
+        {
+          workgroup_size,
+          compute_dh_wgsl: wgsl_compute_dh(spec, workgroup_size),
+          grad_update_w1_wgsl: wgsl_grad_update_w1(
+            spec, workgroup_size, tile_dim,
+          ),
+          grad_update_b1_wgsl: wgsl_grad_update_b1(spec, workgroup_size),
+          grad_update_w2_wgsl: wgsl_grad_update_w2(
+            spec, workgroup_size, tile_dim,
+          ),
+          grad_update_b2_wgsl: wgsl_grad_update_b2(spec, workgroup_size),
+          epoch_accum_wgsl: wgsl_epoch_accum(spec, workgroup_size),
+        }
+      })
     })
   }
 }

@@ -18,6 +18,7 @@ struct TrainArgs {
   bench : Bool
   bench_no_readback : Bool
   use_blas : Bool
+  profile : Bool
   batch_size : Int?
   workgroup_size : Int?
   limit : Int?
@@ -32,6 +33,7 @@ fn train_args_default() -> TrainArgs {
     bench: false,
     bench_no_readback: false,
     use_blas: false,
+    profile: false,
     batch_size: None,
     workgroup_size: None,
     limit: None,
@@ -67,7 +69,7 @@ fn print_usage(program : String) -> Unit {
   println(
     "Usage: " +
     program +
-    " [--backend cpu|gpu|auto] [--epochs N] [--batch N] [--workgroup N] [--limit N] [--bench] [--bench-no-readback] [--blas] [--json]",
+    " [--backend cpu|gpu|auto] [--epochs N] [--batch N] [--workgroup N] [--limit N] [--bench] [--bench-no-readback] [--blas] [--profile] [--json]",
   )
   println("  --backend NAME   select backend (cpu|gpu|auto, default cpu)")
   println("  --epochs N       number of epochs (default 20)")
@@ -79,6 +81,7 @@ fn print_usage(program : String) -> Unit {
   println("  --blas           use BLAS-optimized CPU training")
   println("  --bench          print training time")
   println("  --bench-no-readback skip per-step readback (gpu only)")
+  println("  --profile        per-phase GPU profiling (gpu only)")
   println("  --json           emit JSON lines")
 }
 
@@ -126,6 +129,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
   let mut bench = default.bench
   let mut bench_no_readback = default.bench_no_readback
   let mut use_blas = default.use_blas
+  let mut profile = default.profile
   let mut batch_size = default.batch_size
   let mut workgroup_size = default.workgroup_size
   let mut limit = default.limit
@@ -180,6 +184,11 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
     }
     if arg == "--blas" {
       use_blas = true
+      i = i + 1
+      continue
+    }
+    if arg == "--profile" {
+      profile = true
       i = i + 1
       continue
     }
@@ -289,6 +298,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
     bench,
     bench_no_readback,
     use_blas,
+    profile,
     batch_size,
     workgroup_size,
     limit,
@@ -720,6 +730,7 @@ async fn gpu_train(
   config : @nn.MlpTrainConfig,
   workgroup_size : Int,
   bench_no_readback : Bool,
+  profile : Bool,
 ) -> Result[@nn.MlpTrainResult, String] {
   if config.epochs <= 0 {
     return Err("epochs must be > 0".to_string())
@@ -1828,6 +1839,12 @@ async fn gpu_train(
   let zero_f32_bytes = float_array_to_bytes([Float::from_int(0)])
   let metrics : Array[@nn.MlpTrainMetrics] = []
   let segment_count = ceil_div(effective_count, segment_samples)
+  // Profile accumulators (in ms via UInt64)
+  let mut prof_data_upload = 0UL
+  let mut prof_forward = 0UL
+  let mut prof_loss_reduce = 0UL
+  let mut prof_backward = 0UL
+  let mut prof_readback = 0UL
   for epoch = 0; epoch < config.epochs; epoch = epoch + 1 {
     if !bench_no_readback {
       ignore(
@@ -1874,6 +1891,7 @@ async fn gpu_train(
       let segment_labels = slice_i32_offset(
         all_labels, segment_offset, segment_effective,
       )
+      let t_upload_start = if profile { @env.now() } else { 0UL }
       let input_bytes = float_array_to_bytes(segment_inputs)
       let label_bytes = labels_array_to_bytes(segment_labels)
       ignore(
@@ -1906,9 +1924,14 @@ async fn gpu_train(
           device, indices_pipeline, indices_group, indices_dispatch_x,
         ),
       )
+      if profile {
+        @wgpu.device_poll(device, true)
+        prof_data_upload = prof_data_upload + (@env.now() - t_upload_start)
+      }
       let segment_steps = segment_effective / spec.batch_size
       for step = 0; step < segment_steps; step = step + 1 {
         let batch_start = step * spec.batch_size
+        let t_step_upload = if profile { @env.now() } else { 0UL }
         ignore(
           @wgpu.queue_write_buffer(
             queue,
@@ -1917,62 +1940,70 @@ async fn gpu_train(
             labels_array_to_bytes([batch_start]).to_array(),
           ),
         )
-        ignore(
-          @wgpu.device_dispatch_compute(
-            device,
-            layer1_pipeline,
-            layer1_group,
-            dispatch.layer1_dispatch_x,
-          ),
+        if profile {
+          prof_data_upload = prof_data_upload + (@env.now() - t_step_upload)
+        }
+        // Forward pass (layer1 + layer2_loss) via batch dispatch
+        let t_fwd = if profile { @env.now() } else { 0UL }
+        @wgpu.dispatch_batch_begin()
+        @wgpu.dispatch_batch_add(
+          layer1_pipeline,
+          layer1_group,
+          dispatch.layer1_dispatch_x,
         )
-        ignore(
-          @wgpu.device_dispatch_compute(
-            device, layer2_loss_pipeline, layer2_loss_group, loss_dispatch_x,
-          ),
+        @wgpu.dispatch_batch_add(
+          layer2_loss_pipeline, layer2_loss_group, loss_dispatch_x,
         )
+        @wgpu.dispatch_batch_submit(device)
+        if profile {
+          @wgpu.device_poll(device, true)
+          prof_forward = prof_forward + (@env.now() - t_fwd)
+        }
+        // Loss reduce
         if !bench_no_readback {
+          let t_lr = if profile { @env.now() } else { 0UL }
           ignore(
             @wgpu.device_dispatch_compute(
               device, loss_epoch_reduce_pipeline, loss_epoch_reduce_group, loss_reduce_dispatch_x,
             ),
           )
+          if profile {
+            @wgpu.device_poll(device, true)
+            prof_loss_reduce = prof_loss_reduce + (@env.now() - t_lr)
+          }
         }
-        // Dispatch order: w1, b1 first (read weight2), then w2, b2 (write weight2)
-        ignore(
-          @wgpu.device_dispatch_compute(
-            device,
-            grad_update_w1_pipeline,
-            grad_update_w1_group,
-            train_dispatch.grad_update_w1_dispatch_x,
-          ),
+        // Backward pass (grad updates) via batch dispatch
+        let t_bwd = if profile { @env.now() } else { 0UL }
+        @wgpu.dispatch_batch_begin()
+        @wgpu.dispatch_batch_add(
+          grad_update_w1_pipeline,
+          grad_update_w1_group,
+          train_dispatch.grad_update_w1_dispatch_x,
         )
-        ignore(
-          @wgpu.device_dispatch_compute(
-            device,
-            grad_update_b1_pipeline,
-            grad_update_b1_group,
-            train_dispatch.grad_update_b1_dispatch_x,
-          ),
+        @wgpu.dispatch_batch_add(
+          grad_update_b1_pipeline,
+          grad_update_b1_group,
+          train_dispatch.grad_update_b1_dispatch_x,
         )
-        ignore(
-          @wgpu.device_dispatch_compute(
-            device,
-            grad_update_w2_pipeline,
-            grad_update_w2_group,
-            train_dispatch.grad_update_w2_dispatch_x,
-          ),
+        @wgpu.dispatch_batch_add(
+          grad_update_w2_pipeline,
+          grad_update_w2_group,
+          train_dispatch.grad_update_w2_dispatch_x,
         )
-        ignore(
-          @wgpu.device_dispatch_compute(
-            device,
-            grad_update_b2_pipeline,
-            grad_update_b2_group,
-            train_dispatch.grad_update_b2_dispatch_x,
-          ),
+        @wgpu.dispatch_batch_add(
+          grad_update_b2_pipeline,
+          grad_update_b2_group,
+          train_dispatch.grad_update_b2_dispatch_x,
         )
+        @wgpu.dispatch_batch_submit(device)
+        if profile {
+          @wgpu.device_poll(device, true)
+          prof_backward = prof_backward + (@env.now() - t_bwd)
+        }
       }
     }
     if !bench_no_readback {
+      let t_rb = if profile { @env.now() } else { 0UL }
       let loss_bytes = match
         @wgpu.device_read_buffer_bytes(
           device,
@@ -2000,6 +2031,9 @@ async fn gpu_train(
         Ok(b) => b
         Err(err) => return Err(wgpu_error_to_string(err))
       }
+      if profile {
+        prof_readback = prof_readback + (@env.now() - t_rb)
+      }
       let seen = read_f32_le(seen_bytes, 0)
       if seen > 0 {
         let epoch_loss = read_f32_le(loss_bytes, 0) / seen
@@ -2007,6 +2041,27 @@ async fn gpu_train(
         metrics.push(@nn.mlp_train_metrics(epoch_loss, epoch_acc))
       }
     }
+  }
+  if profile {
+    let total = prof_data_upload +
+      prof_forward +
+      prof_loss_reduce +
+      prof_backward +
+      prof_readback
+    println(
+      "profile: forward_ms=" +
+      Float::from_uint64(prof_forward).to_string() +
+      " backward_ms=" +
+      Float::from_uint64(prof_backward).to_string() +
+      " loss_reduce_ms=" +
+      Float::from_uint64(prof_loss_reduce).to_string() +
+      " data_upload_ms=" +
+      Float::from_uint64(prof_data_upload).to_string() +
+      " readback_ms=" +
+      Float::from_uint64(prof_readback).to_string() +
+      " total_ms=" +
+      Float::from_uint64(total).to_string(),
+    )
   }
   let weight1_bytes = match
     @wgpu.device_read_buffer_bytes(device, weight1_buf, buffers.weight1_bytes) {
@@ -2176,6 +2231,7 @@ async fn run_train(
   bench_no_readback : Bool,
   use_blas : Bool,
   json : Bool,
+  profile : Bool,
 ) -> Result[TrainReport, String] {
   match backend {
     Cpu => {
@@ -2197,7 +2253,7 @@ async fn run_train(
         return Err("wgpu not supported".to_string())
       }
       let train_result = gpu_train(
-        spec, params, dataset, config, workgroup_size, bench_no_readback,
+        spec, params, dataset, config, workgroup_size, bench_no_readback, profile,
       )
       match train_result {
         Ok(r) => Ok({ backend: Gpu, result: r })
@@ -2219,7 +2275,7 @@ async fn run_train(
     Auto => {
       if @wgpu.is_supported() {
         let train_result = gpu_train(
-          spec, params, dataset, config, workgroup_size, bench_no_readback,
+          spec, params, dataset, config, workgroup_size, bench_no_readback, profile,
         )
         match train_result {
           Ok(r) => return Ok({ backend: Gpu, result: r })
@@ -2374,6 +2430,7 @@ async fn train_main() -> Unit {
     args.bench_no_readback,
     args.use_blas,
     args.json,
+    args.profile,
   )
   let train_end = if args.bench { @env.now() } else { 0UL }
   let report = match train_result {

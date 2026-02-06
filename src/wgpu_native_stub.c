@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+// wgpu-native extensions (not in webgpu.h)
+typedef uint64_t WGPUSubmissionIndex;
+WGPUBool wgpuDevicePoll(WGPUDevice device, WGPUBool wait, WGPUSubmissionIndex const * submissionIndex);
+
 typedef uint8_t *moonbit_bytes_t;
 
 moonbit_bytes_t moonbit_make_bytes(int32_t size, int init);
@@ -1190,4 +1194,77 @@ moonbit_bytes_t wgpu_native_device_read_buffer_bytes(
   wgpuBufferRelease(read_buffer);
 
   return out;
+}
+
+void wgpu_native_device_poll(WGPUDevice device, int wait) {
+  if (device == NULL) return;
+  wgpuDevicePoll(device, wait ? true : false, NULL);
+}
+
+// Batch dispatch API: accumulate multiple dispatches, submit as single command buffer
+#define MAX_MULTI_DISPATCH 16
+
+typedef struct {
+  WGPUComputePipeline pipeline;
+  WGPUBindGroup bind_group;
+  uint32_t dispatch_x;
+} dispatch_entry_t;
+
+static dispatch_entry_t g_dispatch_batch[MAX_MULTI_DISPATCH];
+static int g_dispatch_batch_count = 0;
+
+void wgpu_native_dispatch_batch_begin(void) {
+  g_dispatch_batch_count = 0;
+}
+
+void wgpu_native_dispatch_batch_add(
+  WGPUComputePipeline pipeline,
+  WGPUBindGroup bind_group,
+  int dispatch_x
+) {
+  if (g_dispatch_batch_count >= MAX_MULTI_DISPATCH) return;
+  if (pipeline == NULL || bind_group == NULL || dispatch_x <= 0) return;
+  g_dispatch_batch[g_dispatch_batch_count].pipeline = pipeline;
+  g_dispatch_batch[g_dispatch_batch_count].bind_group = bind_group;
+  g_dispatch_batch[g_dispatch_batch_count].dispatch_x = (uint32_t)dispatch_x;
+  g_dispatch_batch_count++;
+}
+
+void wgpu_native_dispatch_batch_submit(WGPUDevice device) {
+  if (device == NULL || g_dispatch_batch_count <= 0) return;
+
+  WGPUCommandEncoderDescriptor encoder_desc;
+  memset(&encoder_desc, 0, sizeof(encoder_desc));
+  encoder_desc.nextInChain = NULL;
+  encoder_desc.label = string_view_empty();
+
+  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &encoder_desc);
+  if (encoder == NULL) return;
+
+  for (int i = 0; i < g_dispatch_batch_count; i++) {
+    WGPUComputePassDescriptor pass_desc;
+    memset(&pass_desc, 0, sizeof(pass_desc));
+    pass_desc.nextInChain = NULL;
+    pass_desc.label = string_view_empty();
+    pass_desc.timestampWrites = NULL;
+
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(encoder, &pass_desc);
+    wgpuComputePassEncoderSetPipeline(pass, g_dispatch_batch[i].pipeline);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, g_dispatch_batch[i].bind_group, 0, NULL);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, g_dispatch_batch[i].dispatch_x, 1, 1);
+    wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
+  }
+
+  WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, NULL);
+  WGPUQueue queue = wgpuDeviceGetQueue(device);
+  if (queue != NULL && cmd != NULL) {
+    wgpuQueueSubmit(queue, 1, &cmd);
+  }
+
+  if (cmd != NULL) {
+    wgpuCommandBufferRelease(cmd);
+  }
+  wgpuCommandEncoderRelease(encoder);
+  g_dispatch_batch_count = 0;
 }

@@ -84,5 +84,16 @@ golden-gen:
 golden-check:
     moon run --target native src/golden-check
 
+# GPU profiling
+profile-gpu *ARGS:
+    moon run --target native src/train -- --gpu --profile --bench {{ARGS}}
+
+# Benchmark comparison (wgpu.mbt vs PyTorch)
+bench-compare:
+    @echo "=== wgpu.mbt GPU ==="
+    moon run --target native src/train -- --gpu --epochs 5 --limit 1024 --bench --profile
+    @echo "=== PyTorch MPS ==="
+    cd ~/sandbox/torch-mnist && uv run python main.py --epochs 5 --limit 1024 --device mps --profile
+
 # Pre-release check
 release-check: fmt info check test

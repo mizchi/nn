@@ -5,6 +5,30 @@ pub fn is_supported() -> Bool {
 }
 
 ///|
+pub fn device_poll(_device : Device, _wait : Bool) -> Unit {
+  ()
+}
+
+///|
+pub fn dispatch_batch_begin() -> Unit {
+  ()
+}
+
+///|
+pub fn dispatch_batch_add(
+  _pipeline : ComputePipeline,
+  _bind_group : BindGroup,
+  _dispatch_x : Int,
+) -> Unit {
+  ()
+}
+
+///|
+pub fn dispatch_batch_submit(_device : Device) -> Unit {
+  ()
+}
+
+///|
 pub async fn request_adapter(
   _options : RequestAdapterOptions,
 ) -> Result[Adapter, WgpuError] {

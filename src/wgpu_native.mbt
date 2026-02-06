@@ -555,6 +555,46 @@ extern "C" fn native_device_read_buffer_bytes(
 ) -> Bytes = "wgpu_native_device_read_buffer_bytes"
 
 ///|
+extern "C" fn native_device_poll(device : Device, wait : Bool) -> Unit = "wgpu_native_device_poll"
+
+///|
+pub fn device_poll(device : Device, wait : Bool) -> Unit {
+  native_device_poll(device, wait)
+}
+
+///|
+extern "C" fn native_dispatch_batch_begin() -> Unit = "wgpu_native_dispatch_batch_begin"
+
+///|
+extern "C" fn native_dispatch_batch_add(
+  pipeline : ComputePipeline,
+  bind_group : BindGroup,
+  dispatch_x : Int,
+) -> Unit = "wgpu_native_dispatch_batch_add"
+
+///|
+extern "C" fn native_dispatch_batch_submit(device : Device) -> Unit = "wgpu_native_dispatch_batch_submit"
+
+///|
+pub fn dispatch_batch_begin() -> Unit {
+  native_dispatch_batch_begin()
+}
+
+///|
+pub fn dispatch_batch_add(
+  pipeline : ComputePipeline,
+  bind_group : BindGroup,
+  dispatch_x : Int,
+) -> Unit {
+  native_dispatch_batch_add(pipeline, bind_group, dispatch_x)
+}
+
+///|
+pub fn dispatch_batch_submit(device : Device) -> Unit {
+  native_dispatch_batch_submit(device)
+}
+
+///|
 pub fn is_supported() -> Bool {
   true
 }

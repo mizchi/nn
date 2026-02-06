@@ -555,3 +555,239 @@ test "numpy_style_normalize" {
   // Should have unit length
   assert_near(vec_nrm2(normalized), 1.0, 0.0001)
 }
+
+// ============================================================================
+// NumPy test_multiarray.py style tests
+// ============================================================================
+
+///|
+test "np_zeros_all_zero" {
+  // From NumPy: assert_equal(np.count_nonzero(d), 0); assert_(not d.any())
+  let d = vec_zeros(13)
+  assert_eq(vec_sum(d), 0.0)
+  // Check no element is nonzero
+  for i = 0; i < vec_len(d); i = i + 1 {
+    assert_eq(vec_at(d, i), 0.0)
+  }
+}
+
+///|
+test "np_ones_construction" {
+  // From NumPy: d = np.ones(6); r = np.array([d, d]); assert_equal(r, np.ones((2, 6)))
+  let d = vec_ones(6)
+  // Reshape to 2x6
+  let row0 = vec_to_array(d)
+  let row1 = vec_to_array(d)
+  let combined : Array[Float] = []
+  for i = 0; i < row0.length(); i = i + 1 {
+    combined.push(row0[i])
+  }
+  for i = 0; i < row1.length(); i = i + 1 {
+    combined.push(row1[i])
+  }
+  let m = mat_view(combined, 2, 6)
+  let expected = mat_ones(2, 6)
+  assert_true(mat_allclose(m, expected, 0.0001))
+}
+
+// ============================================================================
+// NumPy test_function_base.py style tests (linspace, arange)
+// ============================================================================
+
+///|
+test "np_linspace_default_50" {
+  // From NumPy: y = linspace(0, 10); assert_(len(y) == 50)
+  let y = vec_linspace(0.0, 10.0, 50)
+  assert_eq(vec_len(y), 50)
+}
+
+///|
+test "np_linspace_endpoint" {
+  // From NumPy: y = linspace(2, 10, num=100); assert_(y[-1] == 10)
+  let y = vec_linspace(2.0, 10.0, 100)
+  assert_eq(vec_at(y, 99), 10.0)
+}
+
+///|
+test "np_linspace_single" {
+  // From NumPy: y = list(linspace(0, 1, 1)); assert_(y == [0.0])
+  let y = vec_linspace(0.0, 1.0, 1)
+  assert_eq(vec_len(y), 1)
+  assert_eq(vec_at(y, 0), 0.0)
+}
+
+///|
+test "np_arange_linspace_equivalence" {
+  // From NumPy: assert_equal(linspace(0, j, j+1, dtype=int), arange(j+1, dtype=int))
+  // Test for j = 10: linspace(0, 10, 11) should equal arange(0, 11, 1)
+  let lin = vec_linspace(0.0, 10.0, 11)
+  let ara = vec_arange(0.0, 11.0, 1.0)
+  assert_eq(vec_len(lin), vec_len(ara))
+  for i = 0; i < vec_len(lin); i = i + 1 {
+    assert_near(vec_at(lin, i), vec_at(ara, i), 0.0001)
+  }
+}
+
+// ============================================================================
+// NumPy test_linalg.py style tests
+// ============================================================================
+
+///|
+test "np_dot_negative" {
+  // From NumPy: a = [1, 2, 3, 4]; b = [-1, -2, -3, -4]
+  // Expected: 1*(-1) + 2*(-2) + 3*(-3) + 4*(-4) = -30
+  let a = vec_from_array([1.0, 2.0, 3.0, 4.0])
+  let b = vec_from_array([-1.0, -2.0, -3.0, -4.0])
+  assert_near(vec_dot(a, b), -30.0, 0.0001)
+}
+
+///|
+test "np_matmul_transpose" {
+  // From NumPy: x = np.arange(6).reshape((2, 3))
+  // actual = np.linalg.matmul(x, x.T); expected = np.array([[5, 14], [14, 50]])
+  // x = [[0, 1, 2], [3, 4, 5]]
+  let x = mat_view([0.0, 1.0, 2.0, 3.0, 4.0, 5.0], 2, 3)
+  let xt = mat_transpose(x)
+  let actual = mat_matmul(x, xt)
+  // x @ x.T:
+  // [0,1,2] @ [0,3] = 0*0 + 1*1 + 2*2 = 5
+  // [0,1,2] @ [1,4] = 0*1 + 1*4 + 2*5 = 14 (wait, wrong)
+  // Actually x.T = [[0, 3], [1, 4], [2, 5]] (3x2)
+  // So x @ x.T (2x3 @ 3x2 = 2x2):
+  // [0,1,2] @ [0,1,2]^T = 0*0 + 1*1 + 2*2 = 5
+  // [0,1,2] @ [3,4,5]^T = 0*3 + 1*4 + 2*5 = 14
+  // [3,4,5] @ [0,1,2]^T = 3*0 + 4*1 + 5*2 = 14
+  // [3,4,5] @ [3,4,5]^T = 3*3 + 4*4 + 5*5 = 50
+  let expected = mat_view([5.0, 14.0, 14.0, 50.0], 2, 2)
+  assert_true(mat_allclose(actual, expected, 0.0001))
+}
+
+///|
+test "np_matrix_transpose_roundtrip" {
+  // From NumPy: actual = np.linalg.matrix_transpose(x); expected = x.T
+  let x = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
+  let xt = mat_transpose(x)
+  let xtt = mat_transpose(xt)
+  // x.T.T == x
+  assert_true(mat_allclose(x, xtt, 0.0001))
+}
+
+///|
+test "np_eye_identity" {
+  // From NumPy: result = identity(4); expected = np.eye(4)
+  let eye4 = mat_eye(4)
+  assert_eq(mat_rows(eye4), 4)
+  assert_eq(mat_cols(eye4), 4)
+  // Check diagonal is 1, off-diagonal is 0
+  for i = 0; i < 4; i = i + 1 {
+    for j = 0; j < 4; j = j + 1 {
+      if i == j {
+        assert_eq(mat_at(eye4, i, j), 1.0)
+      } else {
+        assert_eq(mat_at(eye4, i, j), 0.0)
+      }
+    }
+  }
+}
+
+///|
+test "np_vector_norm_3x3" {
+  // From NumPy: x = np.arange(9).reshape((3, 3))
+  // actual = np.linalg.vector_norm(x) ≈ 14.2828
+  // ||[0,1,2,3,4,5,6,7,8]|| = sqrt(0+1+4+9+16+25+36+49+64) = sqrt(204) ≈ 14.2828
+  let x = mat_view(
+    [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+    3,
+    3,
+  )
+  let v = mat_flatten(x)
+  let norm = vec_nrm2(v)
+  assert_near(norm, 14.2828, 0.001)
+}
+
+// ============================================================================
+// Additional NumPy-style edge case tests
+// ============================================================================
+
+///|
+test "np_arange_negative_step" {
+  // np.arange(5, 0, -1) -> [5, 4, 3, 2, 1]
+  let v = vec_arange(5.0, 0.0, -1.0)
+  assert_eq(vec_len(v), 5)
+  assert_eq(vec_at(v, 0), 5.0)
+  assert_eq(vec_at(v, 4), 1.0)
+}
+
+///|
+test "np_sum_empty_like" {
+  // Edge case: sum of zeros should be 0
+  let z = vec_zeros(100)
+  assert_eq(vec_sum(z), 0.0)
+}
+
+///|
+test "np_mean_single" {
+  // mean of single element array
+  let v = vec_from_array([42.0])
+  assert_eq(vec_mean(v), 42.0)
+}
+
+///|
+test "np_std_uniform" {
+  // std of uniform array should be 0
+  let v = vec_from_array([5.0, 5.0, 5.0, 5.0])
+  assert_eq(vec_std(v), 0.0)
+}
+
+///|
+test "np_matmul_identity" {
+  // A @ I = A
+  let a = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], 3, 3)
+  let eye3 = mat_eye(3)
+  let result = mat_matmul(a, eye3)
+  assert_true(mat_allclose(a, result, 0.0001))
+}
+
+///|
+test "np_transpose_square" {
+  // For symmetric matrix, A.T == A
+  let sym = mat_view([1.0, 2.0, 2.0, 3.0], 2, 2)
+  let sym_t = mat_transpose(sym)
+  assert_true(mat_allclose(sym, sym_t, 0.0001))
+}
+
+///|
+test "np_clip_all_inside" {
+  // If all values inside range, clip should return same
+  let v = vec_from_array([0.2, 0.5, 0.8])
+  let clipped = vec_clip(v, 0.0, 1.0)
+  assert_true(vec_allclose(v, clipped, 0.0001))
+}
+
+///|
+test "np_exp_log_inverse" {
+  // exp(log(x)) == x for x > 0
+  let v = vec_from_array([0.5, 1.0, 2.0, 10.0])
+  let result = vec_exp(vec_log(v))
+  assert_true(vec_allclose(v, result, 0.0001))
+}
+
+///|
+test "np_sqrt_square" {
+  // sqrt(x^2) == |x| for x >= 0
+  let v = vec_from_array([1.0, 4.0, 9.0, 16.0])
+  let squared = vec_pow(v, 0.5)
+  let expected = vec_from_array([1.0, 2.0, 3.0, 4.0])
+  assert_true(vec_allclose(squared, expected, 0.0001))
+}
+
+///|
+test "np_sum_axis_consistency" {
+  // sum(axis=0).sum() == sum(axis=1).sum() == sum()
+  let m = mat_view([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 2, 3)
+  let sum_all = mat_sum(m)
+  let sum_axis0 = vec_sum(mat_sum_axis0(m))
+  let sum_axis1 = vec_sum(mat_sum_axis1(m))
+  assert_eq(sum_all, sum_axis0)
+  assert_eq(sum_all, sum_axis1)
+}

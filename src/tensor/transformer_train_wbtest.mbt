@@ -194,6 +194,35 @@ test "cross_entropy_backward_shape" {
 }
 
 ///|
+test "forward_with_cache_matches_forward" {
+  let config = transformer_config(4, 8, 1, 1, 16, 8).unwrap()
+  let params = transformer_init_params(config, 123)
+  let tokens = [[0, 1, 2, 3, 1, 2, 3, 0]]
+  let mask = causal_mask(8).unwrap()
+  // forward (inference)
+  let logits_ref = transformer_forward(tokens, params, config, Some(mask))
+    .unwrap()
+  // forward_with_cache (training)
+  let (logits_cached, _) = transformer_forward_with_cache(
+    tokens, params, config, Some(mask),
+  )
+  // Every element must match
+  let n = logits_ref.numel()
+  inspect(n, content=logits_cached.numel().to_string())
+  let ref_c = logits_ref.contiguous()
+  let cac_c = logits_cached.contiguous()
+  let mut max_diff = 0.0
+  for i = 0; i < n; i = i + 1 {
+    let diff = (ref_c.data[i] - cac_c.data[i]).to_double().abs()
+    if diff > max_diff {
+      max_diff = diff
+    }
+  }
+  // Float32 ops should be identical (same computation order)
+  assert_true(max_diff < 1.0e-5)
+}
+
+///|
 test "training_loss_decreases" {
   let text = "abcabcabcabcabcabc"
   let tokenizer = char_tokenizer_from_text(text)
@@ -205,4 +234,45 @@ test "training_loss_decreases" {
   let last_loss = losses[losses.length() - 1]
   let reduction = (first_loss - last_loss) / first_loss
   assert_true(reduction.to_double() > 0.3)
+}
+
+///|
+test "trained_model_generates_learned_pattern" {
+  let text = "abcabcabcabcabcabcabcabcabc"
+  let tokenizer = char_tokenizer_from_text(text)
+  let vocab = tokenizer.vocab_size()
+  // max_seq_len=16 so we have room to generate after a short prompt
+  let config = transformer_config(vocab, 8, 1, 1, 16, 16).unwrap()
+  let params = transformer_init_params(config, 42)
+  let grads = transformer_zero_grads(config)
+  let all_ids = tokenizer.encode(text)
+  let seq_len = 8 // training window size (< max_seq_len)
+  let inputs : Array[Array[Int]] = []
+  let targets : Array[Int] = []
+  for i = 0; i + seq_len < all_ids.length(); i = i + 1 {
+    let input_seq : Array[Int] = []
+    for j = 0; j < seq_len; j = j + 1 {
+      input_seq.push(all_ids[i + j])
+    }
+    inputs.push(input_seq)
+    targets.push(all_ids[i + seq_len])
+  }
+  let mask = causal_mask(seq_len).unwrap()
+  for _epoch = 0; _epoch < 50; _epoch = _epoch + 1 {
+    zero_grads(grads)
+    let (_, cache) = transformer_forward_with_cache(
+      inputs, params, config, Some(mask),
+    )
+    let _ = transformer_backward(cache, params, config, grads, targets)
+    sgd_update(params, grads, Float::from_double(0.01))
+  }
+  // Generate from "abcab" prompt — next should be 'c' (pattern: abc repeating)
+  let prompt = tokenizer.encode("abcab")
+  let generated = generate_greedy(params, config, prompt, 3).unwrap()
+  let output = tokenizer.decode(generated)
+  let chars = output.to_array()
+  // prompt is 5 chars, generated 3 more -> 8 total
+  assert_true(chars.length() == 8)
+  // After "abcab", the pattern demands 'c'
+  assert_true(chars[5] == 'c')
 }

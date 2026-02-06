@@ -1296,6 +1296,101 @@ pub fn vec_has_inf(v : Vec) -> Bool {
 }
 
 // ============================================================================
+// Boolean operations
+// ============================================================================
+
+///|
+/// Returns true if any element is non-zero (truthy)
+pub fn vec_any(v : Vec) -> Bool {
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) != 0.0 {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Returns true if all elements are non-zero (truthy)
+pub fn vec_all(v : Vec) -> Bool {
+  for i = 0; i < v.len; i = i + 1 {
+    if vec_at(v, i) == 0.0 {
+      return false
+    }
+  }
+  true
+}
+
+// ============================================================================
+// Element-wise operations
+// ============================================================================
+
+///|
+/// Element-wise sign: -1 for negative, 0 for zero, 1 for positive
+pub fn vec_sign_into(out : Vec, input : Vec) -> Unit {
+  vec_check_same_len(out, input)
+  let one : Float = 1.0
+  let neg_one : Float = -1.0
+  let zero : Float = 0.0
+  for i = 0; i < input.len; i = i + 1 {
+    let v = vec_at(input, i)
+    let s = if v > zero {
+      one
+    } else if v < zero {
+      neg_one
+    } else {
+      zero
+    }
+    vec_set(out, i, s)
+  }
+}
+
+///|
+pub fn vec_sign(input : Vec) -> Vec {
+  let out = vec_zeros(input.len)
+  vec_sign_into(out, input)
+  out
+}
+
+///|
+/// Element-wise maximum of two vectors
+pub fn vec_maximum_into(out : Vec, a : Vec, b : Vec) -> Unit {
+  vec_check_same_len(out, a)
+  vec_check_same_len(a, b)
+  for i = 0; i < a.len; i = i + 1 {
+    let va = vec_at(a, i)
+    let vb = vec_at(b, i)
+    vec_set(out, i, if va > vb { va } else { vb })
+  }
+}
+
+///|
+pub fn vec_maximum(a : Vec, b : Vec) -> Vec {
+  let out = vec_zeros(a.len)
+  vec_maximum_into(out, a, b)
+  out
+}
+
+///|
+/// Element-wise minimum of two vectors
+pub fn vec_minimum_into(out : Vec, a : Vec, b : Vec) -> Unit {
+  vec_check_same_len(out, a)
+  vec_check_same_len(a, b)
+  for i = 0; i < a.len; i = i + 1 {
+    let va = vec_at(a, i)
+    let vb = vec_at(b, i)
+    vec_set(out, i, if va < vb { va } else { vb })
+  }
+}
+
+///|
+pub fn vec_minimum(a : Vec, b : Vec) -> Vec {
+  let out = vec_zeros(a.len)
+  vec_minimum_into(out, a, b)
+  out
+}
+
+// ============================================================================
 // Slice and reshape
 // ============================================================================
 

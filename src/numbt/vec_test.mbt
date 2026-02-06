@@ -1353,3 +1353,58 @@ test "fmat_lstsq_exact" {
     None => panic()
   }
 }
+
+// ============================================================================
+// Boolean operations tests
+// ============================================================================
+
+///|
+test "vec_any" {
+  assert_eq(vec_any(vec_from_array([0.0, 0.0, 0.0])), false)
+  assert_eq(vec_any(vec_from_array([0.0, 1.0, 0.0])), true)
+  assert_eq(vec_any(vec_from_array([1.0, 2.0, 3.0])), true)
+  assert_eq(vec_any(vec_zeros(5)), false)
+}
+
+///|
+test "vec_all" {
+  assert_eq(vec_all(vec_from_array([1.0, 2.0, 3.0])), true)
+  assert_eq(vec_all(vec_from_array([1.0, 0.0, 3.0])), false)
+  assert_eq(vec_all(vec_from_array([0.0, 0.0, 0.0])), false)
+  assert_eq(vec_all(vec_ones(5)), true)
+}
+
+// ============================================================================
+// Element-wise operations tests
+// ============================================================================
+
+///|
+test "vec_sign" {
+  let v = vec_from_array([-3.0, -0.5, 0.0, 0.5, 3.0])
+  let result = vec_sign(v)
+  assert_eq(vec_to_array(result), [-1.0, -1.0, 0.0, 1.0, 1.0])
+}
+
+///|
+test "vec_maximum" {
+  let a = vec_from_array([1.0, 5.0, 3.0, 7.0])
+  let b = vec_from_array([2.0, 3.0, 4.0, 6.0])
+  let result = vec_maximum(a, b)
+  assert_eq(vec_to_array(result), [2.0, 5.0, 4.0, 7.0])
+}
+
+///|
+test "vec_minimum" {
+  let a = vec_from_array([1.0, 5.0, 3.0, 7.0])
+  let b = vec_from_array([2.0, 3.0, 4.0, 6.0])
+  let result = vec_minimum(a, b)
+  assert_eq(vec_to_array(result), [1.0, 3.0, 3.0, 6.0])
+}
+
+///|
+test "vec_maximum_minimum_negative" {
+  let a = vec_from_array([-1.0, -5.0, 0.0])
+  let b = vec_from_array([-2.0, -3.0, -1.0])
+  assert_eq(vec_to_array(vec_maximum(a, b)), [-1.0, -3.0, 0.0])
+  assert_eq(vec_to_array(vec_minimum(a, b)), [-2.0, -5.0, -1.0])
+}

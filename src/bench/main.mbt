@@ -68,6 +68,14 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     if arg == "--help" || arg == "-h" {
       return Err("help")
     }
+    if arg == "--blas" {
+      i = i + 1
+      continue
+    }
+    if arg == "--fused" {
+      i = i + 1
+      continue
+    }
     if arg == "--input" {
       if i + 1 >= args.length() {
         return Err("missing value for --input")
@@ -417,9 +425,282 @@ fn run_bench(cfg : BenchArgs) -> Unit {
 }
 
 ///|
+fn run_blas_bench(cfg : BenchArgs) -> Unit {
+  // Setup matrices (same dimensions as MLP layer 1)
+  let zero = Float::from_int(0)
+
+  // Single-sample data
+  let input_data = seeded_values(0, cfg.input_size, 0)
+  let weight1_data = seeded_values(1, cfg.input_size * cfg.hidden_size, 100)
+  let bias1_data = seeded_values(2, cfg.hidden_size, 200)
+  let hidden_data = Array::make(cfg.hidden_size, zero)
+
+  // Batch data
+  let batch_input = seeded_values(0, cfg.batch_size * cfg.input_size, 0)
+  let batch_hidden = Array::make(cfg.batch_size * cfg.hidden_size, zero)
+  let batch_hidden_pure = Array::make(cfg.batch_size * cfg.hidden_size, zero)
+
+  // Create numbt structures for single-sample
+  let input = @numbt.vec_from_array(input_data)
+  let mat = @numbt.mat_view(weight1_data, cfg.input_size, cfg.hidden_size)
+  let bias = @numbt.vec_from_array(bias1_data)
+  let hidden = @numbt.vec_from_array(hidden_data)
+
+  // Clone for BLAS single version
+  let hidden_blas_data = Array::make(cfg.hidden_size, zero)
+  let hidden_blas = @numbt.vec_from_array(hidden_blas_data)
+
+  // Warmup (sgemm only)
+  let mut i = 0
+  while i < cfg.warmup {
+    @numbt.batch_matmul_bias_relu_blas(
+      batch_input,
+      weight1_data,
+      bias1_data,
+      batch_hidden,
+      cfg.batch_size,
+      cfg.input_size,
+      cfg.hidden_size,
+    )
+    i = i + 1
+  }
+  // Suppress unused variable warnings
+  ignore(input)
+  ignore(mat)
+  ignore(bias)
+  ignore(hidden)
+  ignore(hidden_blas)
+  ignore(hidden_data)
+  ignore(input_data)
+  ignore(batch_hidden_pure)
+
+  // Prepare second layer
+  let weight2_data = seeded_values(3, cfg.hidden_size * cfg.output_size, 300)
+  let bias2_data = seeded_values(4, cfg.output_size, 400)
+  let batch_output = Array::make(cfg.batch_size * cfg.output_size, zero)
+
+  // Benchmark: Full 2-layer MLP forward with BLAS sgemm
+  let sgemm_start = @env.now()
+  i = 0
+  while i < cfg.iters {
+    // Layer 1: batch_input @ weight1 + bias1 -> batch_hidden (with ReLU)
+    @numbt.batch_matmul_bias_relu_blas(
+      batch_input,
+      weight1_data,
+      bias1_data,
+      batch_hidden,
+      cfg.batch_size,
+      cfg.input_size,
+      cfg.hidden_size,
+    )
+    // Layer 2: batch_hidden @ weight2 + bias2 -> batch_output (no activation)
+    @numbt.batch_matmul_bias_blas(
+      batch_hidden,
+      weight2_data,
+      bias2_data,
+      batch_output,
+      cfg.batch_size,
+      cfg.hidden_size,
+      cfg.output_size,
+    )
+    i = i + 1
+  }
+  let sgemm_end = @env.now()
+  let sgemm_total_ms = Float::from_uint64(sgemm_end - sgemm_start)
+
+  // Calculate per-batch time in microseconds
+  let sgemm_per_batch_us = sgemm_total_ms * Float::from_int(1000) / Float::from_int(
+      cfg.iters,
+    )
+
+  println(
+    "{\"type\":\"blas_mlp_forward_bench\"" +
+    ",\"input\":" +
+    cfg.input_size.to_string() +
+    ",\"hidden\":" +
+    cfg.hidden_size.to_string() +
+    ",\"output\":" +
+    cfg.output_size.to_string() +
+    ",\"batch\":" +
+    cfg.batch_size.to_string() +
+    ",\"iters\":" +
+    cfg.iters.to_string() +
+    ",\"sgemm_total_ms\":" +
+    sgemm_total_ms.to_string() +
+    ",\"sgemm_per_batch_us\":" +
+    sgemm_per_batch_us.to_string() +
+    "}",
+  )
+}
+
+///|
+fn run_blas_fused_bench(cfg : BenchArgs) -> Unit {
+  // Setup data
+  let zero = Float::from_int(0)
+  let batch_input = seeded_values(0, cfg.batch_size * cfg.input_size, 0)
+  let weight1_data = seeded_values(1, cfg.input_size * cfg.hidden_size, 100)
+  let bias1_data = seeded_values(2, cfg.hidden_size, 200)
+  let weight2_data = seeded_values(3, cfg.hidden_size * cfg.output_size, 300)
+  let bias2_data = seeded_values(4, cfg.output_size, 400)
+
+  // Create C-side buffers and initialize (single copy)
+  let bufs = @blas.mlp_buffers_create(
+    cfg.batch_size,
+    cfg.input_size,
+    cfg.hidden_size,
+    cfg.output_size,
+  )
+  @blas.mlp_buffers_init(
+    bufs,
+    batch_input,
+    weight1_data,
+    bias1_data,
+    weight2_data,
+    bias2_data,
+  )
+
+  // Warmup
+  let mut i = 0
+  while i < cfg.warmup {
+    @blas.mlp_forward_fused(bufs)
+    i = i + 1
+  }
+
+  // Measure multiple batches to get meaningful timing
+  // Run in groups of 1000 to accumulate timing
+  let group_size = 1000
+  let groups = if cfg.iters >= group_size {
+    cfg.iters / group_size
+  } else {
+    1
+  }
+  let actual_iters = groups * group_size
+
+  // Benchmark: Zero-copy forward pass
+  let fused_start = @env.now()
+  i = 0
+  while i < actual_iters {
+    @blas.mlp_forward_fused(bufs)
+    i = i + 1
+  }
+  let fused_end = @env.now()
+  let fused_total_ms = Float::from_uint64(fused_end - fused_start)
+
+  // Get output for verification
+  let fused_output = Array::make(cfg.batch_size * cfg.output_size, zero)
+  @blas.mlp_buffers_get_output(bufs, fused_output)
+
+  // Compare with old BLAS (with copy overhead)
+  let batch_hidden = Array::make(cfg.batch_size * cfg.hidden_size, zero)
+  let batch_output = Array::make(cfg.batch_size * cfg.output_size, zero)
+
+  let copy_start = @env.now()
+  i = 0
+  while i < actual_iters {
+    // Layer 1: batch_input @ weight1 + bias1 -> batch_hidden (with ReLU)
+    @numbt.batch_matmul_bias_relu_blas(
+      batch_input,
+      weight1_data,
+      bias1_data,
+      batch_hidden,
+      cfg.batch_size,
+      cfg.input_size,
+      cfg.hidden_size,
+    )
+    // Layer 2: batch_hidden @ weight2 + bias2 -> batch_output (no activation)
+    @numbt.batch_matmul_bias_blas(
+      batch_hidden,
+      weight2_data,
+      bias2_data,
+      batch_output,
+      cfg.batch_size,
+      cfg.hidden_size,
+      cfg.output_size,
+    )
+    i = i + 1
+  }
+  let copy_end = @env.now()
+  let copy_total_ms = Float::from_uint64(copy_end - copy_start)
+
+  // Verify outputs match (first few values)
+  let mut output_match = true
+  let check_count = if cfg.output_size < 3 { cfg.output_size } else { 3 }
+  i = 0
+  while i < check_count {
+    let diff = (fused_output[i] - batch_output[i]).abs()
+    if diff > Float::from_int(1) / Float::from_int(1000) {
+      output_match = false
+    }
+    i = i + 1
+  }
+
+  // Calculate per-batch time in microseconds
+  let fused_per_batch_us = fused_total_ms * Float::from_int(1000) / Float::from_int(
+      actual_iters,
+    )
+  let copy_per_batch_us = copy_total_ms * Float::from_int(1000) / Float::from_int(
+      actual_iters,
+    )
+  let speedup = if fused_total_ms > Float::from_int(0) {
+    copy_total_ms / fused_total_ms
+  } else {
+    Float::from_int(-1) // indicates fused was too fast to measure
+  }
+
+  // Clean up
+  @blas.mlp_buffers_free(bufs)
+
+  println(
+    "{\"type\":\"blas_fused_bench\"" +
+    ",\"input\":" +
+    cfg.input_size.to_string() +
+    ",\"hidden\":" +
+    cfg.hidden_size.to_string() +
+    ",\"output\":" +
+    cfg.output_size.to_string() +
+    ",\"batch\":" +
+    cfg.batch_size.to_string() +
+    ",\"actual_iters\":" +
+    actual_iters.to_string() +
+    ",\"fused_total_ms\":" +
+    fused_total_ms.to_string() +
+    ",\"fused_per_batch_us\":" +
+    fused_per_batch_us.to_string() +
+    ",\"copy_total_ms\":" +
+    copy_total_ms.to_string() +
+    ",\"copy_per_batch_us\":" +
+    copy_per_batch_us.to_string() +
+    ",\"speedup\":" +
+    speedup.to_string() +
+    ",\"output_match\":" +
+    output_match.to_string() +
+    ",\"sample_fused_0\":" +
+    fused_output[0].to_string() +
+    ",\"sample_copy_0\":" +
+    batch_output[0].to_string() +
+    "}",
+  )
+}
+
+///|
 fn main {
   let args = @env.args()
   let program = if args.length() > 0 { args[0] } else { "bench" }
+
+  // Check for --blas and --fused flags
+  let mut use_blas = false
+  let mut use_fused = false
+  let mut i = 1
+  while i < args.length() {
+    if args[i] == "--blas" {
+      use_blas = true
+    }
+    if args[i] == "--fused" {
+      use_fused = true
+    }
+    i = i + 1
+  }
+
   let cfg_result = parse_args(args)
   let cfg = match cfg_result {
     Ok(c) => c
@@ -431,5 +712,12 @@ fn main {
       return
     }
   }
-  run_bench(cfg)
+
+  if use_fused {
+    run_blas_fused_bench(cfg)
+  } else if use_blas {
+    run_blas_bench(cfg)
+  } else {
+    run_bench(cfg)
+  }
 }

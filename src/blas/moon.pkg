@@ -1,0 +1,9 @@
+options(
+  link: {
+    "native": {
+      "cc-link-flags": "-framework Accelerate",
+    },
+  },
+  "native-stub": [ "blas_stub.c" ],
+  "supported-targets": [ "native" ],
+)

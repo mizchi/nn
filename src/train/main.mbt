@@ -16,6 +16,7 @@ struct TrainArgs {
   backend : TrainBackend
   bench : Bool
   bench_no_readback : Bool
+  use_blas : Bool
   batch_size : Int?
   workgroup_size : Int?
   limit : Int?
@@ -29,6 +30,7 @@ fn train_args_default() -> TrainArgs {
     backend: Cpu,
     bench: false,
     bench_no_readback: false,
+    use_blas: false,
     batch_size: None,
     workgroup_size: None,
     limit: None,
@@ -63,7 +65,7 @@ fn print_usage(program : String) -> Unit {
   println(
     "Usage: " +
     program +
-    " [--backend cpu|gpu|auto] [--epochs N] [--batch N] [--workgroup N] [--limit N] [--bench] [--bench-no-readback] [--json]",
+    " [--backend cpu|gpu|auto] [--epochs N] [--batch N] [--workgroup N] [--limit N] [--bench] [--bench-no-readback] [--blas] [--json]",
   )
   println("  --backend NAME   select backend (cpu|gpu|auto, default cpu)")
   println("  --epochs N       number of epochs (default 20)")
@@ -72,6 +74,7 @@ fn print_usage(program : String) -> Unit {
   println("  --limit N        use first N training samples")
   println("  --cpu            alias for --backend cpu")
   println("  --gpu            alias for --backend gpu")
+  println("  --blas           use BLAS-optimized CPU training")
   println("  --bench          print training time")
   println("  --bench-no-readback skip per-step readback (gpu only)")
   println("  --json           emit JSON lines")
@@ -120,6 +123,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
   let mut backend = default.backend
   let mut bench = default.bench
   let mut bench_no_readback = default.bench_no_readback
+  let mut use_blas = default.use_blas
   let mut batch_size = default.batch_size
   let mut workgroup_size = default.workgroup_size
   let mut limit = default.limit
@@ -164,6 +168,11 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
     }
     if arg == "--bench" {
       bench = true
+      i = i + 1
+      continue
+    }
+    if arg == "--blas" {
+      use_blas = true
       i = i + 1
       continue
     }
@@ -272,6 +281,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
     backend,
     bench,
     bench_no_readback,
+    use_blas,
     batch_size,
     workgroup_size,
     limit,
@@ -2024,6 +2034,130 @@ async fn gpu_train(
 }
 
 ///|
+/// BLAS-optimized CPU training using C-side buffers
+/// Uses batch BLAS operations for both forward and backward pass
+fn blas_train(
+  spec : @nn.MlpSpec,
+  params : @nn.MlpParams,
+  dataset : @nn.MlpDataset,
+  config : @nn.MlpTrainConfig,
+) -> Result[@nn.MlpTrainResult, String] {
+  if config.epochs <= 0 {
+    return Err("epochs must be > 0")
+  }
+  if config.batch_size <= 0 {
+    return Err("batch_size must be > 0")
+  }
+  if dataset.count <= 0 {
+    return Err("dataset empty")
+  }
+
+  // Allocate training buffers (all computation happens in C memory)
+  let bufs = @blas.mlp_train_buffers_create(
+    config.batch_size,
+    spec.input_size,
+    spec.hidden_size,
+    spec.output_size,
+  )
+
+  // Initialize weights in C buffers
+  @blas.mlp_train_buffers_init_weights(
+    bufs,
+    params.weight1,
+    params.bias1,
+    params.weight2,
+    params.bias2,
+  )
+
+  // Working arrays
+  let zero = Float::from_int(0)
+  let metrics : Array[@nn.MlpTrainMetrics] = []
+  let indices = Array::makei(dataset.count, fn(i) { i })
+
+  // Batch arrays for input and labels
+  let batch_input = Array::make(config.batch_size * spec.input_size, zero)
+  let batch_labels = Array::make(config.batch_size, 0)
+
+  for _epoch = 0; _epoch < config.epochs; _epoch = _epoch + 1 {
+    if config.shuffle {
+      shuffle_indices_blas(indices, config.seed + _epoch)
+    }
+
+    let mut loss_sum = zero
+    let mut correct = 0
+    let mut start = 0
+
+    while start < dataset.count {
+      let end = if start + config.batch_size <= dataset.count {
+        start + config.batch_size
+      } else {
+        // Skip incomplete batch at end
+        break
+      }
+      let batch_count = end - start
+
+      // Prepare batch data
+      for bi = 0; bi < batch_count; bi = bi + 1 {
+        let idx = indices[start + bi]
+        batch_labels[bi] = dataset.labels[idx]
+        let input_offset = idx * spec.input_size
+        for i = 0; i < spec.input_size; i = i + 1 {
+          batch_input[bi * spec.input_size + i] = dataset.inputs[input_offset + i]
+        }
+      }
+
+      // Run complete training step in C
+      let (batch_loss, batch_correct) = @blas.mlp_train_step(
+        bufs,
+        batch_input,
+        batch_labels,
+        config.learning_rate,
+      )
+      loss_sum = loss_sum + batch_loss
+      correct = correct + batch_correct
+
+      start = end
+    }
+
+    let count_f = Float::from_int(dataset.count)
+    let loss = loss_sum / count_f
+    let accuracy = Float::from_int(correct) / count_f
+    metrics.push(@nn.mlp_train_metrics(loss, accuracy))
+  }
+
+  // Copy final weights back
+  @blas.mlp_train_buffers_get_weights(
+    bufs,
+    params.weight1,
+    params.bias1,
+    params.weight2,
+    params.bias2,
+  )
+
+  // Free C buffers
+  @blas.mlp_train_buffers_free(bufs)
+
+  Ok(@nn.mlp_train_result(params, metrics))
+}
+
+///|
+fn shuffle_indices_blas(indices : Array[Int], seed : Int) -> Unit {
+  let a = 1664525
+  let c = 1013904223
+  let mut state = seed
+  let mut i = indices.length() - 1
+  while i > 0 {
+    state = state * a + c
+    let j = if state < 0 { -state } else { state }
+    let jmod = j % (i + 1)
+    let tmp = indices[i]
+    indices[i] = indices[jmod]
+    indices[jmod] = tmp
+    i = i - 1
+  }
+}
+
+///|
 struct TrainReport {
   backend : TrainBackend
   result : @nn.MlpTrainResult
@@ -2038,14 +2172,22 @@ async fn run_train(
   workgroup_size : Int,
   backend : TrainBackend,
   bench_no_readback : Bool,
+  use_blas : Bool,
   json : Bool,
 ) -> Result[TrainReport, String] {
   match backend {
     Cpu => {
-      let train_result = @nn.mlp_train(spec, params, dataset, config)
+      let train_result = if use_blas {
+        blas_train(spec, params, dataset, config)
+      } else {
+        match @nn.mlp_train(spec, params, dataset, config) {
+          Ok(r) => Ok(r)
+          Err(err) => Err(err.to_string())
+        }
+      }
       match train_result {
         Ok(r) => Ok({ backend: Cpu, result: r })
-        Err(err) => Err(err.to_string())
+        Err(err) => Err(err)
       }
     }
     Gpu => {
@@ -2073,10 +2215,17 @@ async fn run_train(
           }
         }
       }
-      let train_result = @nn.mlp_train(spec, params, dataset, config)
+      let train_result = if use_blas {
+        blas_train(spec, params, dataset, config)
+      } else {
+        match @nn.mlp_train(spec, params, dataset, config) {
+          Ok(r) => Ok(r)
+          Err(err) => Err(err.to_string())
+        }
+      }
       match train_result {
         Ok(r) => Ok({ backend: Cpu, result: r })
-        Err(err) => Err(err.to_string())
+        Err(err) => Err(err)
       }
     }
   }
@@ -2208,6 +2357,7 @@ async fn train_main() -> Unit {
     workgroup_size,
     args.backend,
     args.bench_no_readback,
+    args.use_blas,
     args.json,
   )
   let train_end = if args.bench { @env.now() } else { 0UL }

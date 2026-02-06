@@ -1,5 +1,7 @@
 import {
+  "mizchi/wgpu/blas" as @blas,
   "mizchi/wgpu/nn" as @nn,
+  "mizchi/wgpu/numbt" as @numbt,
   "moonbitlang/core/env" as @env,
   "moonbitlang/core/math" as @math,
   "moonbitlang/core/strconv" as @strconv,
@@ -7,5 +9,6 @@ import {
 
 options(
   "is-main": true,
+  link: { "native": { "cc-link-flags": "-framework Accelerate" } },
   targets: { "main.mbt": [ "not", "js" ], "main_js.mbt": [ "js" ] },
 )

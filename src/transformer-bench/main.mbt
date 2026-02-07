@@ -12,6 +12,7 @@ struct BenchArgs {
   seed : Int
   print_every : Int
   repeat : Int
+  sweep : Bool
 } derive(Show, Eq)
 
 ///|
@@ -29,6 +30,7 @@ fn bench_args_default() -> BenchArgs {
     seed: 42,
     print_every: 10,
     repeat: 256,
+    sweep: false,
   }
 }
 
@@ -79,6 +81,7 @@ fn print_usage(program : String) -> Unit {
   println("  --seed N          RNG seed (default 42)")
   println("  --print-every N   progress interval (default 10)")
   println("  --repeat N        corpus repeat count (default 256)")
+  println("  --sweep           sweep seq/head/layer combinations")
 }
 
 ///|
@@ -96,11 +99,17 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let mut seed = default.seed
   let mut print_every = default.print_every
   let mut repeat = default.repeat
+  let mut sweep = default.sweep
   let mut i = 1
   while i < args.length() {
     let arg = args[i]
     if arg == "--help" || arg == "-h" {
       return Err("help")
+    }
+    if arg == "--sweep" {
+      sweep = true
+      i = i + 1
+      continue
     }
     if arg == "--steps" {
       if i + 1 >= args.length() {
@@ -381,6 +390,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     seed,
     print_every,
     repeat,
+    sweep,
   })
 }
 
@@ -514,6 +524,106 @@ fn run_bench(cfg : BenchArgs) -> Unit {
 }
 
 ///|
+fn run_sweep(cfg : BenchArgs) -> Unit {
+  let text = make_default_corpus(cfg.repeat)
+  let tokenizer = @tensor.char_tokenizer_from_text(text)
+  let vocab = tokenizer.vocab_size()
+  let tokens = tokenizer.encode(text)
+  let seq_opts = [16, 32, 64]
+  let head_opts = [2, 4, 8]
+  let layer_opts = [1, 2, 4]
+  println("=== Transformer LM Sweep ===")
+  println(
+    "steps=" +
+    cfg.steps.to_string() +
+    " warmup=" +
+    cfg.warmup.to_string() +
+    " batch_size=" +
+    cfg.batch_size.to_string() +
+    " d_model=" +
+    cfg.d_model.to_string() +
+    " d_ff=" +
+    cfg.d_ff.to_string(),
+  )
+  println("seq\theads\tlayers\tavg_step_ms\tavg_loss\tavg_ppl\tavg_tok/s")
+  for si = 0; si < seq_opts.length(); si = si + 1 {
+    let seq = seq_opts[si]
+    let windows = tokens.length() - seq
+    if windows <= 0 {
+      continue
+    }
+    let effective_batch = if cfg.batch_size > windows {
+      windows
+    } else {
+      cfg.batch_size
+    }
+    for hi = 0; hi < head_opts.length(); hi = hi + 1 {
+      let heads = head_opts[hi]
+      if cfg.d_model % heads != 0 {
+        continue
+      }
+      for li = 0; li < layer_opts.length(); li = li + 1 {
+        let layers = layer_opts[li]
+        let config = @tensor.transformer_config(
+          vocab,
+          cfg.d_model,
+          heads,
+          layers,
+          cfg.d_ff,
+          seq,
+        ).unwrap()
+        let metrics = @tensor.transformer_train_lm_profile_steps(
+          text,
+          config,
+          cfg.warmup,
+          cfg.steps,
+          effective_batch,
+          cfg.lr,
+          cfg.seed,
+        )
+        if metrics.length() == 0 {
+          continue
+        }
+        let mut total_ns = 0UL
+        let mut total_loss = Float::from_int(0)
+        let mut total_ppl = Float::from_int(0)
+        for i = 0; i < metrics.length(); i = i + 1 {
+          total_ns = total_ns + metrics[i].step_ns
+          total_loss = total_loss + metrics[i].loss
+          total_ppl = total_ppl + metrics[i].perplexity
+        }
+        let n = Float::from_int(metrics.length())
+        let avg_ms = ns_to_ms(total_ns) / n
+        let avg_loss = total_loss / n
+        let avg_ppl = total_ppl / n
+        let avg_tps = if total_ns > 0UL {
+          Float::from_int(effective_batch * seq * metrics.length()) *
+          Float::from_int(1000000000) /
+          Float::from_uint64(total_ns)
+        } else {
+          Float::from_int(0)
+        }
+        println(
+          seq.to_string() +
+          "\t" +
+          heads.to_string() +
+          "\t" +
+          layers.to_string() +
+          "\t" +
+          avg_ms.to_string() +
+          "\t" +
+          avg_loss.to_string() +
+          "\t" +
+          avg_ppl.to_string() +
+          "\t" +
+          avg_tps.to_string(),
+        )
+      }
+    }
+  }
+}
+
+///|
 fn main {
   let args = @env.args()
   let program = if args.length() > 0 { args[0] } else { "transformer-bench" }
@@ -527,5 +637,9 @@ fn main {
       return
     }
   }
-  run_bench(cfg)
+  if cfg.sweep {
+    run_sweep(cfg)
+  } else {
+    run_bench(cfg)
+  }
 }

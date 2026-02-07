@@ -128,6 +128,47 @@ test "batched_linear_backward_numerical" {
 }
 
 ///|
+test "batched_linear_backward_fused_matches_reference" {
+  let batch = 2
+  let seq = 3
+  let in_dim = 4
+  let out_dim = 5
+  let n = batch * seq
+  let x_data = Array::makei(n * in_dim, fn(i) {
+    Float::from_int(i * 5 % 19 - 9) / Float::from_int(11)
+  })
+  let w_data = Array::makei(in_dim * out_dim, fn(i) {
+    Float::from_int(i * 7 % 23 - 11) / Float::from_int(13)
+  })
+  let dy_data = Array::makei(n * out_dim, fn(i) {
+    Float::from_int(i * 3 % 17 - 8) / Float::from_int(9)
+  })
+  let x = tensor_new(shape_new_unchecked([batch, seq, in_dim]), x_data).unwrap()
+  let w = tensor_new(shape_new_unchecked([in_dim, out_dim]), w_data).unwrap()
+  let dy = tensor_new(shape_new_unchecked([batch, seq, out_dim]), dy_data).unwrap()
+  let d_w_ref = tensor_zeros(shape_new_unchecked([in_dim, out_dim]))
+  let dx_ref = batched_linear_backward(dy, x, w, d_w_ref)
+  let d_w_fused = tensor_zeros(shape_new_unchecked([in_dim, out_dim]))
+  let dx_fused = batched_linear_backward_fused(dy, x, w, d_w_fused)
+  let mut max_dx_diff = 0.0
+  let mut max_dw_diff = 0.0
+  for i = 0; i < dx_ref.numel(); i = i + 1 {
+    let diff = (dx_ref.data[i] - dx_fused.data[i]).to_double().abs()
+    if diff > max_dx_diff {
+      max_dx_diff = diff
+    }
+  }
+  for i = 0; i < d_w_ref.numel(); i = i + 1 {
+    let diff = (d_w_ref.data[i] - d_w_fused.data[i]).to_double().abs()
+    if diff > max_dw_diff {
+      max_dw_diff = diff
+    }
+  }
+  assert_true(max_dx_diff < 1.0e-6)
+  assert_true(max_dw_diff < 1.0e-6)
+}
+
+///|
 test "add_bias_backward_accumulates" {
   let dy = tensor_new(shape_new_unchecked([2, 3]), [
     Float::from_double(1.0),
@@ -321,6 +362,63 @@ test "attention_head_backward_matches_reference" {
     let dq_diff = (dq_all[off + i] - dq_ref[i]).to_double().abs()
     let dk_diff = (dk_all[off + i] - dk_ref[i]).to_double().abs()
     let dv_diff = (dv_all[off + i] - dv_ref[i]).to_double().abs()
+    assert_true(dq_diff < 1.0e-6)
+    assert_true(dk_diff < 1.0e-6)
+    assert_true(dv_diff < 1.0e-6)
+  }
+}
+
+///|
+test "attention_backward_batch_matches_head_loop" {
+  let total_heads = 3
+  let seq = 2
+  let d_k = 3
+  let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
+  let n = total_heads * seq * d_k
+  let w_n = total_heads * seq * seq
+  let d_out = FixedArray::make(n, Float::from_int(0))
+  let q = FixedArray::make(n, Float::from_int(0))
+  let k = FixedArray::make(n, Float::from_int(0))
+  let v = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    d_out[i] = Float::from_int(i * 5 % 17 - 8) / Float::from_int(9)
+    q[i] = Float::from_int(i * 3 % 13 - 6) / Float::from_int(8)
+    k[i] = Float::from_int(i * 7 % 19 - 9) / Float::from_int(10)
+    v[i] = Float::from_int(i * 11 % 23 - 11) / Float::from_int(12)
+  }
+  let attn_w = FixedArray::make(w_n, Float::from_int(0))
+  for h = 0; h < total_heads; h = h + 1 {
+    let base = h * seq * seq
+    attn_w[base] = Float::from_double(0.65)
+    attn_w[base + 1] = Float::from_double(0.35)
+    attn_w[base + 2] = Float::from_double(0.4)
+    attn_w[base + 3] = Float::from_double(0.6)
+  }
+  let dq_ref = FixedArray::make(n, Float::from_int(0))
+  let dk_ref = FixedArray::make(n, Float::from_int(0))
+  let dv_ref = FixedArray::make(n, Float::from_int(0))
+  for h = 0; h < total_heads; h = h + 1 {
+    let data_off = h * seq * d_k
+    let w_off = h * seq * seq
+    let w_head = FixedArray::make(seq * seq, Float::from_int(0))
+    for i = 0; i < seq * seq; i = i + 1 {
+      w_head[i] = attn_w[w_off + i]
+    }
+    attention_head_backward(
+      d_out, data_off, q, data_off, k, data_off, v, data_off, w_head, dq_ref, data_off,
+      dk_ref, data_off, dv_ref, data_off, seq, d_k, scale,
+    )
+  }
+  let dq = FixedArray::make(n, Float::from_int(0))
+  let dk = FixedArray::make(n, Float::from_int(0))
+  let dv = FixedArray::make(n, Float::from_int(0))
+  attention_backward_batch(
+    d_out, q, k, v, attn_w, dq, dk, dv, total_heads, seq, d_k, scale,
+  )
+  for i = 0; i < n; i = i + 1 {
+    let dq_diff = (dq[i] - dq_ref[i]).to_double().abs()
+    let dk_diff = (dk[i] - dk_ref[i]).to_double().abs()
+    let dv_diff = (dv[i] - dv_ref[i]).to_double().abs()
     assert_true(dq_diff < 1.0e-6)
     assert_true(dk_diff < 1.0e-6)
     assert_true(dv_diff < 1.0e-6)
@@ -549,8 +647,8 @@ test "attention_cache_uses_fixedarray" {
     config,
     Some(mask),
   )
-  let w0 : FixedArray[Float] = cache.block_caches[0].attn_weights[0]
-  inspect(w0.length(), content="64")
+  let w_all : FixedArray[Float] = cache.block_caches[0].attn_weights
+  inspect(w_all.length(), content="64")
 }
 
 ///|

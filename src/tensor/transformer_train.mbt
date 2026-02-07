@@ -36,7 +36,7 @@ pub struct TransformerBlockCache {
   q_proj : Tensor // [batch, seq, d_model]
   k_proj : Tensor // [batch, seq, d_model]
   v_proj : Tensor // [batch, seq, d_model]
-  attn_weights : Array[FixedArray[Float]] // [batch*num_heads][seq_q*seq_k] softmax output
+  attn_weights : FixedArray[Float] // [batch*num_heads*seq_q*seq_k] softmax output
   attn_out_pre_wo : Tensor // [batch, seq, d_model] before W_o
   x_after_res1 : Tensor // after first residual
   ln2_out : Tensor // output of LN2
@@ -251,6 +251,44 @@ fn batched_linear_backward(
     out_dim,
     Float::from_int(1),
     d_w.data,
+    out_dim,
+  )
+  Tensor::{
+    data: dx_data,
+    shape: x_cached.shape,
+    offset: 0,
+    strides: x_cached.shape.strides(),
+  }
+}
+
+///|
+/// Fused batched linear backward (single FFI call).
+/// dy: [batch, seq, out_dim], x_cached: [batch, seq, in_dim], w: [in_dim, out_dim]
+/// Returns dx: [batch, seq, in_dim]
+/// Accumulates into d_w: [in_dim, out_dim]
+fn batched_linear_backward_fused(
+  dy : Tensor,
+  x_cached : Tensor,
+  w : Tensor,
+  d_w : Tensor,
+) -> Tensor {
+  let batch = dy.dim(0)
+  let seq = dy.dim(1)
+  let out_dim = dy.dim(2)
+  let in_dim = x_cached.dim(2)
+  let n = batch * seq
+  let dyc = dy.contiguous()
+  let xc = x_cached.contiguous()
+  let wc = w.contiguous()
+  let dx_data = FixedArray::make(n * in_dim, Float::from_int(0))
+  batched_linear_backward_raw(
+    dyc.data,
+    xc.data,
+    wc.data,
+    d_w.data,
+    dx_data,
+    n,
+    in_dim,
     out_dim,
   )
   Tensor::{
@@ -489,7 +527,7 @@ fn multi_head_attention_backward(
   let d_k = d_model / num_heads
 
   // W_o backward: dy @ W_o^T -> d_concat
-  let d_concat = batched_linear_backward(
+  let d_concat = batched_linear_backward_fused(
     dy,
     cache.attn_out_pre_wo,
     params.w_o,
@@ -523,33 +561,21 @@ fn multi_head_attention_backward(
   let qc = q_heads.contiguous()
   let kc = k_heads.contiguous()
   let vc = v_heads.contiguous()
-  for b = 0; b < batch; b = b + 1 {
-    for h = 0; h < num_heads; h = h + 1 {
-      let head_idx = b * num_heads + h
-      let attn_w = cache.attn_weights[head_idx]
-      let head_base = (b * num_heads + h) * seq * d_k
-      attention_head_backward(
-        dc.data,
-        head_base,
-        qc.data,
-        head_base,
-        kc.data,
-        head_base,
-        vc.data,
-        head_base,
-        attn_w,
-        dq_heads_data,
-        head_base,
-        dk_heads_data,
-        head_base,
-        dv_heads_data,
-        head_base,
-        seq,
-        d_k,
-        scale,
-      )
-    }
-  }
+  let total_heads = batch * num_heads
+  attention_backward_batch(
+    dc.data,
+    qc.data,
+    kc.data,
+    vc.data,
+    cache.attn_weights,
+    dq_heads_data,
+    dk_heads_data,
+    dv_heads_data,
+    total_heads,
+    seq,
+    d_k,
+    scale,
+  )
 
   // Reshape heads back to [batch, seq, d_model]
   let dq_heads = Tensor::{
@@ -575,19 +601,19 @@ fn multi_head_attention_backward(
   let dv_proj = reshape_from_heads(dv_heads, batch, seq, num_heads, d_k)
 
   // W_q, W_k, W_v backward (self-attention: input is the same for Q, K, V)
-  let dx_q = batched_linear_backward(
+  let dx_q = batched_linear_backward_fused(
     dq_proj,
     cache.ln1_out,
     params.w_q,
     grads.d_w_q,
   )
-  let dx_k = batched_linear_backward(
+  let dx_k = batched_linear_backward_fused(
     dk_proj,
     cache.ln1_out,
     params.w_k,
     grads.d_w_k,
   )
-  let dx_v = batched_linear_backward(
+  let dx_v = batched_linear_backward_fused(
     dv_proj,
     cache.ln1_out,
     params.w_v,
@@ -733,9 +759,9 @@ pub fn transformer_forward_with_cache(
     }
     let total_heads = batch * num_heads
     let scores_size = seq * seq
-    let attn_weights_all : Array[FixedArray[Float]] = Array::makei(
-      total_heads,
-      fn(_i) { FixedArray::make(scores_size, Float::from_int(0)) },
+    let attn_weights_all = FixedArray::make(
+      total_heads * scores_size,
+      Float::from_int(0),
     )
     let attn_result_data = FixedArray::make(
       batch * num_heads * seq * d_k,
@@ -745,7 +771,7 @@ pub fn transformer_forward_with_cache(
       for h = 0; h < num_heads; h = h + 1 {
         let head_idx = b * num_heads + h
         let head_base = head_idx * seq * d_k
-        let scores = attn_weights_all[head_idx]
+        let scores_off = head_idx * scores_size
         // scores = Q @ K^T * scale : [seq, d_k] @ [d_k, seq] -> [seq, seq]
         native_sgemm_offset(
           0,
@@ -761,17 +787,24 @@ pub fn transformer_forward_with_cache(
           head_base,
           d_k,
           Float::from_int(0),
-          scores,
-          0,
+          attn_weights_all,
+          scores_off,
           seq,
         )
         // Apply mask
         match mc {
-          Some(m) => add_matrix_inplace(scores, m.data, seq, seq)
+          Some(m) =>
+            add_matrix_inplace_offset(
+              attn_weights_all,
+              scores_off,
+              m.data,
+              seq,
+              seq,
+            )
           None => ()
         }
         // Softmax
-        native_softmax_inplace(scores, seq, seq)
+        softmax_inplace_offset(attn_weights_all, scores_off, seq, seq)
         // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
         native_sgemm_offset(
           0,
@@ -780,8 +813,8 @@ pub fn transformer_forward_with_cache(
           d_k,
           seq,
           Float::from_int(1),
-          scores,
-          0,
+          attn_weights_all,
+          scores_off,
           seq,
           vc.data,
           head_base,
@@ -907,7 +940,7 @@ fn transformer_backward_from_d_logits(
 ) -> Unit {
   let seq = cache.tokens[0].length()
   // LM head backward: logits = ln_final_out @ lm_head
-  let d_ln_final_out = batched_linear_backward(
+  let d_ln_final_out = batched_linear_backward_fused(
     d_logits,
     cache.ln_final_out,
     params.lm_head,

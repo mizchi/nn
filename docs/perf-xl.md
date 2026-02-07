@@ -239,6 +239,30 @@ whitebox test `attention_head_backward_matches_reference` で参照式との一�
 ベースライン設定（`src/transformer-bench` default）では全体 step time はほぼ同等
 （`~4.3419ms`）で、今後は `num_heads` と `seq_len` を上げた条件で差分を追う。
 
+### Additional progress (Block-level fusion + sweep)
+
+1. **MHA backward を block-level で 1 呼び出し化**
+   - `tensor_attention_backward_batch` を追加し、`total_heads` 分の head backward を
+     C 側ループで一括実行。
+   - `multi_head_attention_backward` は MoonBit 側の head ループを廃止し、
+     `attention_backward_batch` を 1 回呼ぶ構成に変更。
+   - attention cache は `Array[FixedArray]` から
+     `FixedArray`（`[batch*num_heads*seq*seq]`）に整理。
+
+2. **`batched_linear_backward` を fused kernel 化**
+   - `tensor_batched_linear_backward` を追加し、
+     `dx = dy @ W^T` と `dW += X^T @ dy` を 1 FFI 呼び出しで実行。
+   - 学習経路（LM head / MHA の `W_o, W_q, W_k, W_v`）を fused 版へ切替。
+
+3. **ベンチの sweep モード追加**
+   - `src/transformer-bench` に `--sweep` を追加し、
+     `seq_len × heads × layers` の表形式で
+     `avg_step_ms / avg_loss / avg_ppl / avg_tok/s` を出力。
+   - `just bench-transformer-lm-sweep` で実行可能。
+
+軽量 sweep 例（`--steps=4 --warmup=1 --batch-size=8 --d-model=64 --d-ff=256`）では、
+構成増加に応じて `avg_step_ms` が単調増加し、ボトルネック追跡に使えることを確認。
+
 ## PyTorch Comparison
 
 ```

@@ -40,6 +40,42 @@ void tensor_sgemm_offset(
     beta, c + c_offset, ldc);
 }
 
+// Fused batched linear backward:
+// dy: [n, out_dim], x: [n, in_dim], w: [in_dim, out_dim]
+// dx = dy @ w^T, d_w += x^T @ dy
+void tensor_batched_linear_backward(
+  const float* dy,
+  const float* x,
+  const float* w,
+  float* d_w,
+  float* dx,
+  int n,
+  int in_dim,
+  int out_dim
+) {
+  // dx = dy @ w^T : [n, out_dim] @ [out_dim, in_dim] -> [n, in_dim]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasTrans,
+    n, in_dim, out_dim,
+    1.0f,
+    dy, out_dim,
+    w, out_dim,
+    0.0f,
+    dx, in_dim
+  );
+
+  // d_w += x^T @ dy : [in_dim, n] @ [n, out_dim] -> [in_dim, out_dim]
+  cblas_sgemm(
+    CblasRowMajor, CblasTrans, CblasNoTrans,
+    in_dim, out_dim, n,
+    1.0f,
+    x, in_dim,
+    dy, out_dim,
+    1.0f,
+    d_w, out_dim
+  );
+}
+
 // GELU forward: out[i] = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 void tensor_gelu_forward(const float* input, float* output, int n) {
   const float sqrt_2_pi = 0.7978845608028654f;
@@ -84,6 +120,10 @@ void tensor_softmax_inplace(float* data, int rows, int cols) {
       row[j] /= sum;
     }
   }
+}
+
+void tensor_softmax_inplace_offset(float* data, int offset, int rows, int cols) {
+  tensor_softmax_inplace(data + offset, rows, cols);
 }
 
 // Softmax backward over rows:
@@ -192,12 +232,55 @@ void tensor_attention_head_backward(
   );
 }
 
+// Fused backward for all heads in one call.
+// total_heads = batch * num_heads
+void tensor_attention_backward_batch(
+  const float* d_out,
+  const float* q,
+  const float* k,
+  const float* v,
+  const float* attn_w,
+  float* dq,
+  float* dk,
+  float* dv,
+  int total_heads,
+  int seq,
+  int d_k,
+  float scale
+) {
+  int data_stride = seq * d_k;
+  int w_stride = seq * seq;
+  for (int h = 0; h < total_heads; h++) {
+    int data_off = h * data_stride;
+    int w_off = h * w_stride;
+    tensor_attention_head_backward(
+      d_out, data_off,
+      q, data_off,
+      k, data_off,
+      v, data_off,
+      attn_w + w_off,
+      dq, data_off,
+      dk, data_off,
+      dv, data_off,
+      seq,
+      d_k,
+      scale
+    );
+  }
+}
+
 // Row-wise matrix add:
 // dst[row, col] += add[row, col]
 void tensor_add_matrix_inplace(float* dst, const float* add, int rows, int cols) {
   for (int r = 0; r < rows; r++) {
     cblas_saxpy(cols, 1.0f, add + r * cols, 1, dst + r * cols, 1);
   }
+}
+
+void tensor_add_matrix_inplace_offset(
+  float* dst, int dst_off, const float* add, int rows, int cols
+) {
+  tensor_add_matrix_inplace(dst + dst_off, add, rows, cols);
 }
 
 // Cross-entropy forward + backward over rows.

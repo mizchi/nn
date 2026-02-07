@@ -17,6 +17,19 @@ extern "C" fn native_sgemm(
 ) -> Unit = "tensor_sgemm"
 
 ///|
+#borrow(dy, x, w, d_w, dx)
+extern "C" fn native_batched_linear_backward(
+  dy : FixedArray[Float],
+  x : FixedArray[Float],
+  w : FixedArray[Float],
+  d_w : FixedArray[Float],
+  dx : FixedArray[Float],
+  n : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit = "tensor_batched_linear_backward"
+
+///|
 extern "C" fn native_clock_ns() -> UInt64 = "timer_clock_ns"
 
 ///|
@@ -48,6 +61,15 @@ extern "C" fn native_softmax_inplace(
   rows : Int,
   cols : Int,
 ) -> Unit = "tensor_softmax_inplace"
+
+///|
+#borrow(data)
+extern "C" fn native_softmax_inplace_offset(
+  data : FixedArray[Float],
+  offset : Int,
+  rows : Int,
+  cols : Int,
+) -> Unit = "tensor_softmax_inplace_offset"
 
 ///|
 #borrow(d_attn, attn, out)
@@ -83,6 +105,23 @@ extern "C" fn native_attention_head_backward(
 ) -> Unit = "tensor_attention_head_backward"
 
 ///|
+#borrow(d_out, q, k, v, attn_w, dq, dk, dv)
+extern "C" fn native_attention_backward_batch(
+  d_out : FixedArray[Float],
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  dq : FixedArray[Float],
+  dk : FixedArray[Float],
+  dv : FixedArray[Float],
+  total_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit = "tensor_attention_backward_batch"
+
+///|
 #borrow(dst, add)
 extern "C" fn native_add_matrix_inplace(
   dst : FixedArray[Float],
@@ -90,6 +129,16 @@ extern "C" fn native_add_matrix_inplace(
   rows : Int,
   cols : Int,
 ) -> Unit = "tensor_add_matrix_inplace"
+
+///|
+#borrow(dst, add)
+extern "C" fn native_add_matrix_inplace_offset(
+  dst : FixedArray[Float],
+  dst_off : Int,
+  add : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit = "tensor_add_matrix_inplace_offset"
 
 ///|
 #borrow(logits, labels, d_logits)
@@ -178,6 +227,22 @@ pub fn sgemm(
   ldc : Int,
 ) -> Unit {
   native_sgemm(trans_a, trans_b, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+}
+
+///|
+/// Fused batched linear backward:
+/// dx = dy @ w^T, d_w += x^T @ dy.
+pub fn batched_linear_backward_raw(
+  dy : FixedArray[Float],
+  x : FixedArray[Float],
+  w : FixedArray[Float],
+  d_w : FixedArray[Float],
+  dx : FixedArray[Float],
+  n : Int,
+  in_dim : Int,
+  out_dim : Int,
+) -> Unit {
+  native_batched_linear_backward(dy, x, w, d_w, dx, n, in_dim, out_dim)
 }
 
 ///|
@@ -327,6 +392,16 @@ pub fn softmax_inplace(
 }
 
 ///|
+pub fn softmax_inplace_offset(
+  data : FixedArray[Float],
+  offset : Int,
+  rows : Int,
+  cols : Int,
+) -> Unit {
+  native_softmax_inplace_offset(data, offset, rows, cols)
+}
+
+///|
 /// Row-wise softmax backward:
 /// out[row, col] = attn[row, col] * (d_attn[row, col] - sum_j d_attn[row, j] * attn[row, j])
 pub fn softmax_backward_rows(
@@ -370,6 +445,27 @@ pub fn attention_head_backward(
 }
 
 ///|
+/// Fused backward for all attention heads.
+pub fn attention_backward_batch(
+  d_out : FixedArray[Float],
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  dq : FixedArray[Float],
+  dk : FixedArray[Float],
+  dv : FixedArray[Float],
+  total_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit {
+  native_attention_backward_batch(
+    d_out, q, k, v, attn_w, dq, dk, dv, total_heads, seq, d_k, scale,
+  )
+}
+
+///|
 pub fn add_matrix_inplace(
   dst : FixedArray[Float],
   add : FixedArray[Float],
@@ -377,6 +473,17 @@ pub fn add_matrix_inplace(
   cols : Int,
 ) -> Unit {
   native_add_matrix_inplace(dst, add, rows, cols)
+}
+
+///|
+pub fn add_matrix_inplace_offset(
+  dst : FixedArray[Float],
+  dst_off : Int,
+  add : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit {
+  native_add_matrix_inplace_offset(dst, dst_off, add, rows, cols)
 }
 
 ///|

@@ -263,6 +263,53 @@ whitebox test `attention_head_backward_matches_reference` で参照式との一�
 軽量 sweep 例（`--steps=4 --warmup=1 --batch-size=8 --d-model=64 --d-ff=256`）では、
 構成増加に応じて `avg_step_ms` が単調増加し、ボトルネック追跡に使えることを確認。
 
+## Fixed KPI Baseline (2026-02-07)
+
+Transformer LM 学習ループの継続チューニング用に、比較条件を固定した。
+以後は同一コマンドで再計測して差分を見る。
+
+### Baseline A (mid-small)
+
+- command:
+  `just bench-transformer-lm --steps=20 --warmup=5 --batch-size=8 --seq-len=128 --d-model=128 --heads=4 --layers=6 --d-ff=512 --repeat=512 --print-every=5`
+
+| Metric | Value |
+|--------|-------|
+| avg_step_ms | `91.9206` |
+| avg_tok/s | `11140.0488` |
+| avg_loss | `2.3756` |
+| avg_ppl | `10.8389` |
+
+### Baseline B (mid)
+
+- command:
+  `just bench-transformer-lm --steps=20 --warmup=5 --batch-size=4 --seq-len=256 --d-model=128 --heads=4 --layers=12 --d-ff=512 --repeat=1024 --print-every=5`
+
+| Metric | Value |
+|--------|-------|
+| avg_step_ms | `204.1087` |
+| avg_tok/s | `5016.9336` |
+| avg_loss | `2.3571` |
+| avg_ppl | `10.6310` |
+
+### Reference C (GPT-2-like small depth/width probe)
+
+- command:
+  `just bench-transformer-lm --steps=10 --warmup=3 --batch-size=2 --seq-len=256 --d-model=256 --heads=8 --layers=12 --d-ff=1024 --repeat=1024 --print-every=5`
+
+| Metric | Value |
+|--------|-------|
+| avg_step_ms | `240.8992` |
+| avg_tok/s | `2125.3704` |
+| avg_loss | `2.4402` |
+| avg_ppl | `11.4973` |
+
+### Next KPI Target
+
+- A: `avg_tok/s >= 13368`（`+20%`）
+- B: `avg_tok/s >= 6020`（`+20%`）
+- 品質ガード: `avg_loss` は baseline 比 `+0.05` 以内
+
 ## PyTorch Comparison
 
 ```

@@ -55,6 +55,8 @@ just bench-gpu # run WebGPU loss benchmark (Playwright)
 just wgpu-native-build # build wgpu-native (native target)
 just serve     # build browser entry + serve repo root
 just data-migrate # move/link MNIST data under ~/data (or $NN_DATA_DIR)
+just openwebtext-shard-test # run parquet->token shard converter tests (python)
+just openwebtext-shard --input-dir ~/data/lm/openwebtext/plain_text --output-dir ~/data/lm/openwebtext_gpt2 # build GPT token shards
 just mnist-download # download MNIST (official URL + mirror fallback)
 just mnist-train # run MNIST training (native, ~95% test acc)
 just mnist-infer # run MNIST inference with saved weights (native)
@@ -67,6 +69,21 @@ just mnist-train --backend gpu --bench # benchmark GPU training
 just mnist-train --backend gpu --bench --bench-no-readback # GPU training without per-step readback
 just mnist-train --epochs 5 --limit 2048 # quick training on a subset
 ```
+
+## OpenWebText Sharding
+
+Convert downloaded OpenWebText parquet files into GPT-token shard binaries:
+
+```bash
+just openwebtext-shard \
+  --input-dir ~/data/lm/openwebtext/plain_text \
+  --output-dir ~/data/lm/openwebtext_gpt2 \
+  --tokens-per-shard 8388608
+```
+
+Output:
+- `shard-XXXXXX.bin` raw token ids (little-endian `uint16` / `uint32`)
+- `meta.json` tokenizer + shard manifest
 
 ## Benchmarks (MNIST subset)
 

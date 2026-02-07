@@ -38,6 +38,13 @@ bench-transformer-lm *ARGS:
 bench-transformer-lm-sweep *ARGS:
     moon run --target native src/transformer-bench -- --sweep {{ARGS}}
 
+# OpenWebText preprocessing (parquet -> GPT token shards)
+openwebtext-shard *ARGS:
+    uv run --with pyarrow --with tiktoken --with numpy python3 scripts/openwebtext_to_shards.py {{ARGS}}
+
+openwebtext-shard-test:
+    uv run --with pyarrow --with tiktoken --with numpy --with pytest pytest -q scripts/openwebtext_to_shards_test.py
+
 # Build wgpu-native (required for native target)
 wgpu-native-build:
     bash src/scripts/build-wgpu-native.sh src/build-stamps/wgpu_native_build.stamp

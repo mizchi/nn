@@ -52,6 +52,15 @@ Bench:
 ```
 just bench-cpu
 just bench-gpu
+just openwebtext-shard-test
+```
+
+OpenWebText parquet -> GPT token shards:
+```
+just openwebtext-shard \
+  --input-dir ~/data/lm/openwebtext/plain_text \
+  --output-dir ~/data/lm/openwebtext_gpt2 \
+  --tokens-per-shard 8388608
 ```
 
 ## MNIST

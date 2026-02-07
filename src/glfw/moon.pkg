@@ -1,6 +1,0 @@
-import {
-}
-
-options(
-  "supported-targets": [ "native" ],
-)

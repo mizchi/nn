@@ -2,7 +2,7 @@ import {
   "mizchi/blas" as @blas,
   "mizchi/nn/nn" as @nn,
   "mizchi/nn/nn-cpu" as @nn_cpu,
-  "mizchi/nn/mnist" as @mnist,
+  "mizchi/nn/examples/mnist" as @mnist,
   "mizchi/nn/tensor" as @tensor,
   "mizchi/nn" as @wgpu,
   "moonbitlang/async",

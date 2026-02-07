@@ -1,7 +1,7 @@
 import {
   "mizchi/nn/nn" as @nn,
   "mizchi/nn/nn-cpu" as @nn_cpu,
-  "mizchi/nn/mnist" as @mnist,
+  "mizchi/nn/examples/mnist" as @mnist,
   "mizchi/nn" as @wgpu,
   "moonbitlang/async",
   "moonbitlang/async/fs" as @afs,

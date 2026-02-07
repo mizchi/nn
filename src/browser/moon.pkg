@@ -1,7 +1,7 @@
 import {
   "mizchi/js/core" as @core,
   "mizchi/nn" as @wgpu,
-  "mizchi/nn/mnist" as @mnist,
+  "mizchi/nn/examples/mnist" as @mnist,
   "mizchi/nn/nn" as @nn,
   "mizchi/nn/web" as @web,
   "moonbitlang/core/math" as @math,

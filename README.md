@@ -19,9 +19,8 @@ Neural network training library for MoonBit.
 - `mizchi/nn/web` : browser surface API (Canvas)
 - `mizchi/nn/native` : native surface API (window handle)
 - `mizchi/nn/nn` : minimal 2-layer MLP planning + CPU reference
-- `mizchi/nn/glfw` : GLFW contract (native stub, may be split out)
 - `mizchi/nn/browser` : browser entry sample (WebGPU readback)
-- `mizchi/nn/mnist` : MNIST loader (native)
+- `mizchi/nn/examples/mnist` : MNIST loader (native)
 - `mizchi/nn/train` : MNIST training entry (native)
 - `mizchi/nn/infer` : MNIST inference entry (native)
 

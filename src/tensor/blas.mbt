@@ -153,6 +153,49 @@ extern "C" fn native_attention_forward_batch_interleaved_masked(
 ) -> Unit = "tensor_attention_forward_batch_interleaved_masked"
 
 ///|
+#borrow(x, w_q, w_k, w_v, w_o, q_proj, k_proj, v_proj, attn_w, attn_concat, out)
+extern "C" fn native_mha_forward_batch_interleaved(
+  x : FixedArray[Float],
+  w_q : FixedArray[Float],
+  w_k : FixedArray[Float],
+  w_v : FixedArray[Float],
+  w_o : FixedArray[Float],
+  q_proj : FixedArray[Float],
+  k_proj : FixedArray[Float],
+  v_proj : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  attn_concat : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  seq : Int,
+  d_model : Int,
+  num_heads : Int,
+  scale : Float,
+) -> Unit = "tensor_mha_forward_batch_interleaved"
+
+///|
+#borrow(x, w_q, w_k, w_v, w_o, mask, q_proj, k_proj, v_proj, attn_w, attn_concat, out)
+extern "C" fn native_mha_forward_batch_interleaved_masked(
+  x : FixedArray[Float],
+  w_q : FixedArray[Float],
+  w_k : FixedArray[Float],
+  w_v : FixedArray[Float],
+  w_o : FixedArray[Float],
+  mask : FixedArray[Float],
+  q_proj : FixedArray[Float],
+  k_proj : FixedArray[Float],
+  v_proj : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  attn_concat : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  seq : Int,
+  d_model : Int,
+  num_heads : Int,
+  scale : Float,
+) -> Unit = "tensor_mha_forward_batch_interleaved_masked"
+
+///|
 #borrow(d_out, q, k, v, attn_w, dq, dk, dv)
 extern "C" fn native_attention_backward_batch_interleaved(
   d_out : FixedArray[Float],
@@ -589,6 +632,60 @@ pub fn attention_forward_batch_interleaved_masked(
 ) -> Unit {
   native_attention_forward_batch_interleaved_masked(
     q, k, v, mask, attn_w, out, batch, num_heads, seq, d_k, scale,
+  )
+}
+
+///|
+/// Fused MHA block forward:
+/// q/k/v projection + masked/unmasked attention core + output projection.
+pub fn mha_forward_batch_interleaved(
+  x : FixedArray[Float],
+  w_q : FixedArray[Float],
+  w_k : FixedArray[Float],
+  w_v : FixedArray[Float],
+  w_o : FixedArray[Float],
+  q_proj : FixedArray[Float],
+  k_proj : FixedArray[Float],
+  v_proj : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  attn_concat : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  seq : Int,
+  d_model : Int,
+  num_heads : Int,
+  scale : Float,
+) -> Unit {
+  native_mha_forward_batch_interleaved(
+    x, w_q, w_k, w_v, w_o, q_proj, k_proj, v_proj, attn_w, attn_concat, out, batch,
+    seq, d_model, num_heads, scale,
+  )
+}
+
+///|
+/// Masked variant of mha_forward_batch_interleaved.
+pub fn mha_forward_batch_interleaved_masked(
+  x : FixedArray[Float],
+  w_q : FixedArray[Float],
+  w_k : FixedArray[Float],
+  w_v : FixedArray[Float],
+  w_o : FixedArray[Float],
+  mask : FixedArray[Float],
+  q_proj : FixedArray[Float],
+  k_proj : FixedArray[Float],
+  v_proj : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  attn_concat : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  seq : Int,
+  d_model : Int,
+  num_heads : Int,
+  scale : Float,
+) -> Unit {
+  native_mha_forward_batch_interleaved_masked(
+    x, w_q, w_k, w_v, w_o, mask, q_proj, k_proj, v_proj, attn_w, attn_concat, out,
+    batch, seq, d_model, num_heads, scale,
   )
 }
 

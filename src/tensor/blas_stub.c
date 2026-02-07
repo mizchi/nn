@@ -489,6 +489,169 @@ void tensor_attention_forward_batch_interleaved_masked(
   );
 }
 
+// Fused MHA forward for one transformer block (interleaved layout):
+//   q_proj = x @ w_q
+//   k_proj = x @ w_k
+//   v_proj = x @ w_v
+//   attn_concat = Attention(q_proj, k_proj, v_proj, mask)
+//   out = attn_concat @ w_o
+static void tensor_mha_forward_batch_interleaved_impl(
+  const float* x,
+  const float* w_q,
+  const float* w_k,
+  const float* w_v,
+  const float* w_o,
+  const float* mask,
+  float* q_proj,
+  float* k_proj,
+  float* v_proj,
+  float* attn_w,
+  float* attn_concat,
+  float* out,
+  int batch,
+  int seq,
+  int d_model,
+  int num_heads,
+  float scale
+) {
+  int n = batch * seq;
+  int d_k = d_model / num_heads;
+
+  // Q/K/V projections: [n, d_model] @ [d_model, d_model] -> [n, d_model]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasNoTrans,
+    n, d_model, d_model,
+    1.0f,
+    x, d_model,
+    w_q, d_model,
+    0.0f,
+    q_proj, d_model
+  );
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasNoTrans,
+    n, d_model, d_model,
+    1.0f,
+    x, d_model,
+    w_k, d_model,
+    0.0f,
+    k_proj, d_model
+  );
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasNoTrans,
+    n, d_model, d_model,
+    1.0f,
+    x, d_model,
+    w_v, d_model,
+    0.0f,
+    v_proj, d_model
+  );
+
+  // Attention core
+  tensor_attention_forward_batch_interleaved_impl(
+    q_proj,
+    k_proj,
+    v_proj,
+    mask,
+    attn_w,
+    attn_concat,
+    batch,
+    num_heads,
+    seq,
+    d_k,
+    scale
+  );
+
+  // Output projection: [n, d_model] @ [d_model, d_model] -> [n, d_model]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasNoTrans,
+    n, d_model, d_model,
+    1.0f,
+    attn_concat, d_model,
+    w_o, d_model,
+    0.0f,
+    out, d_model
+  );
+}
+
+void tensor_mha_forward_batch_interleaved(
+  const float* x,
+  const float* w_q,
+  const float* w_k,
+  const float* w_v,
+  const float* w_o,
+  float* q_proj,
+  float* k_proj,
+  float* v_proj,
+  float* attn_w,
+  float* attn_concat,
+  float* out,
+  int batch,
+  int seq,
+  int d_model,
+  int num_heads,
+  float scale
+) {
+  tensor_mha_forward_batch_interleaved_impl(
+    x,
+    w_q,
+    w_k,
+    w_v,
+    w_o,
+    NULL,
+    q_proj,
+    k_proj,
+    v_proj,
+    attn_w,
+    attn_concat,
+    out,
+    batch,
+    seq,
+    d_model,
+    num_heads,
+    scale
+  );
+}
+
+void tensor_mha_forward_batch_interleaved_masked(
+  const float* x,
+  const float* w_q,
+  const float* w_k,
+  const float* w_v,
+  const float* w_o,
+  const float* mask,
+  float* q_proj,
+  float* k_proj,
+  float* v_proj,
+  float* attn_w,
+  float* attn_concat,
+  float* out,
+  int batch,
+  int seq,
+  int d_model,
+  int num_heads,
+  float scale
+) {
+  tensor_mha_forward_batch_interleaved_impl(
+    x,
+    w_q,
+    w_k,
+    w_v,
+    w_o,
+    mask,
+    q_proj,
+    k_proj,
+    v_proj,
+    attn_w,
+    attn_concat,
+    out,
+    batch,
+    seq,
+    d_model,
+    num_heads,
+    scale
+  );
+}
+
 // Row-wise matrix add:
 // dst[row, col] += add[row, col]
 void tensor_add_matrix_inplace(float* dst, const float* add, int rows, int cols) {

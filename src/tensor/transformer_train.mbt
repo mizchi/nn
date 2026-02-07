@@ -67,6 +67,43 @@ pub struct TransformerLmStepMetric {
 }
 
 ///|
+priv struct TransformerBlockForwardWorkspace {
+  q_proj : FixedArray[Float]
+  k_proj : FixedArray[Float]
+  v_proj : FixedArray[Float]
+  attn_weights : FixedArray[Float]
+  attn_concat : FixedArray[Float]
+  attn_out : FixedArray[Float]
+}
+
+///|
+priv struct TransformerForwardWorkspace {
+  blocks : Array[TransformerBlockForwardWorkspace]
+}
+
+///|
+fn transformer_forward_workspace(
+  config : TransformerConfig,
+  batch : Int,
+  seq : Int,
+) -> TransformerForwardWorkspace {
+  let d_model = config.d_model
+  let proj_size = batch * seq * d_model
+  let attn_w_size = batch * config.num_heads * seq * seq
+  let blocks = Array::makei(config.num_layers, fn(_i) {
+    TransformerBlockForwardWorkspace::{
+      q_proj: FixedArray::make(proj_size, Float::from_int(0)),
+      k_proj: FixedArray::make(proj_size, Float::from_int(0)),
+      v_proj: FixedArray::make(proj_size, Float::from_int(0)),
+      attn_weights: FixedArray::make(attn_w_size, Float::from_int(0)),
+      attn_concat: FixedArray::make(proj_size, Float::from_int(0)),
+      attn_out: FixedArray::make(proj_size, Float::from_int(0)),
+    }
+  })
+  TransformerForwardWorkspace::{ blocks, }
+}
+
+///|
 pub struct AdamwConfig {
   lr : Float
   beta1 : Float
@@ -740,17 +777,26 @@ fn transformer_block_backward(
 
 ///|
 /// Forward pass with cache for training
-pub fn transformer_forward_with_cache(
+fn transformer_forward_with_cache_impl(
   tokens : Array[Array[Int]],
   params : TransformerParams,
   config : TransformerConfig,
   mask : Tensor?,
+  workspace : TransformerForwardWorkspace?,
 ) -> (Tensor, TransformerCache) {
   let batch = tokens.length()
   let seq = tokens[0].length()
   let d_model = config.d_model
   let num_heads = config.num_heads
   let d_k = d_model / num_heads
+  let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
+  let proj_shape = shape_new_unchecked([batch, seq, d_model])
+  let mc = match mask {
+    None => None
+    Some(m) => Some(m.contiguous())
+  }
+  let proj_size = batch * seq * d_model
+  let attn_w_size = batch * num_heads * seq * seq
 
   // Token embedding
   let tok_emb = embedding(tokens, params.token_embedding)
@@ -770,69 +816,114 @@ pub fn transformer_forward_with_cache(
       config.eps,
     )
 
-    // Q, K, V projections
-    let q_proj = batched_linear(ln1_out, bp.w_q).unwrap()
-    let k_proj = batched_linear(ln1_out, bp.w_k).unwrap()
-    let v_proj = batched_linear(ln1_out, bp.w_v).unwrap()
-
-    // Attention with cached weights (interleaved layout, no head reshape copies).
-    let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
-    let qc = q_proj.contiguous()
-    let kc = k_proj.contiguous()
-    let vc = v_proj.contiguous()
-    let mc = match mask {
+    // MHA block fused forward (QKV projection + attention + W_o)
+    let ws_block = match workspace {
       None => None
-      Some(m) => Some(m.contiguous())
+      Some(ws) => Some(ws.blocks[layer])
     }
-    let total_heads = batch * num_heads
-    let scores_size = seq * seq
-    let attn_weights_all = FixedArray::make(
-      total_heads * scores_size,
-      Float::from_int(0),
-    )
-    let attn_concat_data = FixedArray::make(
-      batch * seq * d_model,
-      Float::from_int(0),
-    )
+    let (
+      q_proj_data,
+      k_proj_data,
+      v_proj_data,
+      attn_weights_all,
+      attn_concat_data,
+      attn_out_data,
+    ) = match ws_block {
+      Some(ws) =>
+        (
+          ws.q_proj,
+          ws.k_proj,
+          ws.v_proj,
+          ws.attn_weights,
+          ws.attn_concat,
+          ws.attn_out,
+        )
+      None =>
+        (
+          FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(attn_w_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
+        )
+    }
+    let ln1c = ln1_out.contiguous()
+    let wq = bp.w_q.contiguous()
+    let wk = bp.w_k.contiguous()
+    let wv = bp.w_v.contiguous()
+    let wo = bp.w_o.contiguous()
     match mc {
       Some(m) =>
-        attention_forward_batch_interleaved_masked(
-          qc.data,
-          kc.data,
-          vc.data,
+        mha_forward_batch_interleaved_masked(
+          ln1c.data,
+          wq.data,
+          wk.data,
+          wv.data,
+          wo.data,
           m.data,
+          q_proj_data,
+          k_proj_data,
+          v_proj_data,
           attn_weights_all,
           attn_concat_data,
+          attn_out_data,
           batch,
-          num_heads,
           seq,
-          d_k,
+          d_model,
+          num_heads,
           scale,
         )
       None =>
-        attention_forward_batch_interleaved(
-          qc.data,
-          kc.data,
-          vc.data,
+        mha_forward_batch_interleaved(
+          ln1c.data,
+          wq.data,
+          wk.data,
+          wv.data,
+          wo.data,
+          q_proj_data,
+          k_proj_data,
+          v_proj_data,
           attn_weights_all,
           attn_concat_data,
+          attn_out_data,
           batch,
-          num_heads,
           seq,
-          d_k,
+          d_model,
+          num_heads,
           scale,
         )
     }
-    let attn_concat_shape = shape_new_unchecked([batch, seq, d_model])
+    let q_proj = Tensor::{
+      data: q_proj_data,
+      shape: proj_shape,
+      offset: 0,
+      strides: proj_shape.strides(),
+    }
+    let k_proj = Tensor::{
+      data: k_proj_data,
+      shape: proj_shape,
+      offset: 0,
+      strides: proj_shape.strides(),
+    }
+    let v_proj = Tensor::{
+      data: v_proj_data,
+      shape: proj_shape,
+      offset: 0,
+      strides: proj_shape.strides(),
+    }
     let attn_concat = Tensor::{
       data: attn_concat_data,
-      shape: attn_concat_shape,
+      shape: proj_shape,
       offset: 0,
-      strides: attn_concat_shape.strides(),
+      strides: proj_shape.strides(),
     }
-
-    // W_o projection
-    let attn_out = batched_linear(attn_concat, bp.w_o).unwrap()
+    let attn_out = Tensor::{
+      data: attn_out_data,
+      shape: proj_shape,
+      offset: 0,
+      strides: proj_shape.strides(),
+    }
 
     // Residual 1
     let x_after_res1_data = FixedArray::make(
@@ -923,6 +1014,34 @@ pub fn transformer_forward_with_cache(
     logits,
   }
   (logits, cache)
+}
+
+///|
+fn transformer_forward_with_cache_workspace(
+  tokens : Array[Array[Int]],
+  params : TransformerParams,
+  config : TransformerConfig,
+  mask : Tensor?,
+  workspace : TransformerForwardWorkspace,
+) -> (Tensor, TransformerCache) {
+  transformer_forward_with_cache_impl(
+    tokens,
+    params,
+    config,
+    mask,
+    Some(workspace),
+  )
+}
+
+///|
+/// Forward pass with cache for training
+pub fn transformer_forward_with_cache(
+  tokens : Array[Array[Int]],
+  params : TransformerParams,
+  config : TransformerConfig,
+  mask : Tensor?,
+) -> (Tensor, TransformerCache) {
+  transformer_forward_with_cache_impl(tokens, params, config, mask, None)
 }
 
 ///|
@@ -1426,6 +1545,9 @@ fn transformer_train_lm_profile_steps_impl(
     batch_size
   }
   let mask = causal_mask(seq_len).unwrap()
+  let forward_workspace = transformer_forward_workspace(
+    config, effective_batch, seq_len,
+  )
   let total_steps = effective_warmup + steps
   for step = 0; step < total_steps; step = step + 1 {
     zero_grads(grads)
@@ -1439,11 +1561,12 @@ fn transformer_train_lm_profile_steps_impl(
     }
     let t0 = clock_ns()
     // Forward with cache (mini-batch)
-    let (_, cache) = transformer_forward_with_cache(
+    let (_, cache) = transformer_forward_with_cache_workspace(
       batch_inputs,
       params,
       config,
       Some(mask),
+      forward_workspace,
     )
 
     // Backward

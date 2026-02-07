@@ -1035,6 +1035,95 @@ test "forward_with_cache_matches_forward" {
 }
 
 ///|
+test "forward_with_cache_workspace_matches_default_and_reusable" {
+  let config = transformer_config(6, 8, 2, 1, 16, 8).unwrap()
+  let params = transformer_init_params(config, 123)
+  let mask = causal_mask(8).unwrap()
+  let tokens_a = [[0, 1, 2, 3, 4, 5, 0, 1], [1, 2, 3, 4, 5, 0, 1, 2]]
+  let tokens_b = [[5, 4, 3, 2, 1, 0, 5, 4], [2, 1, 0, 5, 4, 3, 2, 1]]
+  let workspace = transformer_forward_workspace(config, 2, 8)
+  let (logits_def_a, cache_def_a) = transformer_forward_with_cache(
+    tokens_a,
+    params,
+    config,
+    Some(mask),
+  )
+  let (logits_ws_a, cache_ws_a) = transformer_forward_with_cache_workspace(
+    tokens_a,
+    params,
+    config,
+    Some(mask),
+    workspace,
+  )
+  let logits_def_a_c = logits_def_a.contiguous()
+  let logits_ws_a_c = logits_ws_a.contiguous()
+  for i = 0; i < logits_def_a.numel(); i = i + 1 {
+    let diff = (logits_def_a_c.data[i] - logits_ws_a_c.data[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+  let blk_def_a = cache_def_a.block_caches[0]
+  let blk_ws_a = cache_ws_a.block_caches[0]
+  for i = 0; i < blk_def_a.attn_weights.length(); i = i + 1 {
+    let diff = (blk_def_a.attn_weights[i] - blk_ws_a.attn_weights[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+  for i = 0; i < blk_def_a.q_proj.numel(); i = i + 1 {
+    let q_diff = (blk_def_a.q_proj.data[i] - blk_ws_a.q_proj.data[i])
+      .to_double()
+      .abs()
+    let k_diff = (blk_def_a.k_proj.data[i] - blk_ws_a.k_proj.data[i])
+      .to_double()
+      .abs()
+    let v_diff = (blk_def_a.v_proj.data[i] - blk_ws_a.v_proj.data[i])
+      .to_double()
+      .abs()
+    let a_diff = (blk_def_a.attn_out_pre_wo.data[i] -
+      blk_ws_a.attn_out_pre_wo.data[i])
+      .to_double()
+      .abs()
+    assert_true(q_diff < 1.0e-6)
+    assert_true(k_diff < 1.0e-6)
+    assert_true(v_diff < 1.0e-6)
+    assert_true(a_diff < 1.0e-6)
+  }
+
+  // Reuse the same workspace with different tokens and ensure outputs still match.
+  let (logits_def_b, cache_def_b) = transformer_forward_with_cache(
+    tokens_b,
+    params,
+    config,
+    Some(mask),
+  )
+  let (logits_ws_b, cache_ws_b) = transformer_forward_with_cache_workspace(
+    tokens_b,
+    params,
+    config,
+    Some(mask),
+    workspace,
+  )
+  let logits_def_b_c = logits_def_b.contiguous()
+  let logits_ws_b_c = logits_ws_b.contiguous()
+  for i = 0; i < logits_def_b.numel(); i = i + 1 {
+    let diff = (logits_def_b_c.data[i] - logits_ws_b_c.data[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+  let blk_def_b = cache_def_b.block_caches[0]
+  let blk_ws_b = cache_ws_b.block_caches[0]
+  for i = 0; i < blk_def_b.attn_weights.length(); i = i + 1 {
+    let diff = (blk_def_b.attn_weights[i] - blk_ws_b.attn_weights[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+}
+
+///|
 test "attention_cache_uses_fixedarray" {
   let config = transformer_config(4, 8, 1, 1, 16, 8).unwrap()
   let params = transformer_init_params(config, 123)

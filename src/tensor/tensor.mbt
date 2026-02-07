@@ -1,8 +1,8 @@
 ///|
 /// Tensor represents an N-dimensional array with shape metadata.
-/// Currently CPU-backed (Array[Float]), GPU support to be added.
+/// CPU-backed with FixedArray[Float] for zero-copy FFI.
 pub struct Tensor {
-  data : Array[Float]
+  data : FixedArray[Float]
   shape : Shape
   offset : Int // For views into larger arrays
   strides : Array[Int] // For non-contiguous views
@@ -21,31 +21,45 @@ pub fn tensor_new(shape : Shape, data : Array[Float]) -> Result[Tensor, String] 
       ")",
     )
   }
-  Ok(Tensor::{ data, shape, offset: 0, strides: shape.strides() })
+  let fa = FixedArray::make(data.length(), Float::from_int(0))
+  for i = 0; i < data.length(); i = i + 1 {
+    fa[i] = data[i]
+  }
+  Ok(Tensor::{ data: fa, shape, offset: 0, strides: shape.strides() })
+}
+
+///|
+/// Internal: create Tensor from FixedArray without copying (no validation)
+fn tensor_new_fixed(shape : Shape, data : FixedArray[Float]) -> Tensor {
+  Tensor::{ data, shape, offset: 0, strides: shape.strides() }
 }
 
 ///|
 pub fn tensor_zeros(shape : Shape) -> Tensor {
-  let data = Array::make(shape.numel(), Float::from_int(0))
+  let data = FixedArray::make(shape.numel(), Float::from_int(0))
   Tensor::{ data, shape, offset: 0, strides: shape.strides() }
 }
 
 ///|
 pub fn tensor_ones(shape : Shape) -> Tensor {
-  let data = Array::make(shape.numel(), Float::from_int(1))
+  let data = FixedArray::make(shape.numel(), Float::from_int(1))
   Tensor::{ data, shape, offset: 0, strides: shape.strides() }
 }
 
 ///|
 pub fn tensor_full(shape : Shape, value : Float) -> Tensor {
-  let data = Array::make(shape.numel(), value)
+  let data = FixedArray::make(shape.numel(), value)
   Tensor::{ data, shape, offset: 0, strides: shape.strides() }
 }
 
 ///|
 pub fn tensor_from_array(arr : Array[Float]) -> Tensor {
   let shape = Shape::{ dims: [arr.length()] }
-  Tensor::{ data: arr, shape, offset: 0, strides: [1] }
+  let fa = FixedArray::make(arr.length(), Float::from_int(0))
+  for i = 0; i < arr.length(); i = i + 1 {
+    fa[i] = arr[i]
+  }
+  Tensor::{ data: fa, shape, offset: 0, strides: [1] }
 }
 
 ///|
@@ -130,7 +144,7 @@ pub fn Tensor::contiguous(self : Tensor) -> Tensor {
   if self.is_contiguous() && self.offset == 0 {
     return self
   }
-  let new_data = Array::make(self.numel(), Float::from_int(0))
+  let new_data = FixedArray::make(self.numel(), Float::from_int(0))
   copy_tensor_data(self, new_data)
   Tensor::{
     data: new_data,
@@ -141,7 +155,7 @@ pub fn Tensor::contiguous(self : Tensor) -> Tensor {
 }
 
 ///|
-fn copy_tensor_data(src : Tensor, dst : Array[Float]) -> Unit {
+fn copy_tensor_data(src : Tensor, dst : FixedArray[Float]) -> Unit {
   let n = src.ndim()
   if n == 1 {
     for i = 0; i < src.dim(0); i = i + 1 {
@@ -175,7 +189,7 @@ fn copy_tensor_data(src : Tensor, dst : Array[Float]) -> Unit {
 ///|
 fn copy_nd(
   src : Tensor,
-  dst : Array[Float],
+  dst : FixedArray[Float],
   indices : Array[Int],
   dst_idx : Int,
 ) -> Int {
@@ -275,12 +289,20 @@ pub fn Tensor::slice(
 }
 
 ///|
-/// Get raw data as Array[Float] (contiguous copy if needed)
+/// Get raw data as Array[Float] (always copies)
 pub fn Tensor::to_array(self : Tensor) -> Array[Float] {
+  let n = self.numel()
+  let result = Array::make(n, Float::from_int(0))
   if self.is_contiguous() && self.offset == 0 {
-    return self.data.copy()
+    for i = 0; i < n; i = i + 1 {
+      result[i] = self.data[i]
+    }
+  } else {
+    let tmp = FixedArray::make(n, Float::from_int(0))
+    copy_tensor_data(self, tmp)
+    for i = 0; i < n; i = i + 1 {
+      result[i] = tmp[i]
+    }
   }
-  let result = Array::make(self.numel(), Float::from_int(0))
-  copy_tensor_data(self, result)
   result
 }

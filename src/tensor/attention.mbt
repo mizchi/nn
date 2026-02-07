@@ -70,7 +70,7 @@ fn apply_attention_mask(
     if mask.dim(0) != seq_q || mask.dim(1) != seq_k {
       return Err("mask shape mismatch for broadcast")
     }
-    let result = Array::make(batch * seq_q * seq_k, Float::from_int(0))
+    let result = FixedArray::make(batch * seq_q * seq_k, Float::from_int(0))
     for b = 0; b < batch; b = b + 1 {
       for i = 0; i < seq_q; i = i + 1 {
         for j = 0; j < seq_k; j = j + 1 {
@@ -80,7 +80,7 @@ fn apply_attention_mask(
       }
     }
     let out_shape = shape_new_unchecked([batch, seq_q, seq_k])
-    return tensor_new(out_shape, result)
+    return Ok(tensor_new_fixed(out_shape, result))
   }
   Err(
     "unsupported mask broadcast: scores=" +
@@ -98,7 +98,7 @@ pub fn causal_mask(seq_len : Int) -> Result[Tensor, String] {
     Ok(s) => s
     Err(e) => return Err(e)
   }
-  let data = Array::make(seq_len * seq_len, Float::from_int(0))
+  let data = FixedArray::make(seq_len * seq_len, Float::from_int(0))
   let neg_inf = Float::from_double(-1000000000.0)
   for i = 0; i < seq_len; i = i + 1 {
     for j = 0; j < seq_len; j = j + 1 {
@@ -108,7 +108,7 @@ pub fn causal_mask(seq_len : Int) -> Result[Tensor, String] {
       }
     }
   }
-  tensor_new(shape, data)
+  Ok(tensor_new_fixed(shape, data))
 }
 
 ///|
@@ -165,8 +165,6 @@ pub fn multi_head_attention(
 ///|
 /// Batched linear: [batch, seq, in] @ [in, out] -> [batch, seq, out]
 fn batched_linear(x : Tensor, w : Tensor) -> Result[Tensor, String] {
-  // x: [batch, seq, in], w: [in, out]
-  // For each batch and seq position, compute x[b,s,:] @ w
   let batch = x.dim(0)
   let seq = x.dim(1)
   let in_dim = x.dim(2)
@@ -177,19 +175,18 @@ fn batched_linear(x : Tensor, w : Tensor) -> Result[Tensor, String] {
   let xc = x.contiguous()
   let wc = w.contiguous()
   let out_shape = shape_new_unchecked([batch, seq, out_dim])
-  let result = Array::make(batch * seq * out_dim, Float::from_int(0))
-  for b = 0; b < batch; b = b + 1 {
-    for s = 0; s < seq; s = s + 1 {
-      for o = 0; o < out_dim; o = o + 1 {
-        let mut sum = Float::from_int(0)
-        for i = 0; i < in_dim; i = i + 1 {
-          sum = sum + xc.at3(b, s, i) * wc.at2(i, o)
-        }
-        result[b * seq * out_dim + s * out_dim + o] = sum
-      }
-    }
-  }
-  tensor_new(out_shape, result)
+  let n = batch * seq
+  let result = FixedArray::make(n * out_dim, Float::from_int(0))
+  // C = X @ W : [n, in_dim] @ [in_dim, out_dim] -> [n, out_dim]
+  native_sgemm(
+    0, 0, n, out_dim, in_dim,
+    Float::from_int(1),
+    xc.data, in_dim,
+    wc.data, out_dim,
+    Float::from_int(0),
+    result, out_dim,
+  )
+  Ok(tensor_new_fixed(out_shape, result))
 }
 
 ///|
@@ -203,7 +200,7 @@ fn reshape_for_heads(
 ) -> Tensor {
   let xc = x.contiguous()
   let out_shape = shape_new_unchecked([batch, num_heads, seq, d_k])
-  let result = Array::make(batch * num_heads * seq * d_k, Float::from_int(0))
+  let result = FixedArray::make(batch * num_heads * seq * d_k, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for s = 0; s < seq; s = s + 1 {
       for h = 0; h < num_heads; h = h + 1 {
@@ -238,7 +235,7 @@ fn reshape_from_heads(
   let d_model = num_heads * d_k
   let xc = x.contiguous()
   let out_shape = shape_new_unchecked([batch, seq, d_model])
-  let result = Array::make(batch * seq * d_model, Float::from_int(0))
+  let result = FixedArray::make(batch * seq * d_model, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for s = 0; s < seq; s = s + 1 {
       for h = 0; h < num_heads; h = h + 1 {
@@ -277,7 +274,7 @@ fn multi_head_attention_core(
     (d_k.to_double().sqrt() |> Float::from_double)
   // For each batch and head, compute attention
   let out_shape = shape_new_unchecked([batch, num_heads, seq_q, d_v])
-  let result = Array::make(batch * num_heads * seq_q * d_v, Float::from_int(0))
+  let result = FixedArray::make(batch * num_heads * seq_q * d_v, Float::from_int(0))
   let qc = q.contiguous()
   let kc = k.contiguous()
   let vc = v.contiguous()
@@ -287,30 +284,29 @@ fn multi_head_attention_core(
   }
   for b = 0; b < batch; b = b + 1 {
     for h = 0; h < num_heads; h = h + 1 {
-      // Compute scores: Q @ K^T scaled
-      let scores = Array::make(seq_q * seq_k, Float::from_int(0))
-      for i = 0; i < seq_q; i = i + 1 {
-        for j = 0; j < seq_k; j = j + 1 {
-          let mut dot = Float::from_int(0)
-          for d = 0; d < d_k; d = d + 1 {
-            let q_idx = b * num_heads * seq_q * d_k +
-              h * seq_q * d_k +
-              i * d_k +
-              d
-            let k_idx = b * num_heads * seq_k * d_k +
-              h * seq_k * d_k +
-              j * d_k +
-              d
-            dot = dot + qc.data[q_idx] * kc.data[k_idx]
+      let q_base = (b * num_heads + h) * seq_q * d_k
+      let k_base = (b * num_heads + h) * seq_k * d_k
+      let v_base = (b * num_heads + h) * seq_k * d_v
+      let out_base = (b * num_heads + h) * seq_q * d_v
+      // scores = Q @ K^T * scale : [seq_q, d_k] @ [d_k, seq_k] -> [seq_q, seq_k]
+      let scores = FixedArray::make(seq_q * seq_k, Float::from_int(0))
+      native_sgemm_offset(
+        0, 1, seq_q, seq_k, d_k,
+        scale,
+        qc.data, q_base, d_k,
+        kc.data, k_base, d_k,
+        Float::from_int(0),
+        scores, 0, seq_k,
+      )
+      // Apply mask
+      match mc {
+        Some(m) =>
+          for i = 0; i < seq_q; i = i + 1 {
+            for j = 0; j < seq_k; j = j + 1 {
+              scores[i * seq_k + j] = scores[i * seq_k + j] + m.at2(i, j)
+            }
           }
-          let mut score = dot * scale
-          // Apply mask
-          match mc {
-            Some(m) => score = score + m.at2(i, j)
-            None => ()
-          }
-          scores[i * seq_k + j] = score
-        }
+        None => ()
       }
       // Softmax over seq_k dimension
       for i = 0; i < seq_q; i = i + 1 {
@@ -332,24 +328,15 @@ fn multi_head_attention_core(
           scores[base + j] = scores[base + j] / sum
         }
       }
-      // Multiply by V: attn_weights @ V
-      for i = 0; i < seq_q; i = i + 1 {
-        for d = 0; d < d_v; d = d + 1 {
-          let mut sum = Float::from_int(0)
-          for j = 0; j < seq_k; j = j + 1 {
-            let v_idx = b * num_heads * seq_k * d_v +
-              h * seq_k * d_v +
-              j * d_v +
-              d
-            sum = sum + scores[i * seq_k + j] * vc.data[v_idx]
-          }
-          let out_idx = b * num_heads * seq_q * d_v +
-            h * seq_q * d_v +
-            i * d_v +
-            d
-          result[out_idx] = sum
-        }
-      }
+      // output = attn_weights @ V : [seq_q, seq_k] @ [seq_k, d_v] -> [seq_q, d_v]
+      native_sgemm_offset(
+        0, 0, seq_q, d_v, seq_k,
+        Float::from_int(1),
+        scores, 0, seq_k,
+        vc.data, v_base, d_v,
+        Float::from_int(0),
+        result, out_base, d_v,
+      )
     }
   }
   Tensor::{

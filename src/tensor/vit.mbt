@@ -70,7 +70,11 @@ pub fn vit_init_params(config : VitConfig, seed : Int) -> VitParams {
     (val * 0.04 - 0.02) |> Float::from_double
   }
   let init_tensor = fn(shape : Shape) -> Tensor {
-    let data = Array::makei(shape.numel(), fn(_i) { next_float() })
+    let n = shape.numel()
+    let data = FixedArray::make(n, Float::from_int(0))
+    for i = 0; i < n; i = i + 1 {
+      data[i] = next_float()
+    }
     Tensor::{ data, shape, offset: 0, strides: shape.strides() }
   }
   let ones = fn(n : Int) -> Tensor { tensor_ones(shape_new_unchecked([n])) }
@@ -121,7 +125,7 @@ pub fn extract_patches(images : Tensor, config : VitConfig) -> Tensor {
   let pd = config.patch_dim
   let img_size = config.image_size
   let ic = images.contiguous()
-  let result = Array::make(batch * np * pd, Float::from_int(0))
+  let result = FixedArray::make(batch * np * pd, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     let img_base = b * img_size * img_size
     for gy = 0; gy < grid; gy = gy + 1 {
@@ -157,7 +161,7 @@ pub fn prepend_cls_token(x : Tensor, cls_token : Tensor, batch : Int) -> Tensor 
   let seq_len = num_patches + 1
   let xc = x.contiguous()
   let cc = cls_token.contiguous()
-  let result = Array::make(batch * seq_len * d_model, Float::from_int(0))
+  let result = FixedArray::make(batch * seq_len * d_model, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     let out_base = b * seq_len * d_model
     // Copy CLS token at position 0
@@ -236,7 +240,7 @@ pub fn vit_forward(
   let d_model = config.d_model
   let seq_len = config.seq_len
   let lnc = ln_out.contiguous()
-  let cls_features_data = Array::make(batch * d_model, Float::from_int(0))
+  let cls_features_data = FixedArray::make(batch * d_model, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     let src = b * seq_len * d_model
     let dst = b * d_model
@@ -262,7 +266,7 @@ pub fn vit_forward(
   // Reshape [batch, 1, num_classes] -> [batch, num_classes]
   let nc = config.num_classes
   let l3c = logits_3d.contiguous()
-  let logits_data = Array::make(batch * nc, Float::from_int(0))
+  let logits_data = FixedArray::make(batch * nc, Float::from_int(0))
   for i = 0; i < batch * nc; i = i + 1 {
     logits_data[i] = l3c.data[i]
   }

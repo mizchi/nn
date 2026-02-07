@@ -72,7 +72,7 @@ pub fn embedding(indices : Array[Array[Int]], weight : Tensor) -> Tensor {
   let seq = indices[0].length()
   let d_model = weight.dim(1)
   let out_shape = shape_new_unchecked([batch, seq, d_model])
-  let result = Array::make(batch * seq * d_model, Float::from_int(0))
+  let result = FixedArray::make(batch * seq * d_model, Float::from_int(0))
   let wc = weight.contiguous()
   for b = 0; b < batch; b = b + 1 {
     for s = 0; s < seq; s = s + 1 {
@@ -101,7 +101,7 @@ pub fn add_positional_embedding(x : Tensor, pos_weight : Tensor) -> Tensor {
   let d_model = x.dim(2)
   let xc = x.contiguous()
   let pc = pos_weight.contiguous()
-  let result = Array::make(batch * seq * d_model, Float::from_int(0))
+  let result = FixedArray::make(batch * seq * d_model, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for s = 0; s < seq; s = s + 1 {
       let x_base = b * seq * d_model + s * d_model
@@ -151,7 +151,7 @@ fn add_bias(x : Tensor, bias : Tensor) -> Tensor {
   let xc = x.contiguous()
   let bc = bias.contiguous()
   let last_dim = x.dim(-1)
-  let result = Array::make(xc.numel(), Float::from_int(0))
+  let result = FixedArray::make(xc.numel(), Float::from_int(0))
   let outer = xc.numel() / last_dim
   for i = 0; i < outer; i = i + 1 {
     let base = i * last_dim
@@ -269,7 +269,11 @@ pub fn transformer_init_params(
     (val * 0.04 - 0.02) |> Float::from_double
   }
   let init_tensor = fn(shape : Shape) -> Tensor {
-    let data = Array::makei(shape.numel(), fn(_i) { next_float() })
+    let n = shape.numel()
+    let data = FixedArray::make(n, Float::from_int(0))
+    for i = 0; i < n; i = i + 1 {
+      data[i] = next_float()
+    }
     Tensor::{ data, shape, offset: 0, strides: shape.strides() }
   }
   let ones = fn(n : Int) -> Tensor {

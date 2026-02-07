@@ -4,9 +4,11 @@ test "vit_forward_with_cache_matches_forward" {
   let params = vit_init_params(config, 123)
   let batch = 2
   // Create deterministic test images
-  let img_data = Array::makei(batch * 784, fn(i) {
-    Float::from_double(i.to_double() / 784.0 * 0.1)
-  })
+  let n = batch * 784
+  let img_data = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    img_data[i] = Float::from_double(i.to_double() / 784.0 * 0.1)
+  }
   let images = Tensor::{
     data: img_data,
     shape: shape_new_unchecked([batch, 784]),
@@ -37,9 +39,11 @@ test "vit_backward_gradient_check_cls_head_w" {
   // Numerical gradient check for cls_head_w
   let config = vit_config(4, 2, 8, 2, 1, 16, 3).unwrap()
   let params = vit_init_params(config, 42)
-  let img_data = Array::makei(2 * 16, fn(i) {
-    Float::from_double(i.to_double() / 16.0 * 0.5)
-  })
+  let n = 2 * 16
+  let img_data = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    img_data[i] = Float::from_double(i.to_double() / 16.0 * 0.5)
+  }
   let images = Tensor::{
     data: img_data,
     shape: shape_new_unchecked([2, 16]),
@@ -86,9 +90,11 @@ test "vit_backward_gradient_check_cls_head_w" {
 test "vit_backward_gradient_check_patch_proj_w" {
   let config = vit_config(4, 2, 8, 2, 1, 16, 3).unwrap()
   let params = vit_init_params(config, 42)
-  let img_data = Array::makei(2 * 16, fn(i) {
-    Float::from_double(i.to_double() / 16.0 * 0.5)
-  })
+  let n = 2 * 16
+  let img_data = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    img_data[i] = Float::from_double(i.to_double() / 16.0 * 0.5)
+  }
   let images = Tensor::{
     data: img_data,
     shape: shape_new_unchecked([2, 16]),
@@ -136,7 +142,7 @@ test "vit_training_loss_decreases" {
   // 4x4 images, 3 classes, 6 samples (2 per class)
   let num_samples = 6
   let img_dim = 16
-  let img_data = Array::make(num_samples * img_dim, Float::from_int(0))
+  let img_data = FixedArray::make(num_samples * img_dim, Float::from_int(0))
   // Class 0: bright top-left
   for s = 0; s < 2; s = s + 1 {
     let base = s * img_dim

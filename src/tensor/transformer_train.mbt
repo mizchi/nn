@@ -103,7 +103,7 @@ fn layer_norm_with_cache(
   let tc = t.contiguous()
   let gc = gamma.contiguous()
   let bc = beta.contiguous()
-  let result = Array::make(tc.numel(), Float::from_int(0))
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let outer = t.numel() / last_dim
   let means = Array::make(outer, Float::from_int(0))
   let rstds = Array::make(outer, Float::from_int(0))
@@ -144,7 +144,7 @@ pub fn cross_entropy_backward(logits : Tensor, labels : Array[Int]) -> Tensor {
   let batch = logits.dim(0)
   let vocab = logits.dim(1)
   let lc = logits.contiguous()
-  let result = Array::make(batch * vocab, Float::from_int(0))
+  let result = FixedArray::make(batch * vocab, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     let base = b * vocab
     // compute softmax
@@ -195,32 +195,29 @@ fn batched_linear_backward(
   let seq = dy.dim(1)
   let out_dim = dy.dim(2)
   let in_dim = x_cached.dim(2)
+  let n = batch * seq
   let dyc = dy.contiguous()
   let xc = x_cached.contiguous()
   let wc = w.contiguous()
-  // dx = dy @ W^T : [batch, seq, out_dim] @ [out_dim, in_dim] -> [batch, seq, in_dim]
-  let dx_data = Array::make(batch * seq * in_dim, Float::from_int(0))
-  for b = 0; b < batch; b = b + 1 {
-    for s = 0; s < seq; s = s + 1 {
-      let dy_base = b * seq * out_dim + s * out_dim
-      let dx_base = b * seq * in_dim + s * in_dim
-      for i = 0; i < in_dim; i = i + 1 {
-        let mut sum = Float::from_int(0)
-        for o = 0; o < out_dim; o = o + 1 {
-          // W is [in_dim, out_dim], W^T[o, i] = W[i, o]
-          sum = sum + dyc.data[dy_base + o] * wc.data[i * out_dim + o]
-        }
-        dx_data[dx_base + i] = sum
-      }
-      // dW += x^T @ dy (accumulate)
-      for i = 0; i < in_dim; i = i + 1 {
-        for o = 0; o < out_dim; o = o + 1 {
-          d_w.data[i * out_dim + o] = d_w.data[i * out_dim + o] +
-            xc.data[b * seq * in_dim + s * in_dim + i] * dyc.data[dy_base + o]
-        }
-      }
-    }
-  }
+  let dx_data = FixedArray::make(n * in_dim, Float::from_int(0))
+  // dx = dy @ W^T : [n, out_dim] @ [out_dim, in_dim] -> [n, in_dim]
+  native_sgemm(
+    0, 1, n, in_dim, out_dim,
+    Float::from_int(1),
+    dyc.data, out_dim,
+    wc.data, out_dim,
+    Float::from_int(0),
+    dx_data, in_dim,
+  )
+  // dW += x^T @ dy : [in_dim, n] @ [n, out_dim] -> [in_dim, out_dim], beta=1.0
+  native_sgemm(
+    1, 0, in_dim, out_dim, n,
+    Float::from_int(1),
+    xc.data, in_dim,
+    dyc.data, out_dim,
+    Float::from_int(1),
+    d_w.data, out_dim,
+  )
   Tensor::{
     data: dx_data,
     shape: x_cached.shape,
@@ -263,7 +260,7 @@ pub fn layer_norm_backward(
   let xc = x.contiguous()
   let gc = gamma.contiguous()
   let n_f = Float::from_int(last_dim)
-  let dx_data = Array::make(xc.numel(), Float::from_int(0))
+  let dx_data = FixedArray::make(xc.numel(), Float::from_int(0))
   for i = 0; i < outer; i = i + 1 {
     let base = i * last_dim
     let m = mean[i]
@@ -307,7 +304,7 @@ pub fn layer_norm_backward(
 pub fn gelu_backward(dy : Tensor, x_pre_gelu : Tensor) -> Tensor {
   let dyc = dy.contiguous()
   let xc = x_pre_gelu.contiguous()
-  let result = Array::make(xc.numel(), Float::from_int(0))
+  let result = FixedArray::make(xc.numel(), Float::from_int(0))
   let sqrt_2_pi = 0.7978845608028654
   let coef = 0.044715
   for i = 0; i < xc.numel(); i = i + 1 {
@@ -451,15 +448,15 @@ fn multi_head_attention_backward(
   let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
 
   // Per-head attention backward
-  let dq_heads_data = Array::make(
+  let dq_heads_data = FixedArray::make(
     batch * num_heads * seq * d_k,
     Float::from_int(0),
   )
-  let dk_heads_data = Array::make(
+  let dk_heads_data = FixedArray::make(
     batch * num_heads * seq * d_k,
     Float::from_int(0),
   )
-  let dv_heads_data = Array::make(
+  let dv_heads_data = FixedArray::make(
     batch * num_heads * seq * d_k,
     Float::from_int(0),
   )
@@ -467,40 +464,40 @@ fn multi_head_attention_backward(
   let qc = q_heads.contiguous()
   let kc = k_heads.contiguous()
   let vc = v_heads.contiguous()
+  let attn_w_buf = FixedArray::make(seq * seq, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for h = 0; h < num_heads; h = h + 1 {
       let head_idx = b * num_heads + h
       let attn_w = cache.attn_weights[head_idx]
       let head_base = (b * num_heads + h) * seq * d_k
 
-      // d_attn_out = d_concat_heads[b,h] : [seq, d_k]
-      // attn_out = attn_weights @ V
-      // d_attn_weights = d_attn_out @ V^T : [seq, seq]
-      // dV += attn_weights^T @ d_attn_out : [seq, d_k]
-      let d_attn_weights = Array::make(seq * seq, Float::from_int(0))
-      for i = 0; i < seq; i = i + 1 {
-        for j = 0; j < seq; j = j + 1 {
-          let mut sum = Float::from_int(0)
-          for d = 0; d < d_k; d = d + 1 {
-            sum = sum +
-              dc.data[head_base + i * d_k + d] *
-              vc.data[head_base + j * d_k + d]
-          }
-          d_attn_weights[i * seq + j] = sum
-        }
-        // dV
-        for d = 0; d < d_k; d = d + 1 {
-          for j = 0; j < seq; j = j + 1 {
-            dv_heads_data[head_base + j * d_k + d] = dv_heads_data[head_base +
-              j * d_k +
-              d] +
-              attn_w[i * seq + j] * dc.data[head_base + i * d_k + d]
-          }
-        }
+      // d_attn_weights = d_out @ V^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
+      let d_attn_weights = FixedArray::make(seq * seq, Float::from_int(0))
+      native_sgemm_offset(
+        0, 1, seq, seq, d_k,
+        Float::from_int(1),
+        dc.data, head_base, d_k,
+        vc.data, head_base, d_k,
+        Float::from_int(0),
+        d_attn_weights, 0, seq,
+      )
+
+      // dV += attn_weights^T @ d_out : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
+      // Copy attn_w (Array[Float]) to FixedArray for SGEMM
+      for idx = 0; idx < seq * seq; idx = idx + 1 {
+        attn_w_buf[idx] = attn_w[idx]
       }
+      native_sgemm_offset(
+        1, 0, seq, d_k, seq,
+        Float::from_int(1),
+        attn_w_buf, 0, seq,
+        dc.data, head_base, d_k,
+        Float::from_int(1),
+        dv_heads_data, head_base, d_k,
+      )
 
       // Softmax backward: d_scores = attn_weights * (d_attn_weights - sum(d_attn_weights * attn_weights))
-      let d_scores = Array::make(seq * seq, Float::from_int(0))
+      let d_scores = FixedArray::make(seq * seq, Float::from_int(0))
       for i = 0; i < seq; i = i + 1 {
         let mut dot_sum = Float::from_int(0)
         for j = 0; j < seq; j = j + 1 {
@@ -517,21 +514,24 @@ fn multi_head_attention_backward(
         d_scores[i] = d_scores[i] * scale
       }
 
-      // scores = Q @ K^T => dQ += d_scores @ K, dK += d_scores^T @ Q
-      for i = 0; i < seq; i = i + 1 {
-        for d = 0; d < d_k; d = d + 1 {
-          let mut sum_q = Float::from_int(0)
-          let mut sum_k = Float::from_int(0)
-          for j = 0; j < seq; j = j + 1 {
-            sum_q = sum_q +
-              d_scores[i * seq + j] * kc.data[head_base + j * d_k + d]
-            sum_k = sum_k +
-              d_scores[j * seq + i] * qc.data[head_base + j * d_k + d]
-          }
-          dq_heads_data[head_base + i * d_k + d] = sum_q
-          dk_heads_data[head_base + i * d_k + d] = sum_k
-        }
-      }
+      // dQ = d_scores @ K : [seq, seq] @ [seq, d_k] -> [seq, d_k]
+      native_sgemm_offset(
+        0, 0, seq, d_k, seq,
+        Float::from_int(1),
+        d_scores, 0, seq,
+        kc.data, head_base, d_k,
+        Float::from_int(0),
+        dq_heads_data, head_base, d_k,
+      )
+      // dK = d_scores^T @ Q : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
+      native_sgemm_offset(
+        1, 0, seq, d_k, seq,
+        Float::from_int(1),
+        d_scores, 0, seq,
+        qc.data, head_base, d_k,
+        Float::from_int(0),
+        dk_heads_data, head_base, d_k,
+      )
     }
   }
 
@@ -579,7 +579,7 @@ fn multi_head_attention_backward(
   )
 
   // Sum the three dx contributions (self-attention)
-  let dx_data = Array::make(batch * seq * d_model, Float::from_int(0))
+  let dx_data = FixedArray::make(batch * seq * d_model, Float::from_int(0))
   for i = 0; i < dx_data.length(); i = i + 1 {
     dx_data[i] = dx_q.data[i] + dx_k.data[i] + dx_v.data[i]
   }
@@ -624,7 +624,7 @@ fn transformer_block_backward(
   )
 
   // Add residual2: dy + d_res1_from_ffn
-  let d_res1_data = Array::make(n, Float::from_int(0))
+  let d_res1_data = FixedArray::make(n, Float::from_int(0))
   for i = 0; i < n; i = i + 1 {
     d_res1_data[i] = dy.data[i] + d_res1_from_ffn.data[i]
   }
@@ -652,7 +652,7 @@ fn transformer_block_backward(
   )
 
   // Add residual1: d_res1 + d_input_from_mha
-  let dx_data = Array::make(n, Float::from_int(0))
+  let dx_data = FixedArray::make(n, Float::from_int(0))
   for i = 0; i < n; i = i + 1 {
     dx_data[i] = d_res1.data[i] + d_input_from_mha.data[i]
   }
@@ -715,31 +715,36 @@ pub fn transformer_forward_with_cache(
       None => None
       Some(m) => Some(m.contiguous())
     }
-    let attn_weights_all : Array[Array[Float]] = []
-    let attn_result_data = Array::make(
+    let total_heads = batch * num_heads
+    let scores_size = seq * seq
+    let attn_weights_all : Array[Array[Float]] = Array::make(total_heads, [])
+    let scores = FixedArray::make(scores_size, Float::from_int(0))
+    let attn_result_data = FixedArray::make(
       batch * num_heads * seq * d_k,
       Float::from_int(0),
     )
     for b = 0; b < batch; b = b + 1 {
       for h = 0; h < num_heads; h = h + 1 {
-        let head_base = (b * num_heads + h) * seq * d_k
-        // Compute scores
-        let scores = Array::make(seq * seq, Float::from_int(0))
-        for i = 0; i < seq; i = i + 1 {
-          for j = 0; j < seq; j = j + 1 {
-            let mut dot = Float::from_int(0)
-            for d = 0; d < d_k; d = d + 1 {
-              dot = dot +
-                qc.data[head_base + i * d_k + d] *
-                kc.data[head_base + j * d_k + d]
+        let head_idx = b * num_heads + h
+        let head_base = head_idx * seq * d_k
+        // scores = Q @ K^T * scale : [seq, d_k] @ [d_k, seq] -> [seq, seq]
+        native_sgemm_offset(
+          0, 1, seq, seq, d_k,
+          scale,
+          qc.data, head_base, d_k,
+          kc.data, head_base, d_k,
+          Float::from_int(0),
+          scores, 0, seq,
+        )
+        // Apply mask
+        match mc {
+          Some(m) =>
+            for i = 0; i < seq; i = i + 1 {
+              for j = 0; j < seq; j = j + 1 {
+                scores[i * seq + j] = scores[i * seq + j] + m.at2(i, j)
+              }
             }
-            let mut score = dot * scale
-            match mc {
-              Some(m) => score = score + m.at2(i, j)
-              None => ()
-            }
-            scores[i * seq + j] = score
-          }
+          None => ()
         }
         // Softmax
         for i = 0; i < seq; i = i + 1 {
@@ -761,17 +766,20 @@ pub fn transformer_forward_with_cache(
             scores[sbase + j] = scores[sbase + j] / sum
           }
         }
-        attn_weights_all.push(scores.copy())
-        // Multiply by V
-        for i = 0; i < seq; i = i + 1 {
-          for d = 0; d < d_k; d = d + 1 {
-            let mut sum = Float::from_int(0)
-            for j = 0; j < seq; j = j + 1 {
-              sum = sum + scores[i * seq + j] * vc.data[head_base + j * d_k + d]
-            }
-            attn_result_data[head_base + i * d_k + d] = sum
-          }
+        let scores_copy = Array::make(scores_size, Float::from_int(0))
+        for idx = 0; idx < scores_size; idx = idx + 1 {
+          scores_copy[idx] = scores[idx]
         }
+        attn_weights_all[head_idx] = scores_copy
+        // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
+        native_sgemm_offset(
+          0, 0, seq, d_k, seq,
+          Float::from_int(1),
+          scores, 0, seq,
+          vc.data, head_base, d_k,
+          Float::from_int(0),
+          attn_result_data, head_base, d_k,
+        )
       }
     }
     let attn_heads_out = Tensor::{
@@ -788,7 +796,7 @@ pub fn transformer_forward_with_cache(
     let attn_out = batched_linear(attn_concat, bp.w_o).unwrap()
 
     // Residual 1
-    let x_after_res1_data = Array::make(
+    let x_after_res1_data = FixedArray::make(
       batch * seq * d_model,
       Float::from_int(0),
     )
@@ -820,7 +828,7 @@ pub fn transformer_forward_with_cache(
     let ff_out = add_bias(ff_out_h, bp.ff_b2)
 
     // Residual 2
-    let hidden_data = Array::make(batch * seq * d_model, Float::from_int(0))
+    let hidden_data = FixedArray::make(batch * seq * d_model, Float::from_int(0))
     let r1c = x_after_res1.contiguous()
     let foc = ff_out.contiguous()
     for i = 0; i < hidden_data.length(); i = i + 1 {
@@ -891,7 +899,7 @@ pub fn transformer_backward(
   // Compute loss
   // Extract last-position logits for loss: [batch, vocab_size]
   let vocab = config.vocab_size
-  let last_logits_data = Array::make(batch * vocab, Float::from_int(0))
+  let last_logits_data = FixedArray::make(batch * vocab, Float::from_int(0))
   let logits_c = cache.logits.contiguous()
   for b = 0; b < batch; b = b + 1 {
     for v = 0; v < vocab; v = v + 1 {
@@ -914,7 +922,7 @@ pub fn transformer_backward(
   let d_last_logits = cross_entropy_backward(last_logits, labels)
 
   // Expand to full sequence gradient: [batch, seq, vocab]
-  let d_logits_data = Array::make(batch * seq * vocab, Float::from_int(0))
+  let d_logits_data = FixedArray::make(batch * seq * vocab, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for v = 0; v < vocab; v = v + 1 {
       d_logits_data[b * seq * vocab + (seq - 1) * vocab + v] = d_last_logits.data[b *

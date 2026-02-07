@@ -62,7 +62,7 @@ pub fn vit_zero_grads(config : VitConfig) -> VitGrads {
 }
 
 ///|
-fn vit_zero_grads_inplace(grads : VitGrads) -> Unit {
+pub fn vit_zero_grads_inplace(grads : VitGrads) -> Unit {
   zero_tensor(grads.d_patch_proj_w)
   zero_tensor(grads.d_patch_proj_b)
   zero_tensor(grads.d_cls_token)
@@ -135,26 +135,30 @@ pub fn vit_forward_with_cache(
     let qc = q_heads.contiguous()
     let kc = k_heads.contiguous()
     let vc = v_heads.contiguous()
-    let attn_weights_all : Array[Array[Float]] = []
-    let attn_result_data = Array::make(
+    let total_heads = batch * num_heads
+    let scores_size = seq_len * seq_len
+    let attn_weights_all : Array[Array[Float]] = Array::make(
+      total_heads,
+      [],
+    )
+    let scores = FixedArray::make(scores_size, Float::from_int(0))
+    let attn_result_data = FixedArray::make(
       batch * num_heads * seq_len * d_k,
       Float::from_int(0),
     )
     for b = 0; b < batch; b = b + 1 {
       for h = 0; h < num_heads; h = h + 1 {
-        let head_base = (b * num_heads + h) * seq_len * d_k
-        let scores = Array::make(seq_len * seq_len, Float::from_int(0))
-        for i = 0; i < seq_len; i = i + 1 {
-          for j = 0; j < seq_len; j = j + 1 {
-            let mut dot = Float::from_int(0)
-            for d = 0; d < d_k; d = d + 1 {
-              dot = dot +
-                qc.data[head_base + i * d_k + d] *
-                kc.data[head_base + j * d_k + d]
-            }
-            scores[i * seq_len + j] = dot * scale
-          }
-        }
+        let head_idx = b * num_heads + h
+        let head_base = head_idx * seq_len * d_k
+        // scores = Q @ K^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
+        native_sgemm_offset(
+          0, 1, seq_len, seq_len, d_k,
+          scale,
+          qc.data, head_base, d_k,
+          kc.data, head_base, d_k,
+          Float::from_int(0),
+          scores, 0, seq_len,
+        )
         // Softmax
         for i = 0; i < seq_len; i = i + 1 {
           let sbase = i * seq_len
@@ -175,18 +179,20 @@ pub fn vit_forward_with_cache(
             scores[sbase + j] = scores[sbase + j] / sum
           }
         }
-        attn_weights_all.push(scores.copy())
-        // Multiply by V
-        for i = 0; i < seq_len; i = i + 1 {
-          for d = 0; d < d_k; d = d + 1 {
-            let mut sum = Float::from_int(0)
-            for j = 0; j < seq_len; j = j + 1 {
-              sum = sum +
-                scores[i * seq_len + j] * vc.data[head_base + j * d_k + d]
-            }
-            attn_result_data[head_base + i * d_k + d] = sum
-          }
+        let scores_copy = Array::make(scores_size, Float::from_int(0))
+        for idx = 0; idx < scores_size; idx = idx + 1 {
+          scores_copy[idx] = scores[idx]
         }
+        attn_weights_all[head_idx] = scores_copy
+        // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
+        native_sgemm_offset(
+          0, 0, seq_len, d_k, seq_len,
+          Float::from_int(1),
+          scores, 0, seq_len,
+          vc.data, head_base, d_k,
+          Float::from_int(0),
+          attn_result_data, head_base, d_k,
+        )
       }
     }
     let attn_heads_out = Tensor::{
@@ -201,7 +207,7 @@ pub fn vit_forward_with_cache(
     // W_o projection
     let attn_out = batched_linear(attn_concat, bp.w_o).unwrap()
     // Residual 1
-    let x_after_res1_data = Array::make(
+    let x_after_res1_data = FixedArray::make(
       batch * seq_len * d_model,
       Float::from_int(0),
     )
@@ -230,7 +236,7 @@ pub fn vit_forward_with_cache(
     let ff_out_h = batched_linear(ff_post_gelu, bp.ff_w2).unwrap()
     let ff_out = add_bias(ff_out_h, bp.ff_b2)
     // Residual 2
-    let hidden_data = Array::make(batch * seq_len * d_model, Float::from_int(0))
+    let hidden_data = FixedArray::make(batch * seq_len * d_model, Float::from_int(0))
     let r1c = x_after_res1.contiguous()
     let foc = ff_out.contiguous()
     for i = 0; i < hidden_data.length(); i = i + 1 {
@@ -270,7 +276,7 @@ pub fn vit_forward_with_cache(
   )
   // Extract CLS token: [batch, 1, d_model] for batched_linear
   let lnc = ln_final_out.contiguous()
-  let cls_features_data = Array::make(batch * d_model, Float::from_int(0))
+  let cls_features_data = FixedArray::make(batch * d_model, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     let src = b * seq_len * d_model
     let dst = b * d_model
@@ -290,7 +296,7 @@ pub fn vit_forward_with_cache(
   // Reshape [batch, 1, num_classes] -> [batch, num_classes]
   let nc = config.num_classes
   let l3c = logits_3d.contiguous()
-  let logits_data = Array::make(batch * nc, Float::from_int(0))
+  let logits_data = FixedArray::make(batch * nc, Float::from_int(0))
   for i = 0; i < batch * nc; i = i + 1 {
     logits_data[i] = l3c.data[i]
   }
@@ -336,7 +342,7 @@ pub fn vit_backward(
   let d_logits = cross_entropy_backward(cache.logits, labels)
   // Classification head backward
   // Reshape d_logits [batch, nc] -> [batch, 1, nc]
-  let d_logits_3d_data = Array::make(batch * nc, Float::from_int(0))
+  let d_logits_3d_data = FixedArray::make(batch * nc, Float::from_int(0))
   let dlc = d_logits.contiguous()
   for i = 0; i < batch * nc; i = i + 1 {
     d_logits_3d_data[i] = dlc.data[i]
@@ -358,7 +364,7 @@ pub fn vit_backward(
   )
   // CLS extract backward: expand d_cls [batch,1,d_model] -> d_ln_final [batch,seq_len,d_model]
   // Only position 0 gets gradient
-  let d_ln_final_data = Array::make(
+  let d_ln_final_data = FixedArray::make(
     batch * seq_len * d_model,
     Float::from_int(0),
   )
@@ -418,7 +424,7 @@ pub fn vit_backward(
   }
   // Patch embedding backward: dy[:,1:,:] -> [batch, num_patches, d_model]
   let num_patches = config.num_patches
-  let d_patch_data = Array::make(
+  let d_patch_data = FixedArray::make(
     batch * num_patches * d_model,
     Float::from_int(0),
   )
@@ -500,7 +506,7 @@ pub fn vit_train(
   for _epoch = 0; _epoch < epochs; _epoch = _epoch + 1 {
     // Simple random batch selection
     let bs = if batch_size < count { batch_size } else { count }
-    let batch_data = Array::make(bs * img_dim, Float::from_int(0))
+    let batch_data = FixedArray::make(bs * img_dim, Float::from_int(0))
     let batch_labels : Array[Int] = Array::make(bs, 0)
     let ic = images.contiguous()
     for b = 0; b < bs; b = b + 1 {
@@ -569,7 +575,7 @@ pub fn vit_train_with_eval(
       } else {
         count - offset
       }
-      let batch_data = Array::make(bs * img_dim, Float::from_int(0))
+      let batch_data = FixedArray::make(bs * img_dim, Float::from_int(0))
       let batch_labels : Array[Int] = Array::make(bs, 0)
       for b = 0; b < bs; b = b + 1 {
         let idx = indices[offset + b]

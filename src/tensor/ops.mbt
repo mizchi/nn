@@ -9,13 +9,13 @@ pub fn tensor_add(a : Tensor, b : Tensor) -> Result[Tensor, String] {
       b.shape.to_string(),
     )
   }
-  let result = Array::make(a.numel(), Float::from_int(0))
+  let result = FixedArray::make(a.numel(), Float::from_int(0))
   let ac = a.contiguous()
   let bc = b.contiguous()
   for i = 0; i < result.length(); i = i + 1 {
     result[i] = ac.data[i] + bc.data[i]
   }
-  tensor_new(a.shape, result)
+  Ok(tensor_new_fixed(a.shape, result))
 }
 
 ///|
@@ -29,13 +29,13 @@ pub fn tensor_sub(a : Tensor, b : Tensor) -> Result[Tensor, String] {
       b.shape.to_string(),
     )
   }
-  let result = Array::make(a.numel(), Float::from_int(0))
+  let result = FixedArray::make(a.numel(), Float::from_int(0))
   let ac = a.contiguous()
   let bc = b.contiguous()
   for i = 0; i < result.length(); i = i + 1 {
     result[i] = ac.data[i] - bc.data[i]
   }
-  tensor_new(a.shape, result)
+  Ok(tensor_new_fixed(a.shape, result))
 }
 
 ///|
@@ -49,19 +49,19 @@ pub fn tensor_mul(a : Tensor, b : Tensor) -> Result[Tensor, String] {
       b.shape.to_string(),
     )
   }
-  let result = Array::make(a.numel(), Float::from_int(0))
+  let result = FixedArray::make(a.numel(), Float::from_int(0))
   let ac = a.contiguous()
   let bc = b.contiguous()
   for i = 0; i < result.length(); i = i + 1 {
     result[i] = ac.data[i] * bc.data[i]
   }
-  tensor_new(a.shape, result)
+  Ok(tensor_new_fixed(a.shape, result))
 }
 
 ///|
 /// Scalar multiplication
 pub fn tensor_scale(t : Tensor, s : Float) -> Tensor {
-  let result = Array::make(t.numel(), Float::from_int(0))
+  let result = FixedArray::make(t.numel(), Float::from_int(0))
   let tc = t.contiguous()
   for i = 0; i < result.length(); i = i + 1 {
     result[i] = tc.data[i] * s
@@ -96,17 +96,18 @@ pub fn tensor_matmul_2d(a : Tensor, b : Tensor) -> Result[Tensor, String] {
     Ok(s) => s
     Err(e) => return Err(e)
   }
-  let result = Array::make(m * n, Float::from_int(0))
-  for i = 0; i < m; i = i + 1 {
-    for j = 0; j < n; j = j + 1 {
-      let mut sum = Float::from_int(0)
-      for k = 0; k < k1; k = k + 1 {
-        sum = sum + a.at2(i, k) * b.at2(k, j)
-      }
-      result[i * n + j] = sum
-    }
-  }
-  tensor_new(out_shape, result)
+  let ac = a.contiguous()
+  let bc = b.contiguous()
+  let result = FixedArray::make(m * n, Float::from_int(0))
+  native_sgemm(
+    0, 0, m, n, k1,
+    Float::from_int(1),
+    ac.data, k1,
+    bc.data, n,
+    Float::from_int(0),
+    result, n,
+  )
+  Ok(tensor_new_fixed(out_shape, result))
 }
 
 ///|
@@ -132,19 +133,20 @@ pub fn tensor_matmul(a : Tensor, b : Tensor) -> Result[Tensor, String] {
       Ok(s) => s
       Err(e) => return Err(e)
     }
-    let result = Array::make(batch * m * n, Float::from_int(0))
+    let ac = a.contiguous()
+    let bc = b.contiguous()
+    let result = FixedArray::make(batch * m * n, Float::from_int(0))
     for bi = 0; bi < batch; bi = bi + 1 {
-      for i = 0; i < m; i = i + 1 {
-        for j = 0; j < n; j = j + 1 {
-          let mut sum = Float::from_int(0)
-          for k = 0; k < k1; k = k + 1 {
-            sum = sum + a.at3(bi, i, k) * b.at3(bi, k, j)
-          }
-          result[bi * m * n + i * n + j] = sum
-        }
-      }
+      native_sgemm_offset(
+        0, 0, m, n, k1,
+        Float::from_int(1),
+        ac.data, bi * m * k1, k1,
+        bc.data, bi * k1 * n, n,
+        Float::from_int(0),
+        result, bi * m * n, n,
+      )
     }
-    return tensor_new(out_shape, result)
+    return Ok(tensor_new_fixed(out_shape, result))
   }
   // 3D @ 2D broadcast: [batch, m, k] @ [k, n] -> [batch, m, n]
   if a.ndim() == 3 && b.ndim() == 2 {
@@ -160,19 +162,20 @@ pub fn tensor_matmul(a : Tensor, b : Tensor) -> Result[Tensor, String] {
       Ok(s) => s
       Err(e) => return Err(e)
     }
-    let result = Array::make(batch * m * n, Float::from_int(0))
+    let ac = a.contiguous()
+    let bc = b.contiguous()
+    let result = FixedArray::make(batch * m * n, Float::from_int(0))
     for bi = 0; bi < batch; bi = bi + 1 {
-      for i = 0; i < m; i = i + 1 {
-        for j = 0; j < n; j = j + 1 {
-          let mut sum = Float::from_int(0)
-          for k = 0; k < k1; k = k + 1 {
-            sum = sum + a.at3(bi, i, k) * b.at2(k, j)
-          }
-          result[bi * m * n + i * n + j] = sum
-        }
-      }
+      native_sgemm_offset(
+        0, 0, m, n, k1,
+        Float::from_int(1),
+        ac.data, bi * m * k1, k1,
+        bc.data, 0, n,
+        Float::from_int(0),
+        result, bi * m * n, n,
+      )
     }
-    return tensor_new(out_shape, result)
+    return Ok(tensor_new_fixed(out_shape, result))
   }
   Err(
     "unsupported matmul shapes: " +
@@ -189,7 +192,7 @@ pub fn tensor_softmax(t : Tensor) -> Result[Tensor, String] {
     return Err("softmax requires at least 1D tensor")
   }
   let tc = t.contiguous()
-  let result = Array::make(tc.numel(), Float::from_int(0))
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let last_dim = t.dim(-1)
   let outer = t.numel() / last_dim
   for i = 0; i < outer; i = i + 1 {
@@ -214,14 +217,14 @@ pub fn tensor_softmax(t : Tensor) -> Result[Tensor, String] {
       result[base + j] = result[base + j] / sum
     }
   }
-  tensor_new(t.shape, result)
+  Ok(tensor_new_fixed(t.shape, result))
 }
 
 ///|
 /// ReLU activation
 pub fn tensor_relu(t : Tensor) -> Tensor {
   let tc = t.contiguous()
-  let result = Array::make(tc.numel(), Float::from_int(0))
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let zero = Float::from_int(0)
   for i = 0; i < result.length(); i = i + 1 {
     result[i] = if tc.data[i] > zero { tc.data[i] } else { zero }
@@ -239,7 +242,7 @@ pub fn tensor_relu(t : Tensor) -> Tensor {
 /// GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
 pub fn tensor_gelu(t : Tensor) -> Tensor {
   let tc = t.contiguous()
-  let result = Array::make(tc.numel(), Float::from_int(0))
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let sqrt_2_pi = 0.7978845608028654 // sqrt(2/pi)
   let coef = 0.044715
   for i = 0; i < result.length(); i = i + 1 {
@@ -271,7 +274,7 @@ pub fn tensor_layer_norm(
   let tc = t.contiguous()
   let gc = gamma.contiguous()
   let bc = beta.contiguous()
-  let result = Array::make(tc.numel(), Float::from_int(0))
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let outer = t.numel() / last_dim
   for i = 0; i < outer; i = i + 1 {
     let base = i * last_dim
@@ -295,7 +298,7 @@ pub fn tensor_layer_norm(
       result[base + j] = gc.data[j] * normalized + bc.data[j]
     }
   }
-  tensor_new(t.shape, result)
+  Ok(tensor_new_fixed(t.shape, result))
 }
 
 ///|
@@ -319,14 +322,14 @@ pub fn tensor_sum(t : Tensor, dim : Int) -> Result[Tensor, String] {
     Shape::{ dims: new_dims }
   }
   let tc = t.contiguous()
-  let result = Array::make(new_shape.numel(), Float::from_int(0))
+  let result = FixedArray::make(new_shape.numel(), Float::from_int(0))
   // Generic sum implementation
   sum_along_dim(tc, result, d)
-  tensor_new(new_shape, result)
+  Ok(tensor_new_fixed(new_shape, result))
 }
 
 ///|
-fn sum_along_dim(src : Tensor, dst : Array[Float], dim : Int) -> Unit {
+fn sum_along_dim(src : Tensor, dst : FixedArray[Float], dim : Int) -> Unit {
   let n = src.ndim()
   if n == 1 {
     let mut sum = Float::from_int(0)
@@ -399,7 +402,7 @@ pub fn tensor_log_softmax(t : Tensor) -> Result[Tensor, String] {
     return Err("log_softmax requires at least 1D tensor")
   }
   let tc = t.contiguous()
-  let result = Array::make(tc.numel(), Float::from_int(0))
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let last_dim = t.dim(-1)
   let outer = t.numel() / last_dim
   for i = 0; i < outer; i = i + 1 {
@@ -424,7 +427,7 @@ pub fn tensor_log_softmax(t : Tensor) -> Result[Tensor, String] {
       result[base + j] = tc.data[base + j] - max_val - log_sum
     }
   }
-  tensor_new(t.shape, result)
+  Ok(tensor_new_fixed(t.shape, result))
 }
 
 ///|

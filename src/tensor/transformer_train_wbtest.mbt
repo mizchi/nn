@@ -33,12 +33,7 @@ test "layer_norm_backward_numerical" {
     Float::from_double(3.0),
     Float::from_double(4.0),
   ]
-  let x = Tensor::{
-    data: x_data,
-    shape: shape_new_unchecked([2, 2]),
-    offset: 0,
-    strides: [2, 1],
-  }
+  let x = tensor_new(shape_new_unchecked([2, 2]), x_data).unwrap()
   let gamma = tensor_from_array([
     Float::from_double(1.0),
     Float::from_double(1.0),
@@ -54,12 +49,7 @@ test "layer_norm_backward_numerical" {
     Float::from_double(-0.5),
     Float::from_double(1.0),
   ]
-  let dy = Tensor::{
-    data: dy_data,
-    shape: shape_new_unchecked([2, 2]),
-    offset: 0,
-    strides: [2, 1],
-  }
+  let dy = tensor_new(shape_new_unchecked([2, 2]), dy_data).unwrap()
   let (_, mean, rstd) = layer_norm_with_cache(x, gamma, beta, eps_ln)
   let d_gamma = tensor_zeros(shape_new_unchecked([2]))
   let d_beta = tensor_zeros(shape_new_unchecked([2]))
@@ -68,27 +58,17 @@ test "layer_norm_backward_numerical" {
   for idx = 0; idx < 4; idx = idx + 1 {
     let x_plus_data = x_data.copy()
     x_plus_data[idx] = x_plus_data[idx] + eps
-    let x_plus = Tensor::{
-      data: x_plus_data,
-      shape: shape_new_unchecked([2, 2]),
-      offset: 0,
-      strides: [2, 1],
-    }
+    let x_plus = tensor_new(shape_new_unchecked([2, 2]), x_plus_data).unwrap()
     let x_minus_data = x_data.copy()
     x_minus_data[idx] = x_minus_data[idx] - eps
-    let x_minus = Tensor::{
-      data: x_minus_data,
-      shape: shape_new_unchecked([2, 2]),
-      offset: 0,
-      strides: [2, 1],
-    }
+    let x_minus = tensor_new(shape_new_unchecked([2, 2]), x_minus_data).unwrap()
     let y_plus = tensor_layer_norm(x_plus, gamma, beta, eps_ln).unwrap()
     let y_minus = tensor_layer_norm(x_minus, gamma, beta, eps_ln).unwrap()
     let mut loss_plus = Float::from_int(0)
     let mut loss_minus = Float::from_int(0)
     for j = 0; j < 4; j = j + 1 {
-      loss_plus = loss_plus + dy_data[j] * y_plus.data[j]
-      loss_minus = loss_minus + dy_data[j] * y_minus.data[j]
+      loss_plus = loss_plus + dy.data[j] * y_plus.data[j]
+      loss_minus = loss_minus + dy.data[j] * y_minus.data[j]
     }
     let numerical = (loss_plus - loss_minus) / (Float::from_int(2) * eps)
     let diff = (dx.data[idx] - numerical).to_double().abs()
@@ -106,12 +86,7 @@ test "batched_linear_backward_numerical" {
     Float::from_double(0.5),
     Float::from_double(0.6),
   ]
-  let x = Tensor::{
-    data: x_data,
-    shape: shape_new_unchecked([1, 2, 3]),
-    offset: 0,
-    strides: [6, 3, 1],
-  }
+  let x = tensor_new(shape_new_unchecked([1, 2, 3]), x_data).unwrap()
   let w_data : Array[Float] = [
     Float::from_double(0.1),
     Float::from_double(0.2),
@@ -120,24 +95,14 @@ test "batched_linear_backward_numerical" {
     Float::from_double(0.5),
     Float::from_double(0.6),
   ]
-  let w = Tensor::{
-    data: w_data,
-    shape: shape_new_unchecked([3, 2]),
-    offset: 0,
-    strides: [2, 1],
-  }
+  let w = tensor_new(shape_new_unchecked([3, 2]), w_data).unwrap()
   let dy_data : Array[Float] = [
     Float::from_double(1.0),
     Float::from_double(0.5),
     Float::from_double(-0.5),
     Float::from_double(1.0),
   ]
-  let dy = Tensor::{
-    data: dy_data,
-    shape: shape_new_unchecked([1, 2, 2]),
-    offset: 0,
-    strides: [4, 2, 1],
-  }
+  let dy = tensor_new(shape_new_unchecked([1, 2, 2]), dy_data).unwrap()
   let d_w = tensor_zeros(shape_new_unchecked([3, 2]))
   let dx = batched_linear_backward(dy, x, w, d_w)
   let eps = Float::from_double(0.001)
@@ -146,25 +111,15 @@ test "batched_linear_backward_numerical" {
     xp[idx] = xp[idx] + eps
     let xm = x_data.copy()
     xm[idx] = xm[idx] - eps
-    let x_plus = Tensor::{
-      data: xp,
-      shape: shape_new_unchecked([1, 2, 3]),
-      offset: 0,
-      strides: [6, 3, 1],
-    }
-    let x_minus = Tensor::{
-      data: xm,
-      shape: shape_new_unchecked([1, 2, 3]),
-      offset: 0,
-      strides: [6, 3, 1],
-    }
+    let x_plus = tensor_new(shape_new_unchecked([1, 2, 3]), xp).unwrap()
+    let x_minus = tensor_new(shape_new_unchecked([1, 2, 3]), xm).unwrap()
     let y_plus = batched_linear(x_plus, w).unwrap()
     let y_minus = batched_linear(x_minus, w).unwrap()
     let mut loss_plus = Float::from_int(0)
     let mut loss_minus = Float::from_int(0)
     for j = 0; j < 4; j = j + 1 {
-      loss_plus = loss_plus + dy_data[j] * y_plus.data[j]
-      loss_minus = loss_minus + dy_data[j] * y_minus.data[j]
+      loss_plus = loss_plus + dy.data[j] * y_plus.data[j]
+      loss_minus = loss_minus + dy.data[j] * y_minus.data[j]
     }
     let numerical = (loss_plus - loss_minus) / (Float::from_int(2) * eps)
     let diff = (dx.data[idx] - numerical).to_double().abs()
@@ -174,13 +129,10 @@ test "batched_linear_backward_numerical" {
 
 ///|
 test "cross_entropy_backward_shape" {
-  let logits_data = Array::make(8, Float::from_double(0.25))
-  let logits = Tensor::{
-    data: logits_data,
-    shape: shape_new_unchecked([2, 4]),
-    offset: 0,
-    strides: [4, 1],
-  }
+  let logits = tensor_new(
+    shape_new_unchecked([2, 4]),
+    Array::make(8, Float::from_double(0.25)),
+  ).unwrap()
   let labels = [1, 3]
   let d_logits = cross_entropy_backward(logits, labels)
   inspect(d_logits.dim(0), content="2")

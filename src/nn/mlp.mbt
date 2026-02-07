@@ -791,11 +791,15 @@ pub fn mlp_train_dispatch_plan(
           workgroup_size,
           compute_dh_dispatch_x: ceil_div(dh, workgroup_size),
           grad_update_w1_dispatch_x: tiles_for(
-            spec.input_size, spec.hidden_size, tile_dim,
+            spec.input_size,
+            spec.hidden_size,
+            tile_dim,
           ),
           grad_update_b1_dispatch_x: ceil_div(b1, workgroup_size),
           grad_update_w2_dispatch_x: tiles_for(
-            spec.hidden_size, spec.output_size, tile_dim,
+            spec.hidden_size,
+            spec.output_size,
+            tile_dim,
           ),
           grad_update_b2_dispatch_x: ceil_div(b2, workgroup_size),
         }
@@ -1066,8 +1070,7 @@ fn wgsl_layer2_loss(spec : MlpSpec, workgroup_size : Int) -> String {
   let s40 = s39 + "  let prob = probs[base + label];\n"
   let s41 = s40 + "  loss[b] = -log(prob + EPS);\n"
   let s42 = s41 + "  correct[b] = select(0.0, 1.0, best_k == label);\n"
-  let s43 = s42 +
-    "  for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
+  let s43 = s42 + "  for (var k : u32 = 0u; k < OUTPUT_SIZE; k = k + 1u) {\n"
   let s44 = s43 + "    var dl = probs[base + k];\n"
   let s45 = s44 + "    if (label == k) { dl = dl - 1.0; }\n"
   let s46 = s45 + "    probs[base + k] = dl;\n"
@@ -1219,8 +1222,7 @@ fn wgsl_grad_update_w2(
   let s26 = s25 + "    if (kk >= BATCH_SIZE) { break; }\n"
   // Load H^T tile: H^T[j, kk+col_in_tile] = hidden[kk+col_in_tile, j]
   let s27 = s26 + "    let batch_col = kk + col_in_tile;\n"
-  let s28 = s27 +
-    "    if (j < HIDDEN_SIZE && batch_col < BATCH_SIZE) {\n"
+  let s28 = s27 + "    if (j < HIDDEN_SIZE && batch_col < BATCH_SIZE) {\n"
   let s29 = s28 +
     "      hidden_tile[local] = hidden[batch_col * HIDDEN_SIZE + j];\n"
   let s30 = s29 + "    } else {\n"
@@ -1228,8 +1230,7 @@ fn wgsl_grad_update_w2(
   let s32 = s31 + "    }\n"
   // Load dlogit tile: dlogit[kk+row_in_tile, k] — direct read
   let s33 = s32 + "    let batch_row = kk + row_in_tile;\n"
-  let s34 = s33 +
-    "    if (batch_row < BATCH_SIZE && k < OUTPUT_SIZE) {\n"
+  let s34 = s33 + "    if (batch_row < BATCH_SIZE && k < OUTPUT_SIZE) {\n"
   let s35 = s34 +
     "      dlogit_tile[local] = dlogit[batch_row * OUTPUT_SIZE + k];\n"
   let s36 = s35 + "    } else {\n"
@@ -1243,8 +1244,7 @@ fn wgsl_grad_update_w2(
   let s43 = s42 + "    workgroupBarrier();\n"
   let s44 = s43 + "    kk = kk + TILE_DIM;\n"
   let s45 = s44 + "  }\n"
-  let s46 = s45 +
-    "  if (j < HIDDEN_SIZE && k < OUTPUT_SIZE) {\n"
+  let s46 = s45 + "  if (j < HIDDEN_SIZE && k < OUTPUT_SIZE) {\n"
   let s47 = s46 + "    let scale = lr[0] / f32(BATCH_SIZE);\n"
   let s48 = s47 +
     "    weight2[j * OUTPUT_SIZE + k] = weight2[j * OUTPUT_SIZE + k] - acc * scale;\n"
@@ -1363,21 +1363,16 @@ fn wgsl_grad_update_w1(
   let s27 = s26 + "    if (kk >= BATCH_SIZE) { break; }\n"
   // Load X^T tile: X^T[i, kk+col_in_tile] = input[sample_{kk+col_in_tile}, i]
   let s28 = s27 + "    let batch_col = kk + col_in_tile;\n"
-  let s29 = s28 +
-    "    if (i < INPUT_SIZE && batch_col < BATCH_SIZE) {\n"
-  let s30 = s29 +
-    "      let sample = indices[1u + indices[0] + batch_col];\n"
-  let s31 = s30 +
-    "      input_tile[local] = input[sample * INPUT_SIZE + i];\n"
+  let s29 = s28 + "    if (i < INPUT_SIZE && batch_col < BATCH_SIZE) {\n"
+  let s30 = s29 + "      let sample = indices[1u + indices[0] + batch_col];\n"
+  let s31 = s30 + "      input_tile[local] = input[sample * INPUT_SIZE + i];\n"
   let s32 = s31 + "    } else {\n"
   let s33 = s32 + "      input_tile[local] = 0.0;\n"
   let s34 = s33 + "    }\n"
   // Load dh tile: dh[kk+row_in_tile, j]
   let s35 = s34 + "    let batch_row = kk + row_in_tile;\n"
-  let s36 = s35 +
-    "    if (batch_row < BATCH_SIZE && j < HIDDEN_SIZE) {\n"
-  let s37 = s36 +
-    "      dh_tile[local] = dh[batch_row * HIDDEN_SIZE + j];\n"
+  let s36 = s35 + "    if (batch_row < BATCH_SIZE && j < HIDDEN_SIZE) {\n"
+  let s37 = s36 + "      dh_tile[local] = dh[batch_row * HIDDEN_SIZE + j];\n"
   let s38 = s37 + "    } else {\n"
   let s39 = s38 + "      dh_tile[local] = 0.0;\n"
   let s40 = s39 + "    }\n"
@@ -1389,8 +1384,7 @@ fn wgsl_grad_update_w1(
   let s45 = s44 + "    workgroupBarrier();\n"
   let s46 = s45 + "    kk = kk + TILE_DIM;\n"
   let s47 = s46 + "  }\n"
-  let s48 = s47 +
-    "  if (i < INPUT_SIZE && j < HIDDEN_SIZE) {\n"
+  let s48 = s47 + "  if (i < INPUT_SIZE && j < HIDDEN_SIZE) {\n"
   let s49 = s48 + "    let scale = lr[0] / f32(BATCH_SIZE);\n"
   let s50 = s49 +
     "    weight1[i * HIDDEN_SIZE + j] = weight1[i * HIDDEN_SIZE + j] - acc * scale;\n"

@@ -9,6 +9,7 @@ enum TrainBackend {
   Gpu
   Auto
   GpuTransformer
+  Vit
 } derive(Show, Eq)
 
 ///|
@@ -48,6 +49,7 @@ fn train_backend_label(backend : TrainBackend) -> String {
     Gpu => "gpu"
     Auto => "auto"
     GpuTransformer => "gpu-transformer"
+    Vit => "vit"
   }
 }
 
@@ -78,6 +80,7 @@ fn print_usage(program : String) -> Unit {
   println("  --limit N        use first N training samples")
   println("  --cpu            alias for --backend cpu")
   println("  --gpu            alias for --backend gpu")
+  println("  --vit            train ViT model instead of MLP")
   println("  --blas           use BLAS-optimized CPU training")
   println("  --bench          print training time")
   println("  --bench-no-readback skip per-step readback (gpu only)")
@@ -174,6 +177,11 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
     }
     if arg == "--gpu-transformer" {
       backend = GpuTransformer
+      i = i + 1
+      continue
+    }
+    if arg == "--vit" {
+      backend = Vit
       i = i + 1
       continue
     }
@@ -2430,6 +2438,193 @@ async fn run_train(
         Err(err) => Err(err)
       }
     }
+    Vit => Err("vit backend uses separate training path")
+  }
+}
+
+///|
+async fn run_vit_train(args : TrainArgs) -> Unit {
+  let base = "data/mnist"
+  let train_images_path = mnist_path(base, "train-images-idx3-ubyte")
+  let train_labels_path = mnist_path(base, "train-labels-idx1-ubyte")
+  let test_images_path = mnist_path(base, "t10k-images-idx3-ubyte")
+  let test_labels_path = mnist_path(base, "t10k-labels-idx1-ubyte")
+  // Load training data
+  let train_dataset = @mnist.mnist_load_mlp_dataset(
+    train_images_path,
+    train_labels_path,
+    args.limit,
+  )
+  let train = match train_dataset {
+    Ok(ds) => ds
+    Err(err) => {
+      print_error_line(args.json, "mnist train load error: " + err.to_string())
+      return
+    }
+  }
+  // Load test data
+  let test_dataset = @mnist.mnist_load_mlp_dataset(
+    test_images_path,
+    test_labels_path,
+    None,
+  )
+  let test_set = match test_dataset {
+    Ok(ds) => ds
+    Err(err) => {
+      print_error_line(args.json, "mnist test load error: " + err.to_string())
+      return
+    }
+  }
+  let epochs = match args.epochs {
+    Some(v) => v
+    None => 10
+  }
+  let batch_size = match args.batch_size {
+    Some(v) => v
+    None => 64
+  }
+  let lr = Float::from_double(0.001)
+  let config = match
+    @tensor.vit_config(28, 7, 64, 4, 2, 128, 10) {
+    Ok(c) => c
+    Err(err) => {
+      print_error_line(args.json, "vit config error: " + err)
+      return
+    }
+  }
+  // Print config
+  if args.json {
+    println(
+      json_object([
+        json_field("type", json_string("config")),
+        json_field("backend", json_string("vit")),
+        json_field("model", json_string("vit(28,7,64,4,2,128,10)")),
+        json_field("train_samples", train.count.to_string()),
+        json_field("test_samples", test_set.count.to_string()),
+        json_field("epochs", epochs.to_string()),
+        json_field("batch", batch_size.to_string()),
+        json_field("lr", lr.to_string()),
+      ]),
+    )
+  } else {
+    println(
+      "config: model=vit(28,7,64,4,2,128,10) train_samples=" +
+      train.count.to_string() +
+      " test_samples=" +
+      test_set.count.to_string() +
+      " epochs=" +
+      epochs.to_string() +
+      " batch=" +
+      batch_size.to_string() +
+      " lr=" +
+      lr.to_string() +
+      " backend=vit",
+    )
+  }
+  // Convert MlpDataset to Tensor
+  let train_images = @tensor.tensor_new(
+    @tensor.shape_new_unchecked([train.count, 784]),
+    train.inputs,
+  ).unwrap()
+  let (params, metrics) = @tensor.vit_train_with_eval(
+    train_images,
+    train.labels,
+    train.count,
+    config,
+    epochs,
+    batch_size,
+    lr,
+    42,
+  )
+  // Print epoch metrics
+  for i = 0; i < metrics.length(); i = i + 1 {
+    let (loss, acc) = metrics[i]
+    if args.json {
+      println(
+        json_object([
+          json_field("type", json_string("epoch")),
+          json_field("split", json_string("train")),
+          json_field("epoch", (i + 1).to_string()),
+          json_field("loss", loss.to_string()),
+          json_field("acc", acc.to_string()),
+        ]),
+      )
+    } else {
+      println(
+        "epoch " +
+        (i + 1).to_string() +
+        " loss=" +
+        loss.to_string() +
+        " acc=" +
+        acc.to_string(),
+      )
+    }
+  }
+  // Evaluate on test set
+  let test_count = test_set.count
+  let test_images = @tensor.tensor_new(
+    @tensor.shape_new_unchecked([test_count, 784]),
+    test_set.inputs,
+  ).unwrap()
+  // Evaluate in batches to avoid OOM
+  let eval_batch = 256
+  let mut total_loss = Float::from_int(0)
+  let mut total_correct = 0
+  let mut offset = 0
+  while offset < test_count {
+    let bs = if offset + eval_batch <= test_count {
+      eval_batch
+    } else {
+      test_count - offset
+    }
+    let batch_data = Array::make(bs * 784, Float::from_int(0))
+    let batch_labels : Array[Int] = Array::make(bs, 0)
+    let tc = test_images.contiguous()
+    for b = 0; b < bs; b = b + 1 {
+      let src = (offset + b) * 784
+      let dst = b * 784
+      for d = 0; d < 784; d = d + 1 {
+        batch_data[dst + d] = tc.data[src + d]
+      }
+      batch_labels[b] = test_set.labels[offset + b]
+    }
+    let batch_tensor = @tensor.tensor_new(
+      @tensor.shape_new_unchecked([bs, 784]),
+      batch_data,
+    ).unwrap()
+    match @tensor.vit_eval(batch_tensor, params, config, batch_labels, bs) {
+      Ok((loss, acc)) => {
+        total_loss = total_loss + loss * Float::from_int(bs)
+        let correct_in_batch = ((acc * Float::from_int(bs)).to_double() + 0.5)
+          |> Double::to_int
+        total_correct = total_correct + correct_in_batch
+      }
+      Err(err) => {
+        print_error_line(args.json, "eval error: " + err)
+        return
+      }
+    }
+    offset = offset + bs
+  }
+  let test_loss = total_loss / Float::from_int(test_count)
+  let test_acc = Float::from_int(total_correct) / Float::from_int(test_count)
+  if args.json {
+    println(
+      json_object([
+        json_field("type", json_string("result")),
+        json_field("split", json_string("test")),
+        json_field("backend", json_string("vit")),
+        json_field("loss", test_loss.to_string()),
+        json_field("acc", test_acc.to_string()),
+      ]),
+    )
+  } else {
+    println(
+      "result: backend=vit split=test loss=" +
+      test_loss.to_string() +
+      " acc=" +
+      test_acc.to_string(),
+    )
   }
 }
 
@@ -2454,6 +2649,10 @@ async fn train_main() -> Unit {
       print_usage(program)
       return
     }
+  }
+  if args.backend is Vit {
+    run_vit_train(args)
+    return
   }
   let base = "data/mnist"
   let train_images = mnist_path(base, "train-images-idx3-ubyte")
@@ -2539,6 +2738,7 @@ async fn train_main() -> Unit {
     Gpu => "drop"
     Auto => "auto"
     GpuTransformer => "n/a"
+    Vit => "n/a"
   }
   print_train_config(
     args,
@@ -2583,7 +2783,7 @@ async fn train_main() -> Unit {
           args.json,
           "--bench-no-readback ignored for cpu backend",
         )
-      Auto => ()
+      Auto | Vit => ()
     }
   }
   if args.bench {

@@ -261,6 +261,247 @@ void tensor_accumulate(float* dst, const float* src, int n) {
   cblas_saxpy(n, 1.0f, src, 1, dst, 1);
 }
 
+// Arena-based ReLU backward: all buffers are offsets into one contiguous arena
+void tensor_relu_backward_arena(
+  float* arena, int dy_off, int x_off, int dx_off, int n
+) {
+  const float* dy = arena + dy_off;
+  const float* x = arena + x_off;
+  float* dx = arena + dx_off;
+  for (int i = 0; i < n; i++) {
+    dx[i] = x[i] > 0.0f ? dy[i] : 0.0f;
+  }
+}
+
+// Hybrid ReLU forward: x from arena at offset, output to separate buffer
+void tensor_relu_forward_hybrid(
+  const float* arena, int x_off, float* out, int n
+) {
+  const float* x = arena + x_off;
+  for (int i = 0; i < n; i++) {
+    out[i] = x[i] > 0.0f ? x[i] : 0.0f;
+  }
+}
+
+// Hybrid ReLU backward: dy from separate buffer, x and dx from arena
+void tensor_relu_backward_hybrid(
+  const float* dy, float* arena, int x_off, int dx_off, int n
+) {
+  const float* x = arena + x_off;
+  float* dx = arena + dx_off;
+  for (int i = 0; i < n; i++) {
+    dx[i] = x[i] > 0.0f ? dy[i] : 0.0f;
+  }
+}
+
+// Arena-based ReLU forward: x and out are offsets into one contiguous arena
+void tensor_relu_forward_arena(
+  float* arena, int x_off, int out_off, int n
+) {
+  const float* x = arena + x_off;
+  float* out = arena + out_off;
+  for (int i = 0; i < n; i++) {
+    out[i] = x[i] > 0.0f ? x[i] : 0.0f;
+  }
+}
+
+// Arena-based bias add inplace: y is offset into arena
+void tensor_bias_add_inplace_arena(
+  float* arena, int y_off, const float* bias, int total, int last_dim
+) {
+  float* y = arena + y_off;
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(last_dim, 1.0f, bias, 1, y + r * last_dim, 1);
+  }
+}
+
+// Arena-based bias add backward: dy is offset into arena
+void tensor_bias_add_bwd_arena(
+  const float* arena, int dy_off, float* db, int total, int last_dim
+) {
+  const float* dy = arena + dy_off;
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(last_dim, 1.0f, dy + r * last_dim, 1, db, 1);
+  }
+}
+
+// Arena-based accumulate: dst and src are offsets into one contiguous arena
+void tensor_accumulate_arena(
+  float* arena, int dst_off, int src_off, int n
+) {
+  cblas_saxpy(n, 1.0f, arena + src_off, 1, arena + dst_off, 1);
+}
+
+// ========== C-managed ReLU workspace ==========
+// Statically managed workspace for pre-relu values.
+// Uses posix_memalign for page-aligned memory, completely outside GC control.
+// This avoids GC old-generation cache aliasing that causes 10x relu_backward slowdown.
+
+static float* g_relu_pre = NULL;
+static int g_relu_pre_cap = 0;
+
+static void ensure_relu_pre(int n) {
+  if (g_relu_pre_cap >= n) return;
+  free(g_relu_pre);
+  // Page-aligned allocation (4096 bytes) for optimal cache behavior
+  posix_memalign((void**)&g_relu_pre, 4096, sizeof(float) * n);
+  g_relu_pre_cap = n;
+}
+
+// Write to C-managed relu_pre buffer (called during forward)
+float* tensor_relu_pre_get(int n) {
+  ensure_relu_pre(n);
+  return g_relu_pre;
+}
+
+// sgemm that writes output to C-managed relu_pre buffer
+void tensor_sgemm_to_relu_pre(
+  int trans_a, int trans_b,
+  int m, int n, int k, float alpha,
+  const float* a, int lda,
+  const float* b, int ldb,
+  int total
+) {
+  ensure_relu_pre(total);
+  cblas_sgemm(CblasRowMajor,
+    trans_a ? CblasTrans : CblasNoTrans,
+    trans_b ? CblasTrans : CblasNoTrans,
+    m, n, k, alpha, a, lda, b, ldb, 0.0f, g_relu_pre, n);
+}
+
+// Bias add inplace on relu_pre
+void tensor_bias_add_relu_pre(const float* bias, int total, int last_dim) {
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(last_dim, 1.0f, bias, 1, g_relu_pre + r * last_dim, 1);
+  }
+}
+
+// ReLU forward: reads from g_relu_pre, writes to output FixedArray
+void tensor_relu_from_pre(float* out, int n) {
+  for (int i = 0; i < n; i++) {
+    out[i] = g_relu_pre[i] > 0.0f ? g_relu_pre[i] : 0.0f;
+  }
+}
+
+// ReLU backward: reads dy from MoonBit buffer, reads x from g_relu_pre, writes dx to MoonBit buffer
+void tensor_relu_backward_from_pre(const float* dy, float* dx, int n) {
+  for (int i = 0; i < n; i++) {
+    dx[i] = g_relu_pre[i] > 0.0f ? dy[i] : 0.0f;
+  }
+}
+
+// ========== C-managed gradient pass-through buffer ==========
+// Used by linear backward to write dx, avoiding GC old-gen placement.
+
+static float* g_grad_buf = NULL;
+static int g_grad_buf_cap = 0;
+
+static void ensure_grad_buf(int n) {
+  if (g_grad_buf_cap >= n) return;
+  free(g_grad_buf);
+  posix_memalign((void**)&g_grad_buf, 4096, sizeof(float) * n);
+  g_grad_buf_cap = n;
+}
+
+// sgemm that writes output to C-managed grad buffer
+void tensor_sgemm_to_grad_buf(
+  int trans_a, int trans_b,
+  int m, int n, int k, float alpha,
+  const float* a, int lda,
+  const float* b, int ldb,
+  int total
+) {
+  ensure_grad_buf(total);
+  cblas_sgemm(CblasRowMajor,
+    trans_a ? CblasTrans : CblasNoTrans,
+    trans_b ? CblasTrans : CblasNoTrans,
+    m, n, k, alpha, a, lda, b, ldb, 0.0f, g_grad_buf, n);
+}
+
+// Copy from C-managed grad buffer to MoonBit FixedArray
+void tensor_grad_buf_to_fixed(float* dst, int n) {
+  for (int i = 0; i < n; i++) {
+    dst[i] = g_grad_buf[i];
+  }
+}
+
+// ReLU backward: reads dy from g_grad_buf, reads x from g_relu_pre, writes dx to MoonBit buffer
+void tensor_relu_backward_managed(float* dx, int n) {
+  for (int i = 0; i < n; i++) {
+    dx[i] = g_relu_pre[i] > 0.0f ? g_grad_buf[i] : 0.0f;
+  }
+}
+
+// ========== C-managed relu_dx buffer ==========
+// Third C-managed buffer: holds relu backward output (relu_dx).
+// Keeps the entire fused backward hot path in C-managed memory,
+// avoiding FixedArray::make inside closures that triggers GC + cache pollution.
+
+static float* g_relu_dx_base = NULL;
+static float* g_relu_dx = NULL;
+static int g_relu_dx_cap = 0;
+
+static void ensure_relu_dx(int n) {
+  if (g_relu_dx_cap >= n) return;
+  free(g_relu_dx_base);
+  // Offset by 16KB from page boundary to avoid cache aliasing with
+  // g_relu_pre and g_grad_buf (both page-aligned at offset 0).
+  // On Apple M-series, L1 is 128KB 8-way → 256 sets × 64B lines.
+  // 16KB offset = 256 cache lines shift, breaking systematic set conflicts.
+  size_t alloc_size = sizeof(float) * n + 16384;
+  posix_memalign((void**)&g_relu_dx_base, 4096, alloc_size);
+  g_relu_dx = (float*)((char*)g_relu_dx_base + 16384);
+  g_relu_dx_cap = n;
+}
+
+// ReLU backward fully managed: reads dy from g_grad_buf, x from g_relu_pre,
+// writes dx to g_relu_dx. All three buffers are C-managed.
+void tensor_relu_backward_fully_managed(int n) {
+  ensure_relu_dx(n);
+  for (int i = 0; i < n; i++) {
+    g_relu_dx[i] = g_relu_pre[i] > 0.0f ? g_grad_buf[i] : 0.0f;
+  }
+}
+
+// Get pointer to g_relu_dx for use in sgemm (as A or B operand)
+const float* tensor_relu_dx_ptr(int n) {
+  ensure_relu_dx(n);
+  return g_relu_dx;
+}
+
+// sgemm where A is g_relu_dx: C = alpha * g_relu_dx^T @ B + beta * C
+// Used for dW = relu_dx^T @ x
+void tensor_sgemm_relu_dx_a(
+  int trans_a, int trans_b,
+  int m, int n, int k, float alpha,
+  int lda,
+  const float* b, int ldb,
+  float beta, float* c, int ldc
+) {
+  cblas_sgemm(CblasRowMajor,
+    trans_a ? CblasTrans : CblasNoTrans,
+    trans_b ? CblasTrans : CblasNoTrans,
+    m, n, k, alpha, g_relu_dx, lda, b, ldb, beta, c, ldc);
+}
+
+// bias_add_backward reading from g_relu_dx: db[j] += sum_rows relu_dx[r, j]
+void tensor_bias_add_bwd_relu_dx(float* db, int total, int last_dim) {
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(last_dim, 1.0f, g_relu_dx + r * last_dim, 1, db, 1);
+  }
+}
+
+// Copy from g_relu_dx to MoonBit FixedArray (for accumulate_raw if needed)
+void tensor_relu_dx_to_fixed(float* dst, int n) {
+  for (int i = 0; i < n; i++) {
+    dst[i] = g_relu_dx[i];
+  }
+}
+
 uint64_t timer_clock_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

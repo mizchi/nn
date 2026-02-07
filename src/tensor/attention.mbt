@@ -179,12 +179,19 @@ fn batched_linear(x : Tensor, w : Tensor) -> Result[Tensor, String] {
   let result = FixedArray::make(n * out_dim, Float::from_int(0))
   // C = X @ W : [n, in_dim] @ [in_dim, out_dim] -> [n, out_dim]
   native_sgemm(
-    0, 0, n, out_dim, in_dim,
+    0,
+    0,
+    n,
+    out_dim,
+    in_dim,
     Float::from_int(1),
-    xc.data, in_dim,
-    wc.data, out_dim,
+    xc.data,
+    in_dim,
+    wc.data,
+    out_dim,
     Float::from_int(0),
-    result, out_dim,
+    result,
+    out_dim,
   )
   Ok(tensor_new_fixed(out_shape, result))
 }
@@ -200,7 +207,10 @@ fn reshape_for_heads(
 ) -> Tensor {
   let xc = x.contiguous()
   let out_shape = shape_new_unchecked([batch, num_heads, seq, d_k])
-  let result = FixedArray::make(batch * num_heads * seq * d_k, Float::from_int(0))
+  let result = FixedArray::make(
+    batch * num_heads * seq * d_k,
+    Float::from_int(0),
+  )
   native_reshape_for_heads(xc.data, result, batch, seq, num_heads, d_k)
   Tensor::{
     data: result,
@@ -251,7 +261,10 @@ fn multi_head_attention_core(
     (d_k.to_double().sqrt() |> Float::from_double)
   // For each batch and head, compute attention
   let out_shape = shape_new_unchecked([batch, num_heads, seq_q, d_v])
-  let result = FixedArray::make(batch * num_heads * seq_q * d_v, Float::from_int(0))
+  let result = FixedArray::make(
+    batch * num_heads * seq_q * d_v,
+    Float::from_int(0),
+  )
   let qc = q.contiguous()
   let kc = k.contiguous()
   let vc = v.contiguous()
@@ -268,12 +281,22 @@ fn multi_head_attention_core(
       // scores = Q @ K^T * scale : [seq_q, d_k] @ [d_k, seq_k] -> [seq_q, seq_k]
       let scores = FixedArray::make(seq_q * seq_k, Float::from_int(0))
       native_sgemm_offset(
-        0, 1, seq_q, seq_k, d_k,
+        0,
+        1,
+        seq_q,
+        seq_k,
+        d_k,
         scale,
-        qc.data, q_base, d_k,
-        kc.data, k_base, d_k,
+        qc.data,
+        q_base,
+        d_k,
+        kc.data,
+        k_base,
+        d_k,
         Float::from_int(0),
-        scores, 0, seq_k,
+        scores,
+        0,
+        seq_k,
       )
       // Apply mask
       match mc {
@@ -289,12 +312,22 @@ fn multi_head_attention_core(
       native_softmax_inplace(scores, seq_q, seq_k)
       // output = attn_weights @ V : [seq_q, seq_k] @ [seq_k, d_v] -> [seq_q, d_v]
       native_sgemm_offset(
-        0, 0, seq_q, d_v, seq_k,
+        0,
+        0,
+        seq_q,
+        d_v,
+        seq_k,
         Float::from_int(1),
-        scores, 0, seq_k,
-        vc.data, v_base, d_v,
+        scores,
+        0,
+        seq_k,
+        vc.data,
+        v_base,
+        d_v,
         Float::from_int(0),
-        result, out_base, d_v,
+        result,
+        out_base,
+        d_v,
       )
     }
   }

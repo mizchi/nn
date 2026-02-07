@@ -29,8 +29,8 @@ pub fn tensor_new(shape : Shape, data : Array[Float]) -> Result[Tensor, String] 
 }
 
 ///|
-/// Internal: create Tensor from FixedArray without copying (no validation)
-fn tensor_new_fixed(shape : Shape, data : FixedArray[Float]) -> Tensor {
+/// Create Tensor from FixedArray without copying (no validation)
+pub fn tensor_new_fixed(shape : Shape, data : FixedArray[Float]) -> Tensor {
   Tensor::{ data, shape, offset: 0, strides: shape.strides() }
 }
 

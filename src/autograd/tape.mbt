@@ -63,6 +63,44 @@ pub fn Tape::backward(self : Tape, output : Var) -> Unit {
 }
 
 ///|
+/// Backward with per-node timing (for profiling).
+pub fn Tape::backward_profiled(
+  self : Tape,
+  output : Var,
+) -> Array[(Int, UInt64)] {
+  let ones = @tensor.tensor_ones(output.data().shape)
+  self.nodes[output.id].grad = Some(ones)
+  let timings : Array[(Int, UInt64)] = []
+  for i = self.nodes.length() - 1; i >= 0; i = i - 1 {
+    match (self.nodes[i].grad, self.nodes[i].backward_fn) {
+      (Some(g), Some(bwd)) => {
+        let t0 = @tensor.clock_ns()
+        bwd(g)
+        let elapsed = @tensor.clock_ns() - t0
+        timings.push((i, elapsed))
+      }
+      _ => ()
+    }
+  }
+  timings
+}
+
+///|
+/// Set gradient for a specific node (for diagnostic use).
+pub fn Tape::set_grad(self : Tape, id : Int, g : @tensor.Tensor) -> Unit {
+  self.nodes[id].grad = Some(g)
+}
+
+///|
+/// Run backward for a single node (for diagnostic timing).
+pub fn Tape::run_backward_node(self : Tape, id : Int) -> Unit {
+  match (self.nodes[id].grad, self.nodes[id].backward_fn) {
+    (Some(g), Some(bwd)) => bwd(g)
+    _ => ()
+  }
+}
+
+///|
 /// Check if a node needs gradient (either it requires_grad or has a backward_fn).
 fn needs_grad(tape : Tape, id : Int) -> Bool {
   let node = tape.nodes[id]
@@ -85,5 +123,21 @@ fn accumulate(tape : Tape, id : Int, g : @tensor.Tensor) -> Unit {
       let gd = g.contiguous().data
       @tensor.accumulate_inplace(existing.data, gd, existing.data.length())
     }
+  }
+}
+
+///|
+/// Accumulate gradient from raw FixedArray data without creating Tensor.
+/// Avoids GC pressure from intermediate Tensor objects.
+fn accumulate_raw(
+  tape : Tape,
+  id : Int,
+  data : FixedArray[Float],
+  shape : @tensor.Shape,
+) -> Unit {
+  match tape.nodes[id].grad {
+    None => tape.nodes[id].grad = Some(@tensor.tensor_new_fixed(shape, data))
+    Some(existing) =>
+      @tensor.accumulate_inplace(existing.data, data, existing.data.length())
   }
 }

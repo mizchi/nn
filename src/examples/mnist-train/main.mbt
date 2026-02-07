@@ -2484,8 +2484,7 @@ async fn run_vit_train(args : TrainArgs) -> Unit {
     None => 64
   }
   let lr = Float::from_double(0.001)
-  let config = match
-    @tensor.vit_config(28, 7, 64, 4, 2, 128, 10) {
+  let config = match @tensor.vit_config(28, 7, 64, 4, 2, 128, 10) {
     Ok(c) => c
     Err(err) => {
       print_error_line(args.json, "vit config error: " + err)

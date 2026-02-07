@@ -1,6 +1,9 @@
 ///|
 fn read_u32_be(buf : Bytes, offset : Int) -> Int {
-  (buf[offset].to_int() << 24) | (buf[offset + 1].to_int() << 16) | (buf[offset + 2].to_int() << 8) | buf[offset + 3].to_int()
+  (buf[offset].to_int() << 24) |
+  (buf[offset + 1].to_int() << 16) |
+  (buf[offset + 2].to_int() << 8) |
+  buf[offset + 3].to_int()
 }
 
 ///|
@@ -80,10 +83,18 @@ async fn main_() -> Unit {
   let img_dim = 784
   let nc = 10
   println(
-    "Train: " + train_count.to_string() + " samples, Test: " + test_count.to_string() + " samples",
+    "Train: " +
+    train_count.to_string() +
+    " samples, Test: " +
+    test_count.to_string() +
+    " samples",
   )
   println(
-    "Config: epochs=" + epochs.to_string() + ", batch_size=" + batch_size.to_string() + ", lr=0.001",
+    "Config: epochs=" +
+    epochs.to_string() +
+    ", batch_size=" +
+    batch_size.to_string() +
+    ", lr=0.001",
   )
   println("ViT: image=28, patch=7, d_model=64, heads=4, layers=2, d_ff=128")
   println("")
@@ -139,11 +150,11 @@ async fn main_() -> Unit {
       ).unwrap()
       @tensor.vit_zero_grads_inplace(grads)
       let (logits, cache) = @tensor.vit_forward_with_cache(
-        batch_images,
-        params,
-        config,
+        batch_images, params, config,
       )
-      let loss = @tensor.vit_backward(cache, params, config, grads, batch_labels)
+      let loss = @tensor.vit_backward(
+        cache, params, config, grads, batch_labels,
+      )
       @tensor.vit_sgd_update(params, grads, lr)
       epoch_loss = epoch_loss + loss * Float::from_int(bs)
       let lc = logits.contiguous()
@@ -168,12 +179,20 @@ async fn main_() -> Unit {
     let epoch_ms = t1 - t0
     total_train_ms = total_train_ms + epoch_ms
     let avg_loss = epoch_loss / Float::from_int(epoch_samples)
-    let avg_acc = Float::from_int(epoch_correct) / Float::from_int(epoch_samples)
+    let avg_acc = Float::from_int(epoch_correct) /
+      Float::from_int(epoch_samples)
     println(
-      "Epoch " + (epoch + 1).to_string() + "/" + epochs.to_string() +
-      ": loss=" + avg_loss.to_string() +
-      " train_acc=" + avg_acc.to_string() +
-      " time=" + format_ms(epoch_ms) + "s",
+      "Epoch " +
+      (epoch + 1).to_string() +
+      "/" +
+      epochs.to_string() +
+      ": loss=" +
+      avg_loss.to_string() +
+      " train_acc=" +
+      avg_acc.to_string() +
+      " time=" +
+      format_ms(epoch_ms) +
+      "s",
     )
   }
   println("")
@@ -279,7 +298,13 @@ fn run_profile(
     results.push(r)
     offset = offset + bs
   }
-  println("Profiled " + results.length().to_string() + " steps (batch_size=" + batch_size.to_string() + ")")
+  println(
+    "Profiled " +
+    results.length().to_string() +
+    " steps (batch_size=" +
+    batch_size.to_string() +
+    ")",
+  )
   println("")
   let avg = @tensor.vit_profile_aggregate(results)
   @tensor.vit_profile_result_print(avg)

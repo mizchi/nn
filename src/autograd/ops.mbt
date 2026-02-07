@@ -56,10 +56,9 @@ pub fn var_cross_entropy(logits : Var, labels : Array[Int]) -> Var {
   let inv_batch = Float::from_int(1) / Float::from_int(batch)
   loss = loss * inv_batch
   let result_shape = @tensor.shape_new([1]).unwrap()
-  let result = @tensor.tensor_new_fixed(
-    result_shape,
-    FixedArray::make(1, loss),
-  )
+  let result = @tensor.tensor_new_fixed(result_shape, FixedArray::make(1, loss))
+  let logits_id = logits.id
+  let logits_shape = ld.shape
   tape.push_node(result, fn(dy) {
     let dy_scalar = dy.contiguous().data[0]
     // d_logits = (probs - one_hot) / batch, scaled by dy
@@ -70,8 +69,7 @@ pub fn var_cross_entropy(logits : Var, labels : Array[Int]) -> Var {
     for i = 0; i < batch; i = i + 1 {
       d_data[i * vocab + labels[i]] = d_data[i * vocab + labels[i]] - scale
     }
-    let d_logits = @tensor.tensor_new_fixed(ld.shape, d_data)
-    accumulate(tape, logits.id, d_logits)
+    accumulate_raw(tape, logits_id, d_data, logits_shape)
   })
 }
 
@@ -88,5 +86,31 @@ pub fn var_relu(x : Var) -> Var {
     @tensor.relu_backward_inplace(dyc.data, xd.data, dx_data, n)
     let dx = @tensor.tensor_new_fixed(xd.shape, dx_data)
     accumulate(tape, x.id, dx)
+  })
+}
+
+///|
+/// ReLU with pre-allocated workspaces for both forward output and backward dx.
+/// fwd_ws: buffer for relu forward output [same size as input]
+/// bwd_ws: buffer for relu backward dx [same size as input]
+pub fn var_relu_ws(
+  x : Var,
+  fwd_ws : FixedArray[Float],
+  bwd_ws : FixedArray[Float],
+) -> Var {
+  let tape = x.tape
+  let xd = x.data().contiguous()
+  let n = xd.numel()
+  // Forward: reuse workspace for output (relu_forward overwrites completely)
+  @tensor.relu_forward(xd.data, fwd_ws, n)
+  let result = @tensor.tensor_new_fixed(xd.shape, fwd_ws)
+  let x_id = x.id
+  let x_shape = xd.shape
+  let x_data = xd.data
+  tape.push_node(result, fn(dy) {
+    // Fresh alloc for output to avoid cache aliasing with workspace buffers
+    let dx_data = FixedArray::make(n, Float::from_int(0))
+    @tensor.relu_backward_inplace(dy.data, x_data, dx_data, n)
+    accumulate_raw(tape, x_id, dx_data, x_shape)
   })
 }

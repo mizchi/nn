@@ -137,10 +137,7 @@ pub fn vit_forward_with_cache(
     let vc = v_heads.contiguous()
     let total_heads = batch * num_heads
     let scores_size = seq_len * seq_len
-    let attn_weights_all : Array[Array[Float]] = Array::make(
-      total_heads,
-      [],
-    )
+    let attn_weights_all : Array[Array[Float]] = Array::make(total_heads, [])
     let scores = FixedArray::make(scores_size, Float::from_int(0))
     let attn_result_data = FixedArray::make(
       batch * num_heads * seq_len * d_k,
@@ -152,12 +149,22 @@ pub fn vit_forward_with_cache(
         let head_base = head_idx * seq_len * d_k
         // scores = Q @ K^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
         native_sgemm_offset(
-          0, 1, seq_len, seq_len, d_k,
+          0,
+          1,
+          seq_len,
+          seq_len,
+          d_k,
           scale,
-          qc.data, head_base, d_k,
-          kc.data, head_base, d_k,
+          qc.data,
+          head_base,
+          d_k,
+          kc.data,
+          head_base,
+          d_k,
           Float::from_int(0),
-          scores, 0, seq_len,
+          scores,
+          0,
+          seq_len,
         )
         // Softmax
         native_softmax_inplace(scores, seq_len, seq_len)
@@ -168,12 +175,22 @@ pub fn vit_forward_with_cache(
         attn_weights_all[head_idx] = scores_copy
         // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
         native_sgemm_offset(
-          0, 0, seq_len, d_k, seq_len,
+          0,
+          0,
+          seq_len,
+          d_k,
+          seq_len,
           Float::from_int(1),
-          scores, 0, seq_len,
-          vc.data, head_base, d_k,
+          scores,
+          0,
+          seq_len,
+          vc.data,
+          head_base,
+          d_k,
           Float::from_int(0),
-          attn_result_data, head_base, d_k,
+          attn_result_data,
+          head_base,
+          d_k,
         )
       }
     }
@@ -218,7 +235,10 @@ pub fn vit_forward_with_cache(
     let ff_out_h = batched_linear(ff_post_gelu, bp.ff_w2).unwrap()
     let ff_out = add_bias(ff_out_h, bp.ff_b2)
     // Residual 2
-    let hidden_data = FixedArray::make(batch * seq_len * d_model, Float::from_int(0))
+    let hidden_data = FixedArray::make(
+      batch * seq_len * d_model,
+      Float::from_int(0),
+    )
     let r1c = x_after_res1.contiguous()
     let foc = ff_out.contiguous()
     for i = 0; i < hidden_data.length(); i = i + 1 {
@@ -599,7 +619,8 @@ pub fn vit_train_with_eval(
       offset = offset + bs
     }
     let avg_loss = epoch_loss / Float::from_int(epoch_samples)
-    let avg_acc = Float::from_int(epoch_correct) / Float::from_int(epoch_samples)
+    let avg_acc = Float::from_int(epoch_correct) /
+      Float::from_int(epoch_samples)
     metrics.push((avg_loss, avg_acc))
   }
   (params, metrics)

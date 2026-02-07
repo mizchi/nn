@@ -38,17 +38,23 @@ pub struct VitProfileResult {
 pub fn vit_profile_result_print(r : VitProfileResult) -> Unit {
   let to_us = fn(ns : UInt64) -> String {
     let us = ns / 1000UL
-    let frac = (ns % 1000UL) / 100UL
+    let frac = ns % 1000UL / 100UL
     us.to_string() + "." + frac.to_string()
   }
   let to_ms = fn(ns : UInt64) -> String {
     let ms = ns / 1000000UL
-    let frac = (ns % 1000000UL) / 100000UL
+    let frac = ns % 1000000UL / 100000UL
     ms.to_string() + "." + frac.to_string()
   }
-  let bwd_total = r.bwd_loss_ce_ns + r.bwd_cls_head_ns + r.bwd_final_ln_ns +
-    r.bwd_ffn_ns + r.bwd_ln2_ns + r.bwd_mha_ns + r.bwd_ln1_ns +
-    r.bwd_residual_ns + r.bwd_patch_ns
+  let bwd_total = r.bwd_loss_ce_ns +
+    r.bwd_cls_head_ns +
+    r.bwd_final_ln_ns +
+    r.bwd_ffn_ns +
+    r.bwd_ln2_ns +
+    r.bwd_mha_ns +
+    r.bwd_ln1_ns +
+    r.bwd_residual_ns +
+    r.bwd_patch_ns
   println("=== ViT Profile (per step) ===")
   println("[Forward]")
   println("  extract_patches:  " + to_us(r.fwd_extract_patches_ns) + " us")
@@ -150,7 +156,10 @@ pub fn vit_profile_step(
     let x_input = hidden
     let t0 = clock_ns()
     let (ln1_out, ln1_mean, ln1_rstd) = layer_norm_with_cache(
-      x_input, bp.ln1_gamma, bp.ln1_beta, config.eps,
+      x_input,
+      bp.ln1_gamma,
+      bp.ln1_beta,
+      config.eps,
     )
     let t1 = clock_ns()
     fwd_ln1_ns = fwd_ln1_ns + t1 - t0
@@ -175,7 +184,8 @@ pub fn vit_profile_step(
     let attn_weights_all : Array[Array[Float]] = Array::make(total_heads, [])
     let scores = FixedArray::make(scores_size, Float::from_int(0))
     let attn_result_data = FixedArray::make(
-      batch * num_heads * seq_len * d_k, Float::from_int(0),
+      batch * num_heads * seq_len * d_k,
+      Float::from_int(0),
     )
     for b = 0; b < batch; b = b + 1 {
       for h = 0; h < num_heads; h = h + 1 {
@@ -183,10 +193,22 @@ pub fn vit_profile_step(
         let head_base = head_idx * seq_len * d_k
         let t0 = clock_ns()
         native_sgemm_offset(
-          0, 1, seq_len, seq_len, d_k, scale,
-          qc.data, head_base, d_k,
-          kc.data, head_base, d_k,
-          Float::from_int(0), scores, 0, seq_len,
+          0,
+          1,
+          seq_len,
+          seq_len,
+          d_k,
+          scale,
+          qc.data,
+          head_base,
+          d_k,
+          kc.data,
+          head_base,
+          d_k,
+          Float::from_int(0),
+          scores,
+          0,
+          seq_len,
         )
         let t1 = clock_ns()
         fwd_attn_scores_ns = fwd_attn_scores_ns + t1 - t0
@@ -201,12 +223,22 @@ pub fn vit_profile_step(
         attn_weights_all[head_idx] = scores_copy
         let t0 = clock_ns()
         native_sgemm_offset(
-          0, 0, seq_len, d_k, seq_len,
+          0,
+          0,
+          seq_len,
+          d_k,
+          seq_len,
           Float::from_int(1),
-          scores, 0, seq_len,
-          vc.data, head_base, d_k,
+          scores,
+          0,
+          seq_len,
+          vc.data,
+          head_base,
+          d_k,
           Float::from_int(0),
-          attn_result_data, head_base, d_k,
+          attn_result_data,
+          head_base,
+          d_k,
         )
         let t1 = clock_ns()
         fwd_attn_v_ns = fwd_attn_v_ns + t1 - t0
@@ -230,7 +262,8 @@ pub fn vit_profile_step(
     fwd_wo_linear_ns = fwd_wo_linear_ns + t1 - t0
     let t0 = clock_ns()
     let x_after_res1_data = FixedArray::make(
-      batch * seq_len * d_model, Float::from_int(0),
+      batch * seq_len * d_model,
+      Float::from_int(0),
     )
     let xic = x_input.contiguous()
     let aoc = attn_out.contiguous()
@@ -247,7 +280,10 @@ pub fn vit_profile_step(
     fwd_residual1_ns = fwd_residual1_ns + t1 - t0
     let t0 = clock_ns()
     let (ln2_out, ln2_mean, ln2_rstd) = layer_norm_with_cache(
-      x_after_res1, bp.ln2_gamma, bp.ln2_beta, config.eps,
+      x_after_res1,
+      bp.ln2_gamma,
+      bp.ln2_beta,
+      config.eps,
     )
     let t1 = clock_ns()
     fwd_ln2_ns = fwd_ln2_ns + t1 - t0
@@ -267,7 +303,8 @@ pub fn vit_profile_step(
     fwd_ff_linear_ns = fwd_ff_linear_ns + t1 - t0
     let t0 = clock_ns()
     let hidden_data = FixedArray::make(
-      batch * seq_len * d_model, Float::from_int(0),
+      batch * seq_len * d_model,
+      Float::from_int(0),
     )
     let r1c = x_after_res1.contiguous()
     let foc = ff_out.contiguous()
@@ -366,7 +403,8 @@ pub fn vit_profile_step(
     grads.d_cls_head_w,
   )
   let d_ln_final_data = FixedArray::make(
-    batch * seq_len * d_model, Float::from_int(0),
+    batch * seq_len * d_model,
+    Float::from_int(0),
   )
   let dcf = d_cls_features.contiguous()
   for b = 0; b < batch; b = b + 1 {
@@ -439,7 +477,11 @@ pub fn vit_profile_step(
     // MHA backward
     let t0 = clock_ns()
     let d_ln1 = multi_head_attention_backward(
-      d_res1, cache_b, bp, config_to_transformer(config), bg,
+      d_res1,
+      cache_b,
+      bp,
+      config_to_transformer(config),
+      bg,
     )
     let t1 = clock_ns()
     bwd_mha_ns = bwd_mha_ns + t1 - t0
@@ -483,7 +525,8 @@ pub fn vit_profile_step(
   }
   let num_patches = config.num_patches
   let d_patch_data = FixedArray::make(
-    batch * num_patches * d_model, Float::from_int(0),
+    batch * num_patches * d_model,
+    Float::from_int(0),
   )
   for b = 0; b < batch; b = b + 1 {
     for s = 0; s < num_patches; s = s + 1 {
@@ -561,7 +604,9 @@ fn config_to_transformer(config : VitConfig) -> TransformerConfig {
 }
 
 ///|
-pub fn vit_profile_aggregate(results : Array[VitProfileResult]) -> VitProfileResult {
+pub fn vit_profile_aggregate(
+  results : Array[VitProfileResult],
+) -> VitProfileResult {
   let n = results.length().to_uint64()
   let mut sum_fwd_extract_patches = 0UL
   let mut sum_fwd_patch_linear = 0UL

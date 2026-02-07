@@ -93,7 +93,7 @@ pub fn transformer_zero_grads(config : TransformerConfig) -> TransformerGrads {
 ///|
 /// Layer normalization with cache: returns (output, mean, rstd)
 /// mean and rstd have length = outer (number of vectors normalized)
-fn layer_norm_with_cache(
+pub fn layer_norm_with_cache(
   t : Tensor,
   gamma : Tensor,
   beta : Tensor,
@@ -108,7 +108,15 @@ fn layer_norm_with_cache(
   let means = FixedArray::make(outer, Float::from_int(0))
   let rstds = FixedArray::make(outer, Float::from_int(0))
   native_layer_norm_fwd(
-    tc.data, gc.data, bc.data, result, means, rstds, outer, last_dim, eps,
+    tc.data,
+    gc.data,
+    bc.data,
+    result,
+    means,
+    rstds,
+    outer,
+    last_dim,
+    eps,
   )
   let out = Tensor::{
     data: result,
@@ -172,21 +180,35 @@ fn batched_linear_backward(
   let dx_data = FixedArray::make(n * in_dim, Float::from_int(0))
   // dx = dy @ W^T : [n, out_dim] @ [out_dim, in_dim] -> [n, in_dim]
   native_sgemm(
-    0, 1, n, in_dim, out_dim,
+    0,
+    1,
+    n,
+    in_dim,
+    out_dim,
     Float::from_int(1),
-    dyc.data, out_dim,
-    wc.data, out_dim,
+    dyc.data,
+    out_dim,
+    wc.data,
+    out_dim,
     Float::from_int(0),
-    dx_data, in_dim,
+    dx_data,
+    in_dim,
   )
   // dW += x^T @ dy : [in_dim, n] @ [n, out_dim] -> [in_dim, out_dim], beta=1.0
   native_sgemm(
-    1, 0, in_dim, out_dim, n,
+    1,
+    0,
+    in_dim,
+    out_dim,
+    n,
     Float::from_int(1),
-    xc.data, in_dim,
-    dyc.data, out_dim,
+    xc.data,
+    in_dim,
+    dyc.data,
+    out_dim,
     Float::from_int(1),
-    d_w.data, out_dim,
+    d_w.data,
+    out_dim,
   )
   Tensor::{
     data: dx_data,
@@ -231,9 +253,16 @@ pub fn layer_norm_backward(
   let gc = gamma.contiguous()
   let dx_data = FixedArray::make(xc.numel(), Float::from_int(0))
   native_layer_norm_bwd(
-    dyc.data, xc.data, mean, rstd, gc.data,
-    dx_data, d_gamma.data, d_beta.data,
-    outer, last_dim,
+    dyc.data,
+    xc.data,
+    mean,
+    rstd,
+    gc.data,
+    dx_data,
+    d_gamma.data,
+    d_beta.data,
+    outer,
+    last_dim,
   )
   Tensor::{
     data: dx_data,
@@ -410,12 +439,22 @@ fn multi_head_attention_backward(
       // d_attn_weights = d_out @ V^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
       let d_attn_weights = FixedArray::make(seq * seq, Float::from_int(0))
       native_sgemm_offset(
-        0, 1, seq, seq, d_k,
+        0,
+        1,
+        seq,
+        seq,
+        d_k,
         Float::from_int(1),
-        dc.data, head_base, d_k,
-        vc.data, head_base, d_k,
+        dc.data,
+        head_base,
+        d_k,
+        vc.data,
+        head_base,
+        d_k,
         Float::from_int(0),
-        d_attn_weights, 0, seq,
+        d_attn_weights,
+        0,
+        seq,
       )
 
       // dV += attn_weights^T @ d_out : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
@@ -424,12 +463,22 @@ fn multi_head_attention_backward(
         attn_w_buf[idx] = attn_w[idx]
       }
       native_sgemm_offset(
-        1, 0, seq, d_k, seq,
+        1,
+        0,
+        seq,
+        d_k,
+        seq,
         Float::from_int(1),
-        attn_w_buf, 0, seq,
-        dc.data, head_base, d_k,
+        attn_w_buf,
+        0,
+        seq,
+        dc.data,
+        head_base,
+        d_k,
         Float::from_int(1),
-        dv_heads_data, head_base, d_k,
+        dv_heads_data,
+        head_base,
+        d_k,
       )
 
       // Softmax backward: d_scores = attn_weights * (d_attn_weights - sum(d_attn_weights * attn_weights))
@@ -452,21 +501,41 @@ fn multi_head_attention_backward(
 
       // dQ = d_scores @ K : [seq, seq] @ [seq, d_k] -> [seq, d_k]
       native_sgemm_offset(
-        0, 0, seq, d_k, seq,
+        0,
+        0,
+        seq,
+        d_k,
+        seq,
         Float::from_int(1),
-        d_scores, 0, seq,
-        kc.data, head_base, d_k,
+        d_scores,
+        0,
+        seq,
+        kc.data,
+        head_base,
+        d_k,
         Float::from_int(0),
-        dq_heads_data, head_base, d_k,
+        dq_heads_data,
+        head_base,
+        d_k,
       )
       // dK = d_scores^T @ Q : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
       native_sgemm_offset(
-        1, 0, seq, d_k, seq,
+        1,
+        0,
+        seq,
+        d_k,
+        seq,
         Float::from_int(1),
-        d_scores, 0, seq,
-        qc.data, head_base, d_k,
+        d_scores,
+        0,
+        seq,
+        qc.data,
+        head_base,
+        d_k,
         Float::from_int(0),
-        dk_heads_data, head_base, d_k,
+        dk_heads_data,
+        head_base,
+        d_k,
       )
     }
   }
@@ -665,12 +734,22 @@ pub fn transformer_forward_with_cache(
         let head_base = head_idx * seq * d_k
         // scores = Q @ K^T * scale : [seq, d_k] @ [d_k, seq] -> [seq, seq]
         native_sgemm_offset(
-          0, 1, seq, seq, d_k,
+          0,
+          1,
+          seq,
+          seq,
+          d_k,
           scale,
-          qc.data, head_base, d_k,
-          kc.data, head_base, d_k,
+          qc.data,
+          head_base,
+          d_k,
+          kc.data,
+          head_base,
+          d_k,
           Float::from_int(0),
-          scores, 0, seq,
+          scores,
+          0,
+          seq,
         )
         // Apply mask
         match mc {
@@ -691,12 +770,22 @@ pub fn transformer_forward_with_cache(
         attn_weights_all[head_idx] = scores_copy
         // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
         native_sgemm_offset(
-          0, 0, seq, d_k, seq,
+          0,
+          0,
+          seq,
+          d_k,
+          seq,
           Float::from_int(1),
-          scores, 0, seq,
-          vc.data, head_base, d_k,
+          scores,
+          0,
+          seq,
+          vc.data,
+          head_base,
+          d_k,
           Float::from_int(0),
-          attn_result_data, head_base, d_k,
+          attn_result_data,
+          head_base,
+          d_k,
         )
       }
     }
@@ -746,7 +835,10 @@ pub fn transformer_forward_with_cache(
     let ff_out = add_bias(ff_out_h, bp.ff_b2)
 
     // Residual 2
-    let hidden_data = FixedArray::make(batch * seq * d_model, Float::from_int(0))
+    let hidden_data = FixedArray::make(
+      batch * seq * d_model,
+      Float::from_int(0),
+    )
     let r1c = x_after_res1.contiguous()
     let foc = ff_out.contiguous()
     for i = 0; i < hidden_data.length(); i = i + 1 {

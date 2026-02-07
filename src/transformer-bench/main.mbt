@@ -1,6 +1,7 @@
 ///|
 struct BenchArgs {
   steps : Int
+  long_steps : Int?
   warmup : Int
   batch_size : Int
   seq_len : Int
@@ -17,12 +18,18 @@ struct BenchArgs {
   shard_meta : String?
   shard_max_shards : Int?
   shard_max_tokens : Int?
+  eval_every : Int
+  eval_steps : Int
+  checkpoint_every : Int
+  checkpoint_path : String?
+  resume_checkpoint : String?
 } derive(Show, Eq)
 
 ///|
 fn bench_args_default() -> BenchArgs {
   {
     steps: 40,
+    long_steps: None,
     warmup: 5,
     batch_size: 8,
     seq_len: 32,
@@ -39,6 +46,11 @@ fn bench_args_default() -> BenchArgs {
     shard_meta: None,
     shard_max_shards: None,
     shard_max_tokens: None,
+    eval_every: 0,
+    eval_steps: 8,
+    checkpoint_every: 0,
+    checkpoint_path: None,
+    resume_checkpoint: None,
   }
 }
 
@@ -78,6 +90,7 @@ fn parse_positive_float(name : String, value : String) -> Result[Float, String] 
 fn print_usage(program : String) -> Unit {
   println("Usage: " + program + " [options]")
   println("  --steps N         measured steps (default 40)")
+  println("  --long-steps N    long training mode with total measured steps")
   println("  --warmup N        warmup steps (default 5)")
   println("  --batch-size N    mini-batch size (default 8)")
   println("  --seq-len N       sequence length (default 32)")
@@ -94,12 +107,18 @@ fn print_usage(program : String) -> Unit {
   println("  --shard-meta P    meta.json path for token shards")
   println("  --shard-max-shards N limit number of shard files to load")
   println("  --shard-max-tokens N limit number of token ids to load")
+  println("  --eval-every N    run eval every N steps in long mode (default 0)")
+  println("  --eval-steps N    eval mini-steps per run (default 8)")
+  println("  --checkpoint-every N write checkpoint every N steps (default 0)")
+  println("  --checkpoint-path P checkpoint file path")
+  println("  --resume-checkpoint P resume from checkpoint file")
 }
 
 ///|
 fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let default = bench_args_default()
   let mut steps = default.steps
+  let mut long_steps : Int? = default.long_steps
   let mut warmup = default.warmup
   let mut batch_size = default.batch_size
   let mut seq_len = default.seq_len
@@ -116,6 +135,11 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let mut shard_meta : String? = default.shard_meta
   let mut shard_max_shards : Int? = default.shard_max_shards
   let mut shard_max_tokens : Int? = default.shard_max_tokens
+  let mut eval_every = default.eval_every
+  let mut eval_steps = default.eval_steps
+  let mut checkpoint_every = default.checkpoint_every
+  let mut checkpoint_path : String? = default.checkpoint_path
+  let mut resume_checkpoint : String? = default.resume_checkpoint
   let mut i = 1
   while i < args.length() {
     let arg = args[i]
@@ -143,12 +167,34 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       i = i + 2
       continue
     }
+    if arg == "--long-steps" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --long-steps")
+      }
+      match parse_positive_int("long-steps", args[i + 1]) {
+        Ok(v) => long_steps = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
     if arg.has_prefix("--steps=") {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --steps value")
       }
       match parse_positive_int("steps", view.to_string()) {
         Ok(v) => steps = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg.has_prefix("--long-steps=") {
+      let view = arg.sub(start=13) catch {
+        _ => return Err("invalid --long-steps value")
+      }
+      match parse_positive_int("long-steps", view.to_string()) {
+        Ok(v) => long_steps = Some(v)
         Err(msg) => return Err(msg)
       }
       i = i + 1
@@ -456,6 +502,104 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       i = i + 1
       continue
     }
+    if arg == "--eval-every" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --eval-every")
+      }
+      match parse_nonnegative_int("eval-every", args[i + 1]) {
+        Ok(v) => eval_every = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--eval-every=") {
+      let view = arg.sub(start=13) catch {
+        _ => return Err("invalid --eval-every value")
+      }
+      match parse_nonnegative_int("eval-every", view.to_string()) {
+        Ok(v) => eval_every = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--eval-steps" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --eval-steps")
+      }
+      match parse_positive_int("eval-steps", args[i + 1]) {
+        Ok(v) => eval_steps = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--eval-steps=") {
+      let view = arg.sub(start=13) catch {
+        _ => return Err("invalid --eval-steps value")
+      }
+      match parse_positive_int("eval-steps", view.to_string()) {
+        Ok(v) => eval_steps = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--checkpoint-every" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --checkpoint-every")
+      }
+      match parse_nonnegative_int("checkpoint-every", args[i + 1]) {
+        Ok(v) => checkpoint_every = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--checkpoint-every=") {
+      let view = arg.sub(start=19) catch {
+        _ => return Err("invalid --checkpoint-every value")
+      }
+      match parse_nonnegative_int("checkpoint-every", view.to_string()) {
+        Ok(v) => checkpoint_every = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--checkpoint-path" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --checkpoint-path")
+      }
+      checkpoint_path = Some(args[i + 1])
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--checkpoint-path=") {
+      let view = arg.sub(start=18) catch {
+        _ => return Err("invalid --checkpoint-path value")
+      }
+      checkpoint_path = Some(view.to_string())
+      i = i + 1
+      continue
+    }
+    if arg == "--resume-checkpoint" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --resume-checkpoint")
+      }
+      resume_checkpoint = Some(args[i + 1])
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--resume-checkpoint=") {
+      let view = arg.sub(start=20) catch {
+        _ => return Err("invalid --resume-checkpoint value")
+      }
+      resume_checkpoint = Some(view.to_string())
+      i = i + 1
+      continue
+    }
     return Err("unknown option: " + arg)
   }
   if shard_meta is None {
@@ -468,8 +612,32 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       None => ()
     }
   }
+  if sweep {
+    match long_steps {
+      Some(_) => return Err("--sweep and --long-steps cannot be used together")
+      None => ()
+    }
+  }
+  match long_steps {
+    Some(_) => {
+      if warmup != 0 {
+        return Err("--warmup must be 0 when --long-steps is enabled")
+      }
+      if checkpoint_every > 0 && checkpoint_path is None {
+        return Err("--checkpoint-every requires --checkpoint-path")
+      }
+    }
+    None =>
+      if eval_every > 0 ||
+        checkpoint_every > 0 ||
+        checkpoint_path is Some(_) ||
+        resume_checkpoint is Some(_) {
+        return Err("--eval/--checkpoint options require --long-steps")
+      }
+  }
   Ok({
     steps,
+    long_steps,
     warmup,
     batch_size,
     seq_len,
@@ -486,6 +654,11 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     shard_meta,
     shard_max_shards,
     shard_max_tokens,
+    eval_every,
+    eval_steps,
+    checkpoint_every,
+    checkpoint_path,
+    resume_checkpoint,
   })
 }
 
@@ -554,6 +727,310 @@ async fn load_bench_corpus(cfg : BenchArgs) -> Result[BenchCorpus, String] {
 ///|
 fn ns_to_ms(ns : UInt64) -> Float {
   Float::from_uint64(ns) / Float::from_int(1000000)
+}
+
+///|
+fn checkpoint_dirname(path : String) -> String {
+  match path.rev_find("/") {
+    Some(i) => if i == 0 { "/" } else { path.unsafe_substring(start=0, end=i) }
+    None => "."
+  }
+}
+
+///|
+fn split_train_eval_ids(
+  all_ids : Array[Int],
+  seq_len : Int,
+) -> (Array[Int], Array[Int]) {
+  let min_tokens = seq_len + 1
+  if all_ids.length() <= min_tokens * 2 {
+    return (all_ids, all_ids)
+  }
+  let mut eval_tokens = all_ids.length() / 20
+  if eval_tokens < min_tokens {
+    eval_tokens = min_tokens
+  }
+  if eval_tokens > all_ids.length() - min_tokens {
+    eval_tokens = all_ids.length() - min_tokens
+  }
+  let train_len = all_ids.length() - eval_tokens
+  let train_ids : Array[Int] = []
+  let eval_ids : Array[Int] = []
+  for i = 0; i < train_len; i = i + 1 {
+    train_ids.push(all_ids[i])
+  }
+  for i = train_len; i < all_ids.length(); i = i + 1 {
+    eval_ids.push(all_ids[i])
+  }
+  (train_ids, eval_ids)
+}
+
+///|
+async fn write_checkpoint(
+  path : String,
+  config : @tensor.TransformerConfig,
+  params : @tensor.TransformerParams,
+  adamw_state : @tensor.TransformerAdamwState?,
+  step : Int,
+) -> Result[Unit, String] {
+  let dir = checkpoint_dirname(path)
+  if dir != "." {
+    let exists_result = try? @afs.exists(dir)
+    match exists_result {
+      Ok(true) => ()
+      Ok(false) => {
+        let mkdir_result = try? @afs.mkdir(
+          dir,
+          permission=0o755,
+          recursive=true,
+        )
+        match mkdir_result {
+          Ok(_) => ()
+          Err(err) => return Err("mkdir error: " + err.to_string())
+        }
+      }
+      Err(err) => return Err("exists error: " + err.to_string())
+    }
+  }
+  let bytes = @tensor.transformer_lm_checkpoint_to_bytes(
+    config, params, adamw_state, step,
+  )
+  let write_result = try? @afs.write_file(
+    path,
+    bytes,
+    create=0o644,
+    truncate=true,
+  )
+  match write_result {
+    Ok(_) => Ok(())
+    Err(err) => Err("checkpoint write error: " + err.to_string())
+  }
+}
+
+///|
+async fn read_checkpoint(
+  path : String,
+  config : @tensor.TransformerConfig,
+) -> Result[@tensor.TransformerLmCheckpoint, String] {
+  let read_result = try? @afs.read_file(path)
+  let data = match read_result {
+    Ok(v) => v
+    Err(err) => return Err("checkpoint read error: " + err.to_string())
+  }
+  @tensor.transformer_lm_checkpoint_from_bytes(config, data.binary())
+}
+
+///|
+fn clamp_batch(batch_size : Int, ids : Array[Int], seq_len : Int) -> Int {
+  let windows = ids.length() - seq_len
+  if windows <= 0 {
+    0
+  } else if batch_size > windows {
+    windows
+  } else {
+    batch_size
+  }
+}
+
+///|
+async fn run_long_train(cfg : BenchArgs) -> Unit {
+  let total_steps = match cfg.long_steps {
+    Some(v) => v
+    None => {
+      println("error: --long-steps is required")
+      return
+    }
+  }
+  let corpus = match load_bench_corpus(cfg) {
+    Ok(v) => v
+    Err(msg) => {
+      println("error: " + msg)
+      return
+    }
+  }
+  let config = @tensor.transformer_config(
+    corpus.vocab,
+    cfg.d_model,
+    cfg.num_heads,
+    cfg.num_layers,
+    cfg.d_ff,
+    cfg.seq_len,
+  ).unwrap()
+  let (train_ids, eval_ids) = split_train_eval_ids(corpus.all_ids, cfg.seq_len)
+  let effective_batch = clamp_batch(cfg.batch_size, train_ids, cfg.seq_len)
+  if effective_batch <= 0 {
+    println("dataset is too short for seq_len=" + cfg.seq_len.to_string())
+    return
+  }
+  let (params, adamw_state, start_step) = match cfg.resume_checkpoint {
+    Some(path) => {
+      let restored = match read_checkpoint(path, config) {
+        Ok(v) => v
+        Err(msg) => {
+          println("error: failed to resume checkpoint: " + msg)
+          return
+        }
+      }
+      let restored_state = match restored.adamw_state {
+        Some(s) => s
+        None => @tensor.transformer_zero_adamw_state(config)
+      }
+      println(
+        "resume: step=" + restored.global_step.to_string() + " path=" + path,
+      )
+      (restored.params, restored_state, restored.global_step)
+    }
+    None =>
+      (
+        @tensor.transformer_init_params(config, cfg.seed),
+        @tensor.transformer_zero_adamw_state(config),
+        0,
+      )
+  }
+  let grads = @tensor.transformer_zero_grads(config)
+  let mut global_step = start_step
+  let mut total_ns = 0UL
+  let mut total_loss = Float::from_int(0)
+  let mut total_ppl = Float::from_int(0)
+  let mut measured_steps = 0
+  println("=== Transformer LM Long Train ===")
+  println(
+    "data=" +
+    corpus.source +
+    " train_tokens=" +
+    train_ids.length().to_string() +
+    " eval_tokens=" +
+    eval_ids.length().to_string(),
+  )
+  println(
+    "target_steps=" +
+    total_steps.to_string() +
+    " chunk_steps=" +
+    cfg.steps.to_string() +
+    " batch_size=" +
+    effective_batch.to_string() +
+    " seq_len=" +
+    cfg.seq_len.to_string(),
+  )
+  let optim = if cfg.adamw { "adamw" } else { "sgd" }
+  println("optim=" + optim + " lr=" + cfg.lr.to_string())
+  while global_step < total_steps {
+    let remaining = total_steps - global_step
+    let run_steps = if remaining < cfg.steps { remaining } else { cfg.steps }
+    let metrics = if cfg.adamw {
+      @tensor.transformer_train_lm_profile_steps_ids_inplace_adamw(
+        train_ids,
+        params,
+        grads,
+        adamw_state,
+        config,
+        0,
+        run_steps,
+        effective_batch,
+        cfg.lr,
+        global_step,
+      )
+    } else {
+      @tensor.transformer_train_lm_profile_steps_ids_inplace(
+        train_ids,
+        params,
+        grads,
+        config,
+        0,
+        run_steps,
+        effective_batch,
+        cfg.lr,
+        global_step,
+      )
+    }
+    if metrics.length() == 0 {
+      println("stopped: no training metrics returned")
+      break
+    }
+    for i = 0; i < metrics.length(); i = i + 1 {
+      let m = metrics[i]
+      let step = global_step + i + 1
+      total_ns = total_ns + m.step_ns
+      total_loss = total_loss + m.loss
+      total_ppl = total_ppl + m.perplexity
+      measured_steps = measured_steps + 1
+      if step % cfg.print_every == 0 || step == total_steps {
+        let tok_per_step = effective_batch * cfg.seq_len
+        let step_tps = if m.step_ns > 0UL {
+          Float::from_int(tok_per_step) *
+          Float::from_int(1000000000) /
+          Float::from_uint64(m.step_ns)
+        } else {
+          Float::from_int(0)
+        }
+        println(
+          "step " +
+          step.to_string() +
+          "/" +
+          total_steps.to_string() +
+          ": loss=" +
+          m.loss.to_string() +
+          " ppl=" +
+          m.perplexity.to_string() +
+          " step_ms=" +
+          ns_to_ms(m.step_ns).to_string() +
+          " tok/s=" +
+          step_tps.to_string(),
+        )
+      }
+      if cfg.eval_every > 0 && step % cfg.eval_every == 0 {
+        let (eval_loss, eval_ppl) = @tensor.transformer_eval_lm_ids(
+          eval_ids,
+          params,
+          config,
+          cfg.eval_steps,
+          effective_batch,
+          step,
+        )
+        println(
+          "eval step " +
+          step.to_string() +
+          ": loss=" +
+          eval_loss.to_string() +
+          " ppl=" +
+          eval_ppl.to_string(),
+        )
+      }
+      if cfg.checkpoint_every > 0 && step % cfg.checkpoint_every == 0 {
+        match cfg.checkpoint_path {
+          Some(path) => {
+            let state_opt = if cfg.adamw { Some(adamw_state) } else { None }
+            let save = write_checkpoint(path, config, params, state_opt, step)
+            match save {
+              Ok(_) => println("checkpoint saved: step=" + step.to_string())
+              Err(msg) => println("checkpoint error: " + msg)
+            }
+          }
+          None => ()
+        }
+      }
+    }
+    global_step = global_step + metrics.length()
+  }
+  if measured_steps > 0 {
+    let n = Float::from_int(measured_steps)
+    println("summary:")
+    println("  avg_step_ms=" + (ns_to_ms(total_ns) / n).to_string())
+    println("  avg_loss=" + (total_loss / n).to_string())
+    println("  avg_ppl=" + (total_ppl / n).to_string())
+  }
+  match cfg.checkpoint_path {
+    Some(path) => {
+      let state_opt = if cfg.adamw { Some(adamw_state) } else { None }
+      let save = write_checkpoint(path, config, params, state_opt, global_step)
+      match save {
+        Ok(_) =>
+          println("checkpoint saved: final step=" + global_step.to_string())
+        Err(msg) => println("checkpoint error: " + msg)
+      }
+    }
+    None => ()
+  }
 }
 
 ///|
@@ -838,9 +1315,8 @@ async fn bench_main() -> Unit {
       return
     }
   }
-  if cfg.sweep {
-    run_sweep(cfg)
-  } else {
-    run_bench(cfg)
+  match cfg.long_steps {
+    Some(_) => run_long_train(cfg)
+    None => if cfg.sweep { run_sweep(cfg) } else { run_bench(cfg) }
   }
 }

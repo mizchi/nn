@@ -1280,6 +1280,133 @@ test "training_lm_profile_ids_matches_text_path_adamw" {
 }
 
 ///|
+test "training_lm_inplace_chunk_matches_single_run_adamw" {
+  let text = "abcabcabcabcabcabcabcabcabcabcabcabc"
+  let tokenizer = char_tokenizer_from_text(text)
+  let all_ids = tokenizer.encode(text)
+  let vocab = tokenizer.vocab_size()
+  let config = transformer_config(vocab, 8, 1, 1, 16, 8).unwrap()
+  let warmup = 2
+  let steps = 6
+  let batch = 8
+  let lr = Float::from_double(0.01)
+  let seed = 42
+  let params_full = transformer_init_params(config, seed)
+  let grads_full = transformer_zero_grads(config)
+  let state_full = transformer_zero_adamw_state(config)
+  let metrics_full = transformer_train_lm_profile_steps_ids_inplace_adamw(
+    all_ids, params_full, grads_full, state_full, config, warmup, steps, batch, lr,
+    0,
+  )
+  let params_chunk = transformer_init_params(config, seed)
+  let grads_chunk = transformer_zero_grads(config)
+  let state_chunk = transformer_zero_adamw_state(config)
+  let metrics_part1 = transformer_train_lm_profile_steps_ids_inplace_adamw(
+    all_ids, params_chunk, grads_chunk, state_chunk, config, warmup, 3, batch, lr,
+    0,
+  )
+  let metrics_part2 = transformer_train_lm_profile_steps_ids_inplace_adamw(
+    all_ids,
+    params_chunk,
+    grads_chunk,
+    state_chunk,
+    config,
+    0,
+    3,
+    batch,
+    lr,
+    3 + warmup,
+  )
+  let metrics_chunk : Array[TransformerLmStepMetric] = []
+  for i = 0; i < metrics_part1.length(); i = i + 1 {
+    metrics_chunk.push(metrics_part1[i])
+  }
+  for i = 0; i < metrics_part2.length(); i = i + 1 {
+    metrics_chunk.push(metrics_part2[i])
+  }
+  assert_true(metrics_full.length() == metrics_chunk.length())
+  for i = 0; i < metrics_full.length(); i = i + 1 {
+    let loss_diff = (metrics_full[i].loss - metrics_chunk[i].loss)
+      .to_double()
+      .abs()
+    let ppl_diff = (metrics_full[i].perplexity - metrics_chunk[i].perplexity)
+      .to_double()
+      .abs()
+    assert_true(loss_diff < 1.0e-6)
+    assert_true(ppl_diff < 1.0e-6)
+  }
+  assert_true(state_full.step == state_chunk.step)
+  assert_true(
+    (state_full.beta1_pow - state_chunk.beta1_pow).to_double().abs() < 1.0e-6,
+  )
+  assert_true(
+    (state_full.beta2_pow - state_chunk.beta2_pow).to_double().abs() < 1.0e-6,
+  )
+  for i = 0; i < params_full.lm_head.data.length(); i = i + 1 {
+    let diff = (params_full.lm_head.data[i] - params_chunk.lm_head.data[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+}
+
+///|
+test "transformer_lm_checkpoint_roundtrip_with_adamw" {
+  let text = "abcabcabcabcabcabcabcabcabcabcabcabc"
+  let tokenizer = char_tokenizer_from_text(text)
+  let all_ids = tokenizer.encode(text)
+  let vocab = tokenizer.vocab_size()
+  let config = transformer_config(vocab, 8, 1, 1, 16, 8).unwrap()
+  let params = transformer_init_params(config, 42)
+  let grads = transformer_zero_grads(config)
+  let state = transformer_zero_adamw_state(config)
+  let _ = transformer_train_lm_profile_steps_ids_inplace_adamw(
+    all_ids,
+    params,
+    grads,
+    state,
+    config,
+    1,
+    4,
+    8,
+    Float::from_double(0.01),
+    0,
+  )
+  let ckpt = transformer_lm_checkpoint_to_bytes(
+    config,
+    params,
+    Some(state),
+    123,
+  )
+  let restored = transformer_lm_checkpoint_from_bytes(config, ckpt).unwrap()
+  assert_true(restored.global_step == 123)
+  let restored_state = match restored.adamw_state {
+    Some(s) => s
+    None => fail("expected adamw_state")
+  }
+  assert_true(restored_state.step == state.step)
+  assert_true(
+    (restored_state.beta1_pow - state.beta1_pow).to_double().abs() < 1.0e-6,
+  )
+  assert_true(
+    (restored_state.beta2_pow - state.beta2_pow).to_double().abs() < 1.0e-6,
+  )
+  for i = 0; i < params.token_embedding.data.length(); i = i + 1 {
+    let diff = (params.token_embedding.data[i] -
+      restored.params.token_embedding.data[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+  for i = 0; i < state.m.d_lm_head.data.length(); i = i + 1 {
+    let diff = (state.m.d_lm_head.data[i] - restored_state.m.d_lm_head.data[i])
+      .to_double()
+      .abs()
+    assert_true(diff < 1.0e-6)
+  }
+}
+
+///|
 test "training_loss_decreases" {
   let text = "abcabcabcabcabcabc"
   let tokenizer = char_tokenizer_from_text(text)

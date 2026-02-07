@@ -1499,6 +1499,673 @@ fn zero_tensor(t : Tensor) -> Unit {
 }
 
 ///|
+pub struct TransformerLmCheckpoint {
+  params : TransformerParams
+  adamw_state : TransformerAdamwState?
+  global_step : Int
+}
+
+///|
+fn build_lm_windows(
+  all_ids : Array[Int],
+  seq_len : Int,
+) -> (Array[Array[Int]], Array[Array[Int]]) {
+  let inputs : Array[Array[Int]] = []
+  let targets : Array[Array[Int]] = []
+  for i = 0; i + seq_len < all_ids.length(); i = i + 1 {
+    let input_seq : Array[Int] = []
+    let target_seq : Array[Int] = []
+    for j = 0; j < seq_len; j = j + 1 {
+      input_seq.push(all_ids[i + j])
+      target_seq.push(all_ids[i + j + 1])
+    }
+    inputs.push(input_seq)
+    targets.push(target_seq)
+  }
+  (inputs, targets)
+}
+
+///|
+fn effective_batch_size(batch_size : Int, windows : Int) -> Int {
+  if windows <= 0 {
+    0
+  } else if batch_size <= 0 {
+    1
+  } else if batch_size > windows {
+    windows
+  } else {
+    batch_size
+  }
+}
+
+///|
+fn train_lm_profile_steps_from_windows_inplace(
+  inputs : Array[Array[Int]],
+  targets : Array[Array[Int]],
+  params : TransformerParams,
+  grads : TransformerGrads,
+  adamw_state : TransformerAdamwState,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  step_offset : Int,
+  use_adamw : Bool,
+) -> Array[TransformerLmStepMetric] {
+  let metrics : Array[TransformerLmStepMetric] = []
+  if inputs.length() == 0 || steps <= 0 {
+    return metrics
+  }
+  let effective_warmup = if warmup_steps < 0 { 0 } else { warmup_steps }
+  let effective_batch = effective_batch_size(batch_size, inputs.length())
+  let seq_len = config.max_seq_len
+  let mask = causal_mask(seq_len).unwrap()
+  let forward_workspace = transformer_forward_workspace(
+    config, effective_batch, seq_len,
+  )
+  let total_steps = effective_warmup + steps
+  let offset = if step_offset < 0 { 0 } else { step_offset }
+  let adamw_cfg = adamw_config_default(lr)
+  for step = 0; step < total_steps; step = step + 1 {
+    zero_grads(grads)
+    let batch_inputs : Array[Array[Int]] = []
+    let batch_targets : Array[Array[Int]] = []
+    let logical_step = offset + step
+    let base = logical_step * effective_batch % inputs.length()
+    for i = 0; i < effective_batch; i = i + 1 {
+      let idx = (base + i) % inputs.length()
+      batch_inputs.push(inputs[idx])
+      batch_targets.push(targets[idx])
+    }
+    let t0 = clock_ns()
+    let (_, cache) = transformer_forward_with_cache_workspace(
+      batch_inputs,
+      params,
+      config,
+      Some(mask),
+      forward_workspace,
+    )
+    let loss = transformer_backward_lm(
+      cache, params, config, grads, batch_targets,
+    )
+    if use_adamw {
+      adamw_update(params, grads, adamw_state, adamw_cfg)
+    } else {
+      sgd_update(params, grads, lr)
+    }
+    let t1 = clock_ns()
+    if step >= effective_warmup {
+      metrics.push(TransformerLmStepMetric::{
+        step_ns: t1 - t0,
+        loss,
+        perplexity: @math.expf(loss),
+      })
+    }
+  }
+  metrics
+}
+
+///|
+fn flatten_lm_labels(
+  labels : Array[Array[Int]],
+  seq_len : Int,
+) -> FixedArray[Int] {
+  let batch = labels.length()
+  let out = FixedArray::make(batch * seq_len, 0)
+  for b = 0; b < batch; b = b + 1 {
+    for s = 0; s < seq_len; s = s + 1 {
+      out[b * seq_len + s] = labels[b][s]
+    }
+  }
+  out
+}
+
+///|
+fn append_ascii_bytes(out : Array[Byte], text : String) -> Unit {
+  for c in text {
+    out.push(c.to_int().to_byte())
+  }
+}
+
+///|
+fn append_u32_le(out : Array[Byte], value : Int) -> Unit {
+  let v = if value < 0 { 0 } else { value }
+  out.push((v % 256).to_byte())
+  out.push((v / 256 % 256).to_byte())
+  out.push((v / 65536 % 256).to_byte())
+  out.push((v / 16777216 % 256).to_byte())
+}
+
+///|
+fn read_u32_le(bytes : Bytes, offset : Int) -> Result[(Int, Int), String] {
+  if offset < 0 || offset + 4 > bytes.length() {
+    return Err("checkpoint truncated while reading u32")
+  }
+  let v = bytes[offset].to_int() +
+    bytes[offset + 1].to_int() * 256 +
+    bytes[offset + 2].to_int() * 65536 +
+    bytes[offset + 3].to_int() * 16777216
+  Ok((v, offset + 4))
+}
+
+///|
+fn append_f32_le(out : Array[Byte], value : Float) -> Unit {
+  let b = value.to_le_bytes()
+  for i = 0; i < b.length(); i = i + 1 {
+    out.push(b[i])
+  }
+}
+
+///|
+fn read_f32_le(bytes : Bytes, offset : Int) -> Result[(Float, Int), String] {
+  if offset < 0 || offset + 4 > bytes.length() {
+    return Err("checkpoint truncated while reading f32")
+  }
+  let bits = bytes[offset].to_int() +
+    bytes[offset + 1].to_int() * 256 +
+    bytes[offset + 2].to_int() * 65536 +
+    bytes[offset + 3].to_int() * 16777216
+  Ok((Float::reinterpret_from_int(bits), offset + 4))
+}
+
+///|
+fn append_tensor_f32(out : Array[Byte], t : Tensor) -> Unit {
+  for i = 0; i < t.data.length(); i = i + 1 {
+    append_f32_le(out, t.data[i])
+  }
+}
+
+///|
+fn read_tensor_f32(
+  bytes : Bytes,
+  offset : Int,
+  t : Tensor,
+) -> Result[Int, String] {
+  let mut off = offset
+  for i = 0; i < t.data.length(); i = i + 1 {
+    let r = read_f32_le(bytes, off)
+    let (v, next_off) = match r {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    t.data[i] = v
+    off = next_off
+  }
+  Ok(off)
+}
+
+///|
+fn append_transformer_params_f32(
+  out : Array[Byte],
+  params : TransformerParams,
+) -> Unit {
+  append_tensor_f32(out, params.token_embedding)
+  append_tensor_f32(out, params.pos_embedding)
+  for bi = 0; bi < params.blocks.length(); bi = bi + 1 {
+    let b = params.blocks[bi]
+    append_tensor_f32(out, b.ln1_gamma)
+    append_tensor_f32(out, b.ln1_beta)
+    append_tensor_f32(out, b.w_q)
+    append_tensor_f32(out, b.w_k)
+    append_tensor_f32(out, b.w_v)
+    append_tensor_f32(out, b.w_o)
+    append_tensor_f32(out, b.ln2_gamma)
+    append_tensor_f32(out, b.ln2_beta)
+    append_tensor_f32(out, b.ff_w1)
+    append_tensor_f32(out, b.ff_b1)
+    append_tensor_f32(out, b.ff_w2)
+    append_tensor_f32(out, b.ff_b2)
+  }
+  append_tensor_f32(out, params.ln_final_gamma)
+  append_tensor_f32(out, params.ln_final_beta)
+  append_tensor_f32(out, params.lm_head)
+}
+
+///|
+fn read_transformer_params_f32(
+  bytes : Bytes,
+  offset : Int,
+  params : TransformerParams,
+) -> Result[Int, String] {
+  let mut off = offset
+  off = match read_tensor_f32(bytes, off, params.token_embedding) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  off = match read_tensor_f32(bytes, off, params.pos_embedding) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  for bi = 0; bi < params.blocks.length(); bi = bi + 1 {
+    let b = params.blocks[bi]
+    off = match read_tensor_f32(bytes, off, b.ln1_gamma) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ln1_beta) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.w_q) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.w_k) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.w_v) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.w_o) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ln2_gamma) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ln2_beta) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ff_w1) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ff_b1) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ff_w2) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.ff_b2) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+  }
+  off = match read_tensor_f32(bytes, off, params.ln_final_gamma) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  off = match read_tensor_f32(bytes, off, params.ln_final_beta) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  read_tensor_f32(bytes, off, params.lm_head)
+}
+
+///|
+fn append_transformer_grads_f32(
+  out : Array[Byte],
+  grads : TransformerGrads,
+) -> Unit {
+  append_tensor_f32(out, grads.d_token_embedding)
+  append_tensor_f32(out, grads.d_pos_embedding)
+  for bi = 0; bi < grads.d_blocks.length(); bi = bi + 1 {
+    let b = grads.d_blocks[bi]
+    append_tensor_f32(out, b.d_ln1_gamma)
+    append_tensor_f32(out, b.d_ln1_beta)
+    append_tensor_f32(out, b.d_w_q)
+    append_tensor_f32(out, b.d_w_k)
+    append_tensor_f32(out, b.d_w_v)
+    append_tensor_f32(out, b.d_w_o)
+    append_tensor_f32(out, b.d_ln2_gamma)
+    append_tensor_f32(out, b.d_ln2_beta)
+    append_tensor_f32(out, b.d_ff_w1)
+    append_tensor_f32(out, b.d_ff_b1)
+    append_tensor_f32(out, b.d_ff_w2)
+    append_tensor_f32(out, b.d_ff_b2)
+  }
+  append_tensor_f32(out, grads.d_ln_final_gamma)
+  append_tensor_f32(out, grads.d_ln_final_beta)
+  append_tensor_f32(out, grads.d_lm_head)
+}
+
+///|
+fn read_transformer_grads_f32(
+  bytes : Bytes,
+  offset : Int,
+  grads : TransformerGrads,
+) -> Result[Int, String] {
+  let mut off = offset
+  off = match read_tensor_f32(bytes, off, grads.d_token_embedding) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  off = match read_tensor_f32(bytes, off, grads.d_pos_embedding) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  for bi = 0; bi < grads.d_blocks.length(); bi = bi + 1 {
+    let b = grads.d_blocks[bi]
+    off = match read_tensor_f32(bytes, off, b.d_ln1_gamma) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ln1_beta) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_w_q) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_w_k) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_w_v) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_w_o) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ln2_gamma) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ln2_beta) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ff_w1) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ff_b1) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ff_w2) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    off = match read_tensor_f32(bytes, off, b.d_ff_b2) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+  }
+  off = match read_tensor_f32(bytes, off, grads.d_ln_final_gamma) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  off = match read_tensor_f32(bytes, off, grads.d_ln_final_beta) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  read_tensor_f32(bytes, off, grads.d_lm_head)
+}
+
+///|
+pub fn transformer_train_lm_profile_steps_ids_inplace(
+  all_ids : Array[Int],
+  params : TransformerParams,
+  grads : TransformerGrads,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  step_offset : Int,
+) -> Array[TransformerLmStepMetric] {
+  let seq_len = config.max_seq_len
+  let (inputs, targets) = build_lm_windows(all_ids, seq_len)
+  let dummy_adamw_state = transformer_zero_adamw_state(config)
+  train_lm_profile_steps_from_windows_inplace(
+    inputs, targets, params, grads, dummy_adamw_state, config, warmup_steps, steps,
+    batch_size, lr, step_offset, false,
+  )
+}
+
+///|
+pub fn transformer_train_lm_profile_steps_ids_inplace_adamw(
+  all_ids : Array[Int],
+  params : TransformerParams,
+  grads : TransformerGrads,
+  adamw_state : TransformerAdamwState,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  step_offset : Int,
+) -> Array[TransformerLmStepMetric] {
+  let seq_len = config.max_seq_len
+  let (inputs, targets) = build_lm_windows(all_ids, seq_len)
+  train_lm_profile_steps_from_windows_inplace(
+    inputs, targets, params, grads, adamw_state, config, warmup_steps, steps, batch_size,
+    lr, step_offset, true,
+  )
+}
+
+///|
+pub fn transformer_eval_lm_ids(
+  all_ids : Array[Int],
+  params : TransformerParams,
+  config : TransformerConfig,
+  steps : Int,
+  batch_size : Int,
+  step_offset : Int,
+) -> (Float, Float) {
+  if steps <= 0 {
+    return (Float::from_int(0), Float::from_int(0))
+  }
+  let seq_len = config.max_seq_len
+  let (inputs, targets) = build_lm_windows(all_ids, seq_len)
+  if inputs.length() == 0 {
+    return (Float::from_int(0), Float::from_int(0))
+  }
+  let effective_batch = effective_batch_size(batch_size, inputs.length())
+  let mask = causal_mask(seq_len).unwrap()
+  let forward_workspace = transformer_forward_workspace(
+    config, effective_batch, seq_len,
+  )
+  let offset = if step_offset < 0 { 0 } else { step_offset }
+  let mut total_loss = Float::from_int(0)
+  for step = 0; step < steps; step = step + 1 {
+    let batch_inputs : Array[Array[Int]] = []
+    let batch_targets : Array[Array[Int]] = []
+    let logical_step = offset + step
+    let base = logical_step * effective_batch % inputs.length()
+    for i = 0; i < effective_batch; i = i + 1 {
+      let idx = (base + i) % inputs.length()
+      batch_inputs.push(inputs[idx])
+      batch_targets.push(targets[idx])
+    }
+    let (logits, _cache) = transformer_forward_with_cache_workspace(
+      batch_inputs,
+      params,
+      config,
+      Some(mask),
+      forward_workspace,
+    )
+    let labels = flatten_lm_labels(batch_targets, seq_len)
+    let batch = logits.dim(0)
+    let vocab = logits.dim(2)
+    let logits_c = logits.contiguous()
+    let flat_shape = shape_new_unchecked([batch * seq_len, vocab])
+    let flat_logits = Tensor::{
+      data: logits_c.data,
+      shape: flat_shape,
+      offset: 0,
+      strides: flat_shape.strides(),
+    }
+    let (loss, _) = cross_entropy_forward_backward_fixed(flat_logits, labels)
+    total_loss = total_loss + loss
+  }
+  let avg_loss = total_loss / Float::from_int(steps)
+  (avg_loss, @math.expf(avg_loss))
+}
+
+///|
+pub fn transformer_lm_checkpoint_to_bytes(
+  config : TransformerConfig,
+  params : TransformerParams,
+  adamw_state : TransformerAdamwState?,
+  global_step : Int,
+) -> Bytes {
+  let out : Array[Byte] = []
+  append_ascii_bytes(out, "NNTRCHK1")
+  let flags = match adamw_state {
+    Some(_) => 1
+    None => 0
+  }
+  append_u32_le(out, flags)
+  append_u32_le(out, global_step)
+  append_u32_le(out, config.vocab_size)
+  append_u32_le(out, config.d_model)
+  append_u32_le(out, config.num_heads)
+  append_u32_le(out, config.num_layers)
+  append_u32_le(out, config.d_ff)
+  append_u32_le(out, config.max_seq_len)
+  match adamw_state {
+    Some(state) => {
+      append_u32_le(out, state.step)
+      append_f32_le(out, state.beta1_pow)
+      append_f32_le(out, state.beta2_pow)
+    }
+    None => ()
+  }
+  append_transformer_params_f32(out, params)
+  match adamw_state {
+    Some(state) => {
+      append_transformer_grads_f32(out, state.m)
+      append_transformer_grads_f32(out, state.v)
+    }
+    None => ()
+  }
+  Bytes::from_array(out)
+}
+
+///|
+pub fn transformer_lm_checkpoint_from_bytes(
+  config : TransformerConfig,
+  bytes : Bytes,
+) -> Result[TransformerLmCheckpoint, String] {
+  let magic = "NNTRCHK1"
+  if bytes.length() < magic.length() {
+    return Err("checkpoint too short")
+  }
+  for i = 0; i < magic.length(); i = i + 1 {
+    let c = magic.to_array()[i]
+    if bytes[i] != c.to_int().to_byte() {
+      return Err("invalid checkpoint magic")
+    }
+  }
+  let offset = magic.length()
+  let flags_r = read_u32_le(bytes, offset)
+  let (flags, offset1) = match flags_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let global_r = read_u32_le(bytes, offset1)
+  let (global_step, offset2) = match global_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let vocab_r = read_u32_le(bytes, offset2)
+  let (vocab, offset3) = match vocab_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let d_model_r = read_u32_le(bytes, offset3)
+  let (d_model, offset4) = match d_model_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let heads_r = read_u32_le(bytes, offset4)
+  let (heads, offset5) = match heads_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let layers_r = read_u32_le(bytes, offset5)
+  let (layers, offset6) = match layers_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let d_ff_r = read_u32_le(bytes, offset6)
+  let (d_ff, offset7) = match d_ff_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let seq_r = read_u32_le(bytes, offset7)
+  let (max_seq_len, offset8) = match seq_r {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let mut next_offset = offset8
+  if vocab != config.vocab_size ||
+    d_model != config.d_model ||
+    heads != config.num_heads ||
+    layers != config.num_layers ||
+    d_ff != config.d_ff ||
+    max_seq_len != config.max_seq_len {
+    return Err("checkpoint config does not match current config")
+  }
+  let has_adamw = (flags & 1) == 1
+  let mut adamw_step = 0
+  let mut beta1_pow = Float::from_int(1)
+  let mut beta2_pow = Float::from_int(1)
+  if has_adamw {
+    let step_r = read_u32_le(bytes, next_offset)
+    let (s, o1) = match step_r {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    let b1_r = read_f32_le(bytes, o1)
+    let (b1, o2) = match b1_r {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    let b2_r = read_f32_le(bytes, o2)
+    let (b2, o3) = match b2_r {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    adamw_step = s
+    beta1_pow = b1
+    beta2_pow = b2
+    next_offset = o3
+  }
+  let params = transformer_init_params(config, 0)
+  next_offset = match read_transformer_params_f32(bytes, next_offset, params) {
+    Ok(v) => v
+    Err(msg) => return Err(msg)
+  }
+  let mut restored_state : TransformerAdamwState? = None
+  if has_adamw {
+    let state = transformer_zero_adamw_state(config)
+    state.step = adamw_step
+    state.beta1_pow = beta1_pow
+    state.beta2_pow = beta2_pow
+    next_offset = match
+      read_transformer_grads_f32(bytes, next_offset, state.m) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    next_offset = match
+      read_transformer_grads_f32(bytes, next_offset, state.v) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    restored_state = Some(state)
+  }
+  if next_offset != bytes.length() {
+    return Err(
+      "checkpoint trailing bytes: " + (bytes.length() - next_offset).to_string(),
+    )
+  }
+  Ok({ params, adamw_state: restored_state, global_step })
+}
+
+///|
 /// Train a tiny transformer on text data with step-based mini-batch updates.
 /// Returns loss history (one value per step).
 pub fn transformer_train_lm_steps(
@@ -1553,78 +2220,12 @@ fn transformer_train_lm_profile_steps_from_ids_impl(
   let params = transformer_init_params(config, seed)
   let grads = transformer_zero_grads(config)
   let adamw_state = transformer_zero_adamw_state(config)
-  let adamw_cfg = adamw_config_default(lr)
-  let metrics : Array[TransformerLmStepMetric] = []
   let seq_len = config.max_seq_len
-
-  // Create training examples: sliding window
-  let inputs : Array[Array[Int]] = []
-  let targets : Array[Array[Int]] = []
-  for i = 0; i + seq_len < all_ids.length(); i = i + 1 {
-    let input_seq : Array[Int] = []
-    let target_seq : Array[Int] = []
-    for j = 0; j < seq_len; j = j + 1 {
-      input_seq.push(all_ids[i + j])
-      target_seq.push(all_ids[i + j + 1])
-    }
-    inputs.push(input_seq)
-    targets.push(target_seq)
-  }
-  if inputs.length() == 0 || steps <= 0 {
-    return metrics
-  }
-  let effective_warmup = if warmup_steps < 0 { 0 } else { warmup_steps }
-  let effective_batch = if batch_size <= 0 {
-    1
-  } else if batch_size > inputs.length() {
-    inputs.length()
-  } else {
-    batch_size
-  }
-  let mask = causal_mask(seq_len).unwrap()
-  let forward_workspace = transformer_forward_workspace(
-    config, effective_batch, seq_len,
+  let (inputs, targets) = build_lm_windows(all_ids, seq_len)
+  train_lm_profile_steps_from_windows_inplace(
+    inputs, targets, params, grads, adamw_state, config, warmup_steps, steps, batch_size,
+    lr, 0, use_adamw,
   )
-  let total_steps = effective_warmup + steps
-  for step = 0; step < total_steps; step = step + 1 {
-    zero_grads(grads)
-    let batch_inputs : Array[Array[Int]] = []
-    let batch_targets : Array[Array[Int]] = []
-    let base = step * effective_batch % inputs.length()
-    for i = 0; i < effective_batch; i = i + 1 {
-      let idx = (base + i) % inputs.length()
-      batch_inputs.push(inputs[idx])
-      batch_targets.push(targets[idx])
-    }
-    let t0 = clock_ns()
-    // Forward with cache (mini-batch)
-    let (_, cache) = transformer_forward_with_cache_workspace(
-      batch_inputs,
-      params,
-      config,
-      Some(mask),
-      forward_workspace,
-    )
-
-    // Backward
-    let loss = transformer_backward_lm(
-      cache, params, config, grads, batch_targets,
-    )
-    if use_adamw {
-      adamw_update(params, grads, adamw_state, adamw_cfg)
-    } else {
-      sgd_update(params, grads, lr)
-    }
-    let t1 = clock_ns()
-    if step >= effective_warmup {
-      metrics.push(TransformerLmStepMetric::{
-        step_ns: t1 - t0,
-        loss,
-        perplexity: @math.expf(loss),
-      })
-    }
-  }
-  metrics
 }
 
 ///|

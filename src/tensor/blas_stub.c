@@ -438,6 +438,18 @@ void tensor_layer_norm_bwd_add(
   }
 }
 
+// In-place variant of tensor_layer_norm_bwd_add:
+// add_inout is read as residual and overwritten with residual + dx.
+void tensor_layer_norm_bwd_add_inplace(
+  const float* dy, float* add_inout, const float* x, const float* mean, const float* rstd,
+  const float* gamma, float* d_gamma, float* d_beta,
+  int outer, int last_dim
+) {
+  tensor_layer_norm_bwd_add(
+    dy, add_inout, x, mean, rstd, gamma, add_inout, d_gamma, d_beta, outer, last_dim
+  );
+}
+
 // Reshape [batch, seq, num_heads*d_k] -> [batch, num_heads, seq, d_k]
 void tensor_reshape_for_heads(
   const float* src, float* dst,

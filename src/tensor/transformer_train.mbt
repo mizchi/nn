@@ -348,9 +348,9 @@ pub fn layer_norm_backward(
 }
 
 ///|
-/// Layer norm backward and residual add in one kernel call.
-/// Returns residual + dx_layer_norm, and accumulates into d_gamma/d_beta.
-fn layer_norm_backward_add(
+/// In-place variant of layer_norm_backward_add:
+/// residual is overwritten with residual + dx_layer_norm and returned.
+fn layer_norm_backward_add_inplace(
   dy : Tensor,
   residual : Tensor,
   x : Tensor,
@@ -366,22 +366,20 @@ fn layer_norm_backward_add(
   let residual_c = residual.contiguous()
   let xc = x.contiguous()
   let gc = gamma.contiguous()
-  let out_data = FixedArray::make(xc.numel(), Float::from_int(0))
-  native_layer_norm_bwd_add(
+  native_layer_norm_bwd_add_inplace(
     dyc.data,
     residual_c.data,
     xc.data,
     mean,
     rstd,
     gc.data,
-    out_data,
     d_gamma.data,
     d_beta.data,
     outer,
     last_dim,
   )
   Tensor::{
-    data: out_data,
+    data: residual_c.data,
     shape: x.shape,
     offset: 0,
     strides: x.shape.strides(),
@@ -694,7 +692,7 @@ fn transformer_block_backward(
   let d_ln2 = feed_forward_backward(dy, cache, params, grads)
 
   // LN2 backward
-  let d_res1 = layer_norm_backward_add(
+  let d_res1 = layer_norm_backward_add_inplace(
     d_ln2,
     dy,
     cache.x_after_res1,
@@ -711,7 +709,7 @@ fn transformer_block_backward(
   )
 
   // LN1 backward + residual1 add
-  layer_norm_backward_add(
+  layer_norm_backward_add_inplace(
     d_ln1,
     d_res1,
     cache.x_input,

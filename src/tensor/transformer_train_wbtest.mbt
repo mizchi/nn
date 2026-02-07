@@ -118,7 +118,7 @@ test "layer_norm_backward_add_matches_reference" {
   }
   let d_gamma_fused = tensor_zeros(shape_new_unchecked([d_model]))
   let d_beta_fused = tensor_zeros(shape_new_unchecked([d_model]))
-  let out_fused = layer_norm_backward_add(
+  let out_fused = layer_norm_backward_add_inplace(
     dy, residual, x, mean, rstd, gamma, d_gamma_fused, d_beta_fused,
   )
   for i = 0; i < n; i = i + 1 {

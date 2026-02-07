@@ -189,20 +189,19 @@ extern "C" fn native_layer_norm_bwd(
 ) -> Unit = "tensor_layer_norm_bwd"
 
 ///|
-#borrow(dy, add, x, mean, rstd, gamma, out, d_gamma, d_beta)
-extern "C" fn native_layer_norm_bwd_add(
+#borrow(dy, add_inout, x, mean, rstd, gamma, d_gamma, d_beta)
+extern "C" fn native_layer_norm_bwd_add_inplace(
   dy : FixedArray[Float],
-  add : FixedArray[Float],
+  add_inout : FixedArray[Float],
   x : FixedArray[Float],
   mean : FixedArray[Float],
   rstd : FixedArray[Float],
   gamma : FixedArray[Float],
-  out : FixedArray[Float],
   d_gamma : FixedArray[Float],
   d_beta : FixedArray[Float],
   outer : Int,
   last_dim : Int,
-) -> Unit = "tensor_layer_norm_bwd_add"
+) -> Unit = "tensor_layer_norm_bwd_add_inplace"
 
 ///|
 #borrow(src, dst)

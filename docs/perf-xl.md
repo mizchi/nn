@@ -331,6 +331,26 @@ Transformer LM 学習ループの継続チューニング用に、比較条件�
 - 目標 `+20%` には未達だが、alloc/加算ループ削減で改善を確認
 - 次優先は `AdamW step` か `LayerNorm backward` の scratch 再利用（step 間再利用）
 
+### Iteration: LayerNorm Backward + Residual Add In-place
+
+実装:
+
+- `tensor_layer_norm_bwd_add_inplace` を追加し、residual バッファを上書き再利用
+- `transformer_block_backward` の LN2/LN1 経路を in-place 版に差し替え
+- whitebox test は参照式（`layer_norm_backward + residual`）との一致を維持
+
+再計測（同一条件）:
+
+| Case | Baseline tok/s | New tok/s | Delta |
+|------|----------------|-----------|-------|
+| A (`seq=128, layers=6`) | `11140.0488` | `11359.1553` | `+1.97%` |
+| B (`seq=256, layers=12`) | `5016.9336` | `5180.4863` | `+3.26%` |
+
+評価:
+
+- 改善は確認できたが、`+20%` 目標には未達
+- 次は MHA backward の `dx_q + dx_k + dx_v` 合算を kernel 化してメモリ走査を 1 回に寄せる
+
 ## PyTorch Comparison
 
 ```

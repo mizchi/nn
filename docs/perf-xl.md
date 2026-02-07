@@ -469,17 +469,42 @@ Transformer LM 学習ループの継続チューニング用に、比較条件�
 - B（長系列・深層）で改善が大きく、MHA block 融合と workspace 再利用が効いた
 - A は微増に留まるため、次は residual/LN 周辺バッファの再利用範囲を広げる
 
+### Iteration: Residual/LN Workspace Expansion
+
+実装:
+
+- `TransformerBlockForwardWorkspace` に
+  `ln1_out / x_after_res1 / ln2_out / hidden_out` を追加
+- `TransformerForwardWorkspace` に `ln_final_out` を追加
+- `layer_norm_with_cache_to` を追加し、workspace 出力バッファへ直接書き込み
+- residual 加算を `add_residual_into` で workspace バッファへ書き込み
+- whitebox test:
+  - `forward_with_cache_workspace_matches_default_and_reusable`
+    （`ln1_out/ln2_out/x_after_res1/final_ln_out` の一致も確認）
+
+再計測（A/B, `--adamw`, 直列実行）:
+
+| Case | Previous tok/s | New tok/s | Delta |
+|------|----------------|-----------|-------|
+| A (`seq=128, layers=6`) | `15895.1055` | `16674.8633` | `+4.91%` |
+| B (`seq=256, layers=12`) | `8034.2646` | `8054.2402` | `+0.25%` |
+
+評価:
+
+- A で改善が明確（`+4.91%`）、B は維持寄り（微増）
+- 追加再利用により alloc 削減は進んだので、次は FFN forward 融合で B 側も押し上げる
+
 ### GPT-2-like Probe (AdamW)
 
 - command:
   `just bench-transformer-lm --adamw --steps=10 --warmup=3 --batch-size=2 --seq-len=256 --d-model=256 --heads=8 --layers=12 --d-ff=1024 --repeat=1024 --print-every=5`
 - result:
-  - `avg_step_ms=141.3095`
-  - `avg_tok/s=3623.2524`
+  - `avg_step_ms=143.5322`
+  - `avg_tok/s=3567.1438`
   - `avg_loss=2.6241`
   - `avg_ppl=13.8389`
 
-`Reference C`（`avg_tok/s=2125.3704`）比で `+70.48%`。  
+`Reference C`（`avg_tok/s=2125.3704`）比で `+67.84%`。  
 この構成で loss が step 進行に伴って低下することも確認でき、GPT-2 相当の簡易LM学習に向けた throughput 基盤は前進。
 
 ## PyTorch Comparison

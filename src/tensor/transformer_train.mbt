@@ -68,17 +68,22 @@ pub struct TransformerLmStepMetric {
 
 ///|
 priv struct TransformerBlockForwardWorkspace {
+  ln1_out : FixedArray[Float]
   q_proj : FixedArray[Float]
   k_proj : FixedArray[Float]
   v_proj : FixedArray[Float]
   attn_weights : FixedArray[Float]
   attn_concat : FixedArray[Float]
   attn_out : FixedArray[Float]
+  x_after_res1 : FixedArray[Float]
+  ln2_out : FixedArray[Float]
+  hidden_out : FixedArray[Float]
 }
 
 ///|
 priv struct TransformerForwardWorkspace {
   blocks : Array[TransformerBlockForwardWorkspace]
+  ln_final_out : FixedArray[Float]
 }
 
 ///|
@@ -92,15 +97,22 @@ fn transformer_forward_workspace(
   let attn_w_size = batch * config.num_heads * seq * seq
   let blocks = Array::makei(config.num_layers, fn(_i) {
     TransformerBlockForwardWorkspace::{
+      ln1_out: FixedArray::make(proj_size, Float::from_int(0)),
       q_proj: FixedArray::make(proj_size, Float::from_int(0)),
       k_proj: FixedArray::make(proj_size, Float::from_int(0)),
       v_proj: FixedArray::make(proj_size, Float::from_int(0)),
       attn_weights: FixedArray::make(attn_w_size, Float::from_int(0)),
       attn_concat: FixedArray::make(proj_size, Float::from_int(0)),
       attn_out: FixedArray::make(proj_size, Float::from_int(0)),
+      x_after_res1: FixedArray::make(proj_size, Float::from_int(0)),
+      ln2_out: FixedArray::make(proj_size, Float::from_int(0)),
+      hidden_out: FixedArray::make(proj_size, Float::from_int(0)),
     }
   })
-  TransformerForwardWorkspace::{ blocks, }
+  TransformerForwardWorkspace::{
+    blocks,
+    ln_final_out: FixedArray::make(proj_size, Float::from_int(0)),
+  }
 }
 
 ///|
@@ -185,12 +197,23 @@ pub fn layer_norm_with_cache(
   beta : Tensor,
   eps : Float,
 ) -> (Tensor, FixedArray[Float], FixedArray[Float]) {
+  let result = FixedArray::make(t.numel(), Float::from_int(0))
+  layer_norm_with_cache_to(t, gamma, beta, eps, result)
+}
+
+///|
+fn layer_norm_with_cache_to(
+  t : Tensor,
+  gamma : Tensor,
+  beta : Tensor,
+  eps : Float,
+  result : FixedArray[Float],
+) -> (Tensor, FixedArray[Float], FixedArray[Float]) {
   let last_dim = t.dim(-1)
   let tc = t.contiguous()
   let gc = gamma.contiguous()
   let bc = beta.contiguous()
   let outer = t.numel() / last_dim
-  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let means = FixedArray::make(outer, Float::from_int(0))
   let rstds = FixedArray::make(outer, Float::from_int(0))
   native_layer_norm_fwd(
@@ -211,6 +234,25 @@ pub fn layer_norm_with_cache(
     strides: t.shape.strides(),
   }
   (out, means, rstds)
+}
+
+///|
+fn add_residual_into(
+  a : Tensor,
+  b : Tensor,
+  out_data : FixedArray[Float],
+) -> Tensor {
+  let ac = a.contiguous()
+  let bc = b.contiguous()
+  for i = 0; i < out_data.length(); i = i + 1 {
+    out_data[i] = ac.data[i] + bc.data[i]
+  }
+  Tensor::{
+    data: out_data,
+    shape: a.shape,
+    offset: 0,
+    strides: a.shape.strides(),
+  }
 }
 
 ///|
@@ -805,49 +847,62 @@ fn transformer_forward_with_cache_impl(
   let mut hidden = x_with_pos
   let block_caches : Array[TransformerBlockCache] = []
   for layer = 0; layer < config.num_layers; layer = layer + 1 {
-    let bp = params.blocks[layer]
-    let x_input = hidden
-
-    // LN1 with cache
-    let (ln1_out, ln1_mean, ln1_rstd) = layer_norm_with_cache(
-      x_input,
-      bp.ln1_gamma,
-      bp.ln1_beta,
-      config.eps,
-    )
-
-    // MHA block fused forward (QKV projection + attention + W_o)
     let ws_block = match workspace {
       None => None
       Some(ws) => Some(ws.blocks[layer])
     }
+    let bp = params.blocks[layer]
+    let x_input = hidden
     let (
+      ln1_out_data,
       q_proj_data,
       k_proj_data,
       v_proj_data,
       attn_weights_all,
       attn_concat_data,
       attn_out_data,
+      x_after_res1_data,
+      ln2_out_data,
+      hidden_data,
     ) = match ws_block {
       Some(ws) =>
         (
+          ws.ln1_out,
           ws.q_proj,
           ws.k_proj,
           ws.v_proj,
           ws.attn_weights,
           ws.attn_concat,
           ws.attn_out,
+          ws.x_after_res1,
+          ws.ln2_out,
+          ws.hidden_out,
         )
       None =>
         (
           FixedArray::make(proj_size, Float::from_int(0)),
           FixedArray::make(proj_size, Float::from_int(0)),
           FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
           FixedArray::make(attn_w_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
+          FixedArray::make(proj_size, Float::from_int(0)),
           FixedArray::make(proj_size, Float::from_int(0)),
           FixedArray::make(proj_size, Float::from_int(0)),
         )
     }
+
+    // LN1 with cache
+    let (ln1_out, ln1_mean, ln1_rstd) = layer_norm_with_cache_to(
+      x_input,
+      bp.ln1_gamma,
+      bp.ln1_beta,
+      config.eps,
+      ln1_out_data,
+    )
+
+    // MHA block fused forward (QKV projection + attention + W_o)
     let ln1c = ln1_out.contiguous()
     let wq = bp.w_q.contiguous()
     let wk = bp.w_k.contiguous()
@@ -926,28 +981,15 @@ fn transformer_forward_with_cache_impl(
     }
 
     // Residual 1
-    let x_after_res1_data = FixedArray::make(
-      batch * seq * d_model,
-      Float::from_int(0),
-    )
-    let xic = x_input.contiguous()
-    let aoc = attn_out.contiguous()
-    for i = 0; i < x_after_res1_data.length(); i = i + 1 {
-      x_after_res1_data[i] = xic.data[i] + aoc.data[i]
-    }
-    let x_after_res1 = Tensor::{
-      data: x_after_res1_data,
-      shape: x_input.shape,
-      offset: 0,
-      strides: x_input.shape.strides(),
-    }
+    let x_after_res1 = add_residual_into(x_input, attn_out, x_after_res1_data)
 
     // LN2 with cache
-    let (ln2_out, ln2_mean, ln2_rstd) = layer_norm_with_cache(
+    let (ln2_out, ln2_mean, ln2_rstd) = layer_norm_with_cache_to(
       x_after_res1,
       bp.ln2_gamma,
       bp.ln2_beta,
       config.eps,
+      ln2_out_data,
     )
 
     // FFN with cache
@@ -958,21 +1000,7 @@ fn transformer_forward_with_cache_impl(
     let ff_out = add_bias(ff_out_h, bp.ff_b2)
 
     // Residual 2
-    let hidden_data = FixedArray::make(
-      batch * seq * d_model,
-      Float::from_int(0),
-    )
-    let r1c = x_after_res1.contiguous()
-    let foc = ff_out.contiguous()
-    for i = 0; i < hidden_data.length(); i = i + 1 {
-      hidden_data[i] = r1c.data[i] + foc.data[i]
-    }
-    hidden = Tensor::{
-      data: hidden_data,
-      shape: x_input.shape,
-      offset: 0,
-      strides: x_input.shape.strides(),
-    }
+    hidden = add_residual_into(x_after_res1, ff_out, hidden_data)
     block_caches.push(TransformerBlockCache::{
       x_input,
       ln1_out,
@@ -994,12 +1022,23 @@ fn transformer_forward_with_cache_impl(
 
   // Final layer norm
   let hidden_before_final_ln = hidden
-  let (ln_final_out, ln_final_mean, ln_final_rstd) = layer_norm_with_cache(
-    hidden_before_final_ln,
-    params.ln_final_gamma,
-    params.ln_final_beta,
-    config.eps,
-  )
+  let (ln_final_out, ln_final_mean, ln_final_rstd) = match workspace {
+    Some(ws) =>
+      layer_norm_with_cache_to(
+        hidden_before_final_ln,
+        params.ln_final_gamma,
+        params.ln_final_beta,
+        config.eps,
+        ws.ln_final_out,
+      )
+    None =>
+      layer_norm_with_cache(
+        hidden_before_final_ln,
+        params.ln_final_gamma,
+        params.ln_final_beta,
+        config.eps,
+      )
+  }
 
   // LM head
   let logits = batched_linear(ln_final_out, params.lm_head).unwrap()

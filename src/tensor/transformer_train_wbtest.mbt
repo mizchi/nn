@@ -1063,6 +1063,18 @@ test "forward_with_cache_workspace_matches_default_and_reusable" {
       .abs()
     assert_true(diff < 1.0e-6)
   }
+  for i = 0; i < cache_def_a.hidden_before_final_ln.numel(); i = i + 1 {
+    let h_diff = (cache_def_a.hidden_before_final_ln.data[i] -
+      cache_ws_a.hidden_before_final_ln.data[i])
+      .to_double()
+      .abs()
+    let ln_diff = (cache_def_a.ln_final_out.data[i] -
+      cache_ws_a.ln_final_out.data[i])
+      .to_double()
+      .abs()
+    assert_true(h_diff < 1.0e-6)
+    assert_true(ln_diff < 1.0e-6)
+  }
   let blk_def_a = cache_def_a.block_caches[0]
   let blk_ws_a = cache_ws_a.block_caches[0]
   for i = 0; i < blk_def_a.attn_weights.length(); i = i + 1 {
@@ -1085,10 +1097,23 @@ test "forward_with_cache_workspace_matches_default_and_reusable" {
       blk_ws_a.attn_out_pre_wo.data[i])
       .to_double()
       .abs()
+    let ln1_diff = (blk_def_a.ln1_out.data[i] - blk_ws_a.ln1_out.data[i])
+      .to_double()
+      .abs()
+    let r1_diff = (blk_def_a.x_after_res1.data[i] -
+      blk_ws_a.x_after_res1.data[i])
+      .to_double()
+      .abs()
+    let ln2_diff = (blk_def_a.ln2_out.data[i] - blk_ws_a.ln2_out.data[i])
+      .to_double()
+      .abs()
     assert_true(q_diff < 1.0e-6)
     assert_true(k_diff < 1.0e-6)
     assert_true(v_diff < 1.0e-6)
     assert_true(a_diff < 1.0e-6)
+    assert_true(ln1_diff < 1.0e-6)
+    assert_true(r1_diff < 1.0e-6)
+    assert_true(ln2_diff < 1.0e-6)
   }
 
   // Reuse the same workspace with different tokens and ensure outputs still match.
@@ -1112,6 +1137,18 @@ test "forward_with_cache_workspace_matches_default_and_reusable" {
       .to_double()
       .abs()
     assert_true(diff < 1.0e-6)
+  }
+  for i = 0; i < cache_def_b.hidden_before_final_ln.numel(); i = i + 1 {
+    let h_diff = (cache_def_b.hidden_before_final_ln.data[i] -
+      cache_ws_b.hidden_before_final_ln.data[i])
+      .to_double()
+      .abs()
+    let ln_diff = (cache_def_b.ln_final_out.data[i] -
+      cache_ws_b.ln_final_out.data[i])
+      .to_double()
+      .abs()
+    assert_true(h_diff < 1.0e-6)
+    assert_true(ln_diff < 1.0e-6)
   }
   let blk_def_b = cache_def_b.block_caches[0]
   let blk_ws_b = cache_ws_b.block_caches[0]

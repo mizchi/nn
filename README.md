@@ -181,16 +181,26 @@ python3 scripts/bench_pytorch.py
 
 | Size | MoonBit (ms) | PyTorch (ms) | vs PyTorch |
 |------|-------------|-------------|------------|
-| [32, 784] -> 128 -> 10 | 0.039 | 0.130 | **0.30x (3x faster)** |
-| [64, 784] -> 256 -> 10 | 0.133 | 0.168 | **0.79x (faster)** |
-| [128, 784] -> 512 -> 10 | 0.519 | 0.343 | 1.5x |
-| [256, 784] -> 1024 -> 10 | 1.973 | 0.821 | 2.4x |
+| [32, 784] -> 128 -> 10 | 0.033 | 0.130 | **0.25x (4x faster)** |
+| [64, 784] -> 256 -> 10 | 0.117 | 0.168 | **0.70x (faster)** |
+| [128, 784] -> 512 -> 10 | 0.432 | 0.343 | 1.3x |
+| [256, 784] -> 1024 -> 10 | 1.649 | 0.821 | 2.0x |
 
 Optimizations applied:
 - BLAS sgemm with trans flags (no transpose copies)
 - C FFI for SGD (cblas_saxpy), ReLU, bias add, gradient accumulate
 - Inline bias in Linear forward (fused sgemm + bias)
 - LinearWorkspace for buffer reuse across iterations
+- C-managed buffers (posix_memalign) for relu_pre, grad_buf, relu_out
+- Fused two-layer backward: single C call for linear2+relu+linear1 backward
+
+### Known issue: GC old-gen cache aliasing
+
+XL backward (1.2ms) is ~3x slower than the theoretical CPU minimum (0.39ms manual backward).
+Root cause: MoonBit GC promotes long-lived FixedArrays to old-generation where physical memory
+placement causes CPU L1/L2 cache set conflicts. `relu_backward` takes 0.9ms with old-gen buffers
+vs 0.07ms with fresh allocations. C-managed buffers (posix_memalign) bypass this for reads, but
+workspace write buffers remain in GC old-gen. See `docs/perf-xl.md` for full analysis.
 
 ## numbt - NumPy-like library for MoonBit
 

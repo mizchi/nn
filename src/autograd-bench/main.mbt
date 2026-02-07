@@ -76,8 +76,7 @@ fn run_step(
   let b2 = tape.create_var(b2_data, true)
   let linear2 = @autograd.Linear::from_vars(w2, b2)
   let x = tape.create_var(input_data, false)
-  let ha = linear1.forward_relu_managed(x, ws1)
-  let logits = linear2.forward_ws_managed(ha, ws2)
+  let logits = @autograd.forward_two_layer_relu(linear1, linear2, x, ws1, ws2)
   let loss = @autograd.var_cross_entropy(logits, labels)
   let t1 = @tensor.clock_ns()
   // --- Backward ---
@@ -411,15 +410,17 @@ fn profile_xl() -> Unit {
     let b2_var = tape.create_var(b2_data, true)
     let linear2 = @autograd.Linear::from_vars(w2, b2_var)
     let x_var = tape.create_var(input_data, false)
-    let ha_var = linear1.forward_relu_managed(x_var, ws1)
-    let logits_var = linear2.forward_ws_managed(ha_var, ws2)
+    let logits_var = @autograd.forward_two_layer_relu(
+      linear1, linear2, x_var, ws1, ws2,
+    )
     let loss_var = @autograd.var_cross_entropy(logits_var, labels)
     tape.backward(loss_var)
   }
   // Profile run (5 iterations to see variance)
   let node_names = [
-    "w1", "b1", "w2", "b2", "x", "fused_l1_relu", "linear2_out", "cross_entropy",
+    "w1", "b1", "w2", "b2", "x", "fused_two_layer", "cross_entropy",
   ]
+  let fused_parts : FixedArray[UInt64] = FixedArray::make(5, 0UL)
   for run = 0; run < 5; run = run + 1 {
     let tape = @autograd.Tape::new()
     let w1p = tape.create_var(w1_data, true)
@@ -429,8 +430,9 @@ fn profile_xl() -> Unit {
     let b2p = tape.create_var(b2_data, true)
     let linear2p = @autograd.Linear::from_vars(w2p, b2p)
     let xp = tape.create_var(input_data, false)
-    let hap = linear1p.forward_relu_managed(xp, ws1)
-    let logitsp = linear2p.forward_ws_managed(hap, ws2)
+    let logitsp = @autograd.forward_two_layer_relu(
+      linear1p, linear2p, xp, ws1, ws2,
+    )
     let lossp = @autograd.var_cross_entropy(logitsp, labels)
     let timings = tape.backward_profiled(lossp)
     let mut line = "  run" + run.to_string() + ": "
@@ -444,6 +446,20 @@ fn profile_xl() -> Unit {
       line = line + name + "=" + ns_to_ms(ns) + "ms "
     }
     println(line)
+    @tensor.fused_two_layer_last_profile(fused_parts)
+    println(
+      "    fused C: dw2=" +
+      ns_to_ms(fused_parts[0]) +
+      "ms db2=" +
+      ns_to_ms(fused_parts[1]) +
+      "ms da1=" +
+      ns_to_ms(fused_parts[2]) +
+      "ms relu=" +
+      ns_to_ms(fused_parts[3]) +
+      "ms dw1+db1=" +
+      ns_to_ms(fused_parts[4]) +
+      "ms",
+    )
   }
   println("")
   // Manual backward (no tape/closures)

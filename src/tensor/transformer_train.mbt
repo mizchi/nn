@@ -338,10 +338,9 @@ fn positional_embedding_backward(
 }
 
 ///|
-/// Feed-forward backward
-/// dy: [batch, seq, d_model]
-/// Returns dx: [batch, seq, d_model]
-fn feed_forward_backward(
+/// Feed-forward backward reference implementation (non-fused).
+/// Kept for numerical regression checks in whitebox tests.
+pub fn feed_forward_backward_reference(
   dy : Tensor,
   cache : TransformerBlockCache,
   params : TransformerBlockParams,
@@ -375,6 +374,59 @@ fn feed_forward_backward(
     grads.d_ff_w1,
   )
   dx
+}
+
+///|
+/// Feed-forward backward fused path:
+///   dy -> (dW2, db2) -> GELU backward -> (dW1, db1, dx)
+fn feed_forward_backward_fused(
+  dy : Tensor,
+  cache : TransformerBlockCache,
+  params : TransformerBlockParams,
+  grads : TransformerBlockGrads,
+) -> Tensor {
+  let batch = dy.dim(0)
+  let seq = dy.dim(1)
+  let d_model = dy.dim(2)
+  let d_ff = cache.ff_pre_gelu.dim(2)
+  let n = batch * seq
+  let dyc = dy.contiguous()
+  let post_c = cache.ff_post_gelu.contiguous()
+  let pre_c = cache.ff_pre_gelu.contiguous()
+  let ln2_c = cache.ln2_out.contiguous()
+  let w2_c = params.ff_w2.contiguous()
+  let w1_c = params.ff_w1.contiguous()
+  let dx_data = FixedArray::make(n * d_model, Float::from_int(0))
+  fused_ffn_backward(
+    dyc.data,
+    post_c.data,
+    pre_c.data,
+    ln2_c.data,
+    w2_c.data,
+    w1_c.data,
+    grads.d_ff_w2.data,
+    grads.d_ff_b2.data,
+    grads.d_ff_w1.data,
+    grads.d_ff_b1.data,
+    dx_data,
+    n,
+    d_model,
+    d_ff,
+  )
+  Tensor::{ data: dx_data, shape: dy.shape, offset: 0, strides: dy.shape.strides() }
+}
+
+///|
+/// Feed-forward backward
+/// dy: [batch, seq, d_model]
+/// Returns dx: [batch, seq, d_model]
+fn feed_forward_backward(
+  dy : Tensor,
+  cache : TransformerBlockCache,
+  params : TransformerBlockParams,
+  grads : TransformerBlockGrads,
+) -> Tensor {
+  feed_forward_backward_fused(dy, cache, params, grads)
 }
 
 ///|

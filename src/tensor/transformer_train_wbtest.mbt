@@ -128,6 +128,102 @@ test "batched_linear_backward_numerical" {
 }
 
 ///|
+test "ffn_backward_fused_matches_reference" {
+  let config = transformer_config(8, 8, 1, 1, 16, 4).unwrap()
+  let params = transformer_init_params(config, 123)
+  let tokens = [[0, 1, 2, 3], [1, 2, 3, 4]]
+  let mask = causal_mask(4).unwrap()
+  let (_, cache_all) = transformer_forward_with_cache(tokens, params, config, Some(mask))
+  let block_cache = cache_all.block_caches[0]
+  let block_params = params.blocks[0]
+  let dy_data = Array::makei(2 * 4 * 8, fn(i) {
+    Float::from_int((i % 13) - 6) / Float::from_int(11)
+  })
+  let dy = tensor_new(shape_new_unchecked([2, 4, 8]), dy_data).unwrap()
+
+  let grads_ref = TransformerBlockGrads::{
+    d_ln1_gamma: tensor_zeros(shape_new_unchecked([8])),
+    d_ln1_beta: tensor_zeros(shape_new_unchecked([8])),
+    d_w_q: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_w_k: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_w_v: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_w_o: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_ln2_gamma: tensor_zeros(shape_new_unchecked([8])),
+    d_ln2_beta: tensor_zeros(shape_new_unchecked([8])),
+    d_ff_w1: tensor_zeros(shape_new_unchecked([8, 16])),
+    d_ff_b1: tensor_zeros(shape_new_unchecked([16])),
+    d_ff_w2: tensor_zeros(shape_new_unchecked([16, 8])),
+    d_ff_b2: tensor_zeros(shape_new_unchecked([8])),
+  }
+  let grads_fused = TransformerBlockGrads::{
+    d_ln1_gamma: tensor_zeros(shape_new_unchecked([8])),
+    d_ln1_beta: tensor_zeros(shape_new_unchecked([8])),
+    d_w_q: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_w_k: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_w_v: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_w_o: tensor_zeros(shape_new_unchecked([8, 8])),
+    d_ln2_gamma: tensor_zeros(shape_new_unchecked([8])),
+    d_ln2_beta: tensor_zeros(shape_new_unchecked([8])),
+    d_ff_w1: tensor_zeros(shape_new_unchecked([8, 16])),
+    d_ff_b1: tensor_zeros(shape_new_unchecked([16])),
+    d_ff_w2: tensor_zeros(shape_new_unchecked([16, 8])),
+    d_ff_b2: tensor_zeros(shape_new_unchecked([8])),
+  }
+
+  let dx_ref = feed_forward_backward_reference(
+    dy,
+    block_cache,
+    block_params,
+    grads_ref,
+  )
+  let dx_fused = feed_forward_backward_fused(
+    dy,
+    block_cache,
+    block_params,
+    grads_fused,
+  )
+
+  let mut max_diff = 0.0
+  for i = 0; i < dx_ref.numel(); i = i + 1 {
+    let diff = (dx_ref.data[i] - dx_fused.data[i]).to_double().abs()
+    if diff > max_diff {
+      max_diff = diff
+    }
+  }
+  assert_true(max_diff < 1.0e-5)
+
+  let mut grad_diff = 0.0
+  for i = 0; i < grads_ref.d_ff_w1.numel(); i = i + 1 {
+    let diff = (grads_ref.d_ff_w1.data[i] - grads_fused.d_ff_w1.data[i]).to_double()
+      .abs()
+    if diff > grad_diff {
+      grad_diff = diff
+    }
+  }
+  for i = 0; i < grads_ref.d_ff_w2.numel(); i = i + 1 {
+    let diff = (grads_ref.d_ff_w2.data[i] - grads_fused.d_ff_w2.data[i]).to_double()
+      .abs()
+    if diff > grad_diff {
+      grad_diff = diff
+    }
+  }
+  for i = 0; i < grads_ref.d_ff_b1.numel(); i = i + 1 {
+    let diff = (grads_ref.d_ff_b1.data[i] - grads_fused.d_ff_b1.data[i]).to_double()
+      .abs()
+    if diff > grad_diff {
+      grad_diff = diff
+    }
+  }
+  for i = 0; i < grads_ref.d_ff_b2.numel(); i = i + 1 {
+    let diff = (grads_ref.d_ff_b2.data[i] - grads_fused.d_ff_b2.data[i]).to_double()
+      .abs()
+    if diff > grad_diff {
+      grad_diff = diff
+    }
+  }
+  assert_true(grad_diff < 1.0e-5)
+}
+
 test "cross_entropy_backward_shape" {
   let logits = tensor_new(
     shape_new_unchecked([2, 4]),

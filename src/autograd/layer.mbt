@@ -367,8 +367,6 @@ pub fn Linear::forward_relu_managed(
   let in_features = wd.dim(1)
   let out_features = wd.dim(0)
   let n_rows = xd.numel() / in_features
-  let one = Float::from_int(1)
-  let zero = Float::from_int(0)
   let total = n_rows * out_features
   let y_shape = if xd.ndim() == 2 {
     @tensor.shape_new([n_rows, out_features]).unwrap()
@@ -382,7 +380,7 @@ pub fn Linear::forward_relu_managed(
     n_rows,
     out_features,
     in_features,
-    one,
+    Float::from_int(1),
     xd.data,
     in_features,
     wd.data,
@@ -402,50 +400,27 @@ pub fn Linear::forward_relu_managed(
   let b_shape = bd.shape
   tape.push_node(result, fn(dy) {
     ignore(dy)
-    // Backward step 1: relu backward — dy and x from C-managed buffers
-    // Reuse ws.y_data as relu_dx (forward output no longer needed during backward)
-    // This avoids FixedArray::make inside the closure which triggers GC + cache pollution
-    @tensor.relu_backward_managed(ws.y_data, total)
-    // Backward step 2: dW = relu_dx^T @ x
-    @tensor.sgemm(
-      1,
-      0,
-      out_features,
-      in_features,
-      n_rows,
-      one,
-      ws.y_data,
-      out_features,
+    // Single C call: relu_backward + sgemm dW + bias_backward + sgemm dx
+    // All heavy computation stays in C, avoiding GC cache pollution between ops.
+    // Reads from C-managed g_grad_buf (upstream dy) and g_relu_pre (pre-relu values).
+    @tensor.fused_linear_relu_backward(
       xd.data,
-      in_features,
-      zero,
+      wd.data,
       ws.dw_data,
+      ws.db_data,
+      ws.dx_data,
+      n_rows,
       in_features,
+      out_features,
+      if x_needs_grad {
+        1
+      } else {
+        0
+      },
     )
     accumulate_raw(tape, w_id, ws.dw_data, w_shape)
-    // dbias = sum(relu_dx, axis=0)
-    for i = 0; i < ws.db_data.length(); i = i + 1 {
-      ws.db_data[i] = zero
-    }
-    @tensor.bias_add_backward(ws.y_data, ws.db_data, total, out_features)
     accumulate_raw(tape, bias_id, ws.db_data, b_shape)
-    // dx = relu_dx @ W (skip if x doesn't need gradient)
     if x_needs_grad {
-      @tensor.sgemm(
-        0,
-        0,
-        n_rows,
-        in_features,
-        out_features,
-        one,
-        ws.y_data,
-        out_features,
-        wd.data,
-        in_features,
-        zero,
-        ws.dx_data,
-        in_features,
-      )
       accumulate_raw(tape, x_id, ws.dx_data, x_shape)
     }
   })
@@ -543,6 +518,103 @@ pub fn Linear::forward_ws_managed(
       @tensor.grad_buf_to_fixed(ws.dx_data, dx_total)
       accumulate_raw(tape, x_id, ws.dx_data, x_shape)
     }
+  })
+}
+
+///|
+/// Fused two-layer MLP forward: y = linear2(relu(linear1(x)))
+/// Combines linear1 + relu + linear2 into a single tape node,
+/// minimizing GC cache pollution during backward by dispatching only one closure.
+/// Uses C-managed g_relu_pre for pre-relu values and a single C call for backward.
+pub fn forward_two_layer_relu(
+  linear1 : Linear,
+  linear2 : Linear,
+  x : Var,
+  ws1 : LinearWorkspace,
+  ws2 : LinearWorkspace,
+) -> Var {
+  let tape = x.tape
+  let xd = x.data().contiguous()
+  let w1d = linear1.weight.data().contiguous()
+  let b1d = linear1.bias.data().contiguous()
+  let w2d = linear2.weight.data().contiguous()
+  let b2d = linear2.bias.data().contiguous()
+  let in_features = w1d.dim(1)
+  let hidden = w1d.dim(0)
+  let out_features = w2d.dim(0)
+  let n_rows = xd.numel() / in_features
+  let one = Float::from_int(1)
+  let zero = Float::from_int(0)
+  let h_total = n_rows * hidden
+  // Layer 1 forward: y1 = x @ W1^T + b1 (store in C-managed relu_pre)
+  @tensor.sgemm_to_relu_pre(
+    0,
+    1,
+    n_rows,
+    hidden,
+    in_features,
+    one,
+    xd.data,
+    in_features,
+    w1d.data,
+    in_features,
+    h_total,
+  )
+  @tensor.bias_add_relu_pre(b1d.data, h_total, hidden)
+  // ReLU: relu(relu_pre) -> ws1.y_data AND C-managed g_relu_out
+  @tensor.relu_from_pre_cached(ws1.y_data, h_total)
+  // Layer 2 forward: y2 = a1 @ W2^T + b2
+  @tensor.sgemm(
+    0,
+    1,
+    n_rows,
+    out_features,
+    hidden,
+    one,
+    ws1.y_data,
+    hidden,
+    w2d.data,
+    hidden,
+    zero,
+    ws2.y_data,
+    out_features,
+  )
+  @tensor.bias_add_inplace(
+    ws2.y_data,
+    b2d.data,
+    n_rows * out_features,
+    out_features,
+  )
+  let y_shape = @tensor.shape_new([n_rows, out_features]).unwrap()
+  let result = @tensor.tensor_new_fixed(y_shape, ws2.y_data)
+  let w1_id = linear1.weight.id
+  let b1_id = linear1.bias.id
+  let w2_id = linear2.weight.id
+  let b2_id = linear2.bias.id
+  let w1_shape = w1d.shape
+  let b1_shape = b1d.shape
+  let w2_shape = w2d.shape
+  let b2_shape = b2d.shape
+  tape.push_node(result, fn(dy) {
+    let dyc = dy.contiguous()
+    // Single C call: linear2 backward + relu backward + linear1 backward
+    @tensor.fused_two_layer_relu_backward(
+      dyc.data,
+      xd.data,
+      w2d.data,
+      ws1.dw_data,
+      ws1.db_data,
+      ws2.dw_data,
+      ws2.db_data,
+      n_rows,
+      in_features,
+      hidden,
+      out_features,
+    )
+    accumulate_raw(tape, w1_id, ws1.dw_data, w1_shape)
+    accumulate_raw(tape, b1_id, ws1.db_data, b1_shape)
+    accumulate_raw(tape, w2_id, ws2.dw_data, w2_shape)
+    accumulate_raw(tape, b2_id, ws2.db_data, b2_shape)
   })
 }
 

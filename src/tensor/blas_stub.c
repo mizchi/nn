@@ -8,6 +8,10 @@
 #include <stdint.h>
 #include <time.h>
 #include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+uint64_t timer_clock_ns(void);
 
 void tensor_sgemm(
   int trans_a, int trans_b,
@@ -339,14 +343,23 @@ void tensor_accumulate_arena(
 // Uses posix_memalign for page-aligned memory, completely outside GC control.
 // This avoids GC old-generation cache aliasing that causes 10x relu_backward slowdown.
 
+#define CACHE_ALIGN_BYTES 4096
+#define GRAD_BUF_OFFSET_BYTES 64
+#define RELU_DX_OFFSET_BYTES 128
+#define RELU_OUT_OFFSET_BYTES 192
+
 static float* g_relu_pre = NULL;
 static int g_relu_pre_cap = 0;
+static float* g_relu_out = NULL;
+static float* g_relu_out_base = NULL;
+static int g_relu_out_cap = 0;
+static void ensure_relu_out(int n);
 
 static void ensure_relu_pre(int n) {
   if (g_relu_pre_cap >= n) return;
   free(g_relu_pre);
   // Page-aligned allocation (4096 bytes) for optimal cache behavior
-  posix_memalign((void**)&g_relu_pre, 4096, sizeof(float) * n);
+  posix_memalign((void**)&g_relu_pre, CACHE_ALIGN_BYTES, sizeof(float) * n);
   g_relu_pre_cap = n;
 }
 
@@ -379,10 +392,14 @@ void tensor_bias_add_relu_pre(const float* bias, int total, int last_dim) {
   }
 }
 
-// ReLU forward: reads from g_relu_pre, writes to output FixedArray
+// ReLU forward: reads from g_relu_pre, writes to output FixedArray.
+// Also caches output in g_relu_out for backward mask access.
 void tensor_relu_from_pre(float* out, int n) {
+  ensure_relu_out(n);
   for (int i = 0; i < n; i++) {
-    out[i] = g_relu_pre[i] > 0.0f ? g_relu_pre[i] : 0.0f;
+    float v = g_relu_pre[i] > 0.0f ? g_relu_pre[i] : 0.0f;
+    out[i] = v;
+    g_relu_out[i] = v;
   }
 }
 
@@ -396,13 +413,17 @@ void tensor_relu_backward_from_pre(const float* dy, float* dx, int n) {
 // ========== C-managed gradient pass-through buffer ==========
 // Used by linear backward to write dx, avoiding GC old-gen placement.
 
+static float* g_grad_buf_base = NULL;
 static float* g_grad_buf = NULL;
 static int g_grad_buf_cap = 0;
 
 static void ensure_grad_buf(int n) {
   if (g_grad_buf_cap >= n) return;
-  free(g_grad_buf);
-  posix_memalign((void**)&g_grad_buf, 4096, sizeof(float) * n);
+  free(g_grad_buf_base);
+  // Shift by one cache line so g_grad_buf does not alias g_relu_pre set mapping.
+  size_t alloc_size = sizeof(float) * n + GRAD_BUF_OFFSET_BYTES;
+  posix_memalign((void**)&g_grad_buf_base, CACHE_ALIGN_BYTES, alloc_size);
+  g_grad_buf = (float*)((char*)g_grad_buf_base + GRAD_BUF_OFFSET_BYTES);
   g_grad_buf_cap = n;
 }
 
@@ -447,13 +468,10 @@ static int g_relu_dx_cap = 0;
 static void ensure_relu_dx(int n) {
   if (g_relu_dx_cap >= n) return;
   free(g_relu_dx_base);
-  // Offset by 16KB from page boundary to avoid cache aliasing with
-  // g_relu_pre and g_grad_buf (both page-aligned at offset 0).
-  // On Apple M-series, L1 is 128KB 8-way → 256 sets × 64B lines.
-  // 16KB offset = 256 cache lines shift, breaking systematic set conflicts.
-  size_t alloc_size = sizeof(float) * n + 16384;
-  posix_memalign((void**)&g_relu_dx_base, 4096, alloc_size);
-  g_relu_dx = (float*)((char*)g_relu_dx_base + 16384);
+  // Keep relu_dx on a different cache-set offset from both relu_pre and grad_buf.
+  size_t alloc_size = sizeof(float) * n + RELU_DX_OFFSET_BYTES;
+  posix_memalign((void**)&g_relu_dx_base, CACHE_ALIGN_BYTES, alloc_size);
+  g_relu_dx = (float*)((char*)g_relu_dx_base + RELU_DX_OFFSET_BYTES);
   g_relu_dx_cap = n;
 }
 
@@ -500,6 +518,239 @@ void tensor_relu_dx_to_fixed(float* dst, int n) {
   for (int i = 0; i < n; i++) {
     dst[i] = g_relu_dx[i];
   }
+}
+
+// ========== C-managed relu output buffer ==========
+// Caches relu output in C-managed memory for backward pass.
+// Avoids reading GC old-gen workspace buffer during backward sgemm.
+
+static void ensure_relu_out(int n) {
+  if (g_relu_out_cap >= n) return;
+  free(g_relu_out_base);
+  // Separate offset from relu_pre/grad_buf/relu_dx to avoid set conflicts on dW2.
+  size_t alloc_size = sizeof(float) * n + RELU_OUT_OFFSET_BYTES;
+  posix_memalign((void**)&g_relu_out_base, CACHE_ALIGN_BYTES, alloc_size);
+  g_relu_out = (float*)((char*)g_relu_out_base + RELU_OUT_OFFSET_BYTES);
+  g_relu_out_cap = n;
+}
+
+// ReLU forward with caching: alias of tensor_relu_from_pre.
+void tensor_relu_from_pre_cached(float* out, int n) {
+  tensor_relu_from_pre(out, n);
+}
+
+// ========== Fused FFN backward ==========
+// Fused backward for Transformer FFN:
+//   dy -> (dW2, db2) -> GELU' -> (dW1, db1, dx)
+
+static float* g_ffn_tmp_base = NULL;
+static float* g_ffn_tmp = NULL;
+static int g_ffn_tmp_cap = 0;
+#define FFN_TMP_OFFSET_BYTES 256
+
+static void ensure_ffn_tmp(int n) {
+  if (g_ffn_tmp_cap >= n) return;
+  free(g_ffn_tmp_base);
+  size_t alloc_size = sizeof(float) * n + FFN_TMP_OFFSET_BYTES;
+  posix_memalign((void**)&g_ffn_tmp_base, CACHE_ALIGN_BYTES, alloc_size);
+  g_ffn_tmp = (float*)((char*)g_ffn_tmp_base + FFN_TMP_OFFSET_BYTES);
+  g_ffn_tmp_cap = n;
+}
+
+void tensor_fused_ffn_backward(
+    const float* dy,           // [n, d_model]
+    const float* ff_post_gelu, // [n, d_ff]
+    const float* ff_pre_gelu,  // [n, d_ff]
+    const float* ln2_out,      // [n, d_model]
+    const float* w2,           // [d_ff, d_model]
+    const float* w1,           // [d_model, d_ff]
+    float* d_w2,               // [d_ff, d_model], accum
+    float* d_b2,               // [d_model], accum
+    float* d_w1,               // [d_model, d_ff], accum
+    float* d_b1,               // [d_ff], accum
+    float* dx,                 // [n, d_model], write
+    int n,
+    int d_model,
+    int d_ff
+) {
+    const float sqrt_2_pi = 0.7978845608028654f;
+    const float coef = 0.044715f;
+    int total = n * d_ff;
+    ensure_ffn_tmp(total);
+
+    // db2 += sum_rows(dy)
+    for (int r = 0; r < n; r++) {
+        cblas_saxpy(d_model, 1.0f, dy + r * d_model, 1, d_b2, 1);
+    }
+
+    // dW2 += ff_post_gelu^T @ dy
+    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+        d_ff, d_model, n,
+        1.0f, ff_post_gelu, d_ff, dy, d_model,
+        1.0f, d_w2, d_model);
+
+    // d_gelu_out = dy @ W2^T -> g_ffn_tmp
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+        n, d_ff, d_model,
+        1.0f, dy, d_model, w2, d_model,
+        0.0f, g_ffn_tmp, d_ff);
+
+    // d_pre_gelu = d_gelu_out * gelu'(ff_pre_gelu) (in-place on g_ffn_tmp)
+    for (int i = 0; i < total; i++) {
+        float x = ff_pre_gelu[i];
+        float inner = sqrt_2_pi * (x + coef * x * x * x);
+        float t = tanhf(inner);
+        float sech2 = 1.0f - t * t;
+        float inner_deriv = sqrt_2_pi * (1.0f + 3.0f * coef * x * x);
+        float gelu_deriv = 0.5f * (1.0f + t) + 0.5f * x * sech2 * inner_deriv;
+        g_ffn_tmp[i] = g_ffn_tmp[i] * gelu_deriv;
+    }
+
+    // db1 += sum_rows(d_pre_gelu)
+    for (int r = 0; r < n; r++) {
+        cblas_saxpy(d_ff, 1.0f, g_ffn_tmp + r * d_ff, 1, d_b1, 1);
+    }
+
+    // dW1 += ln2_out^T @ d_pre_gelu
+    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+        d_model, d_ff, n,
+        1.0f, ln2_out, d_model, g_ffn_tmp, d_ff,
+        1.0f, d_w1, d_ff);
+
+    // dx = d_pre_gelu @ W1^T
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+        n, d_model, d_ff,
+        1.0f, g_ffn_tmp, d_ff, w1, d_ff,
+        0.0f, dx, d_model);
+}
+
+// ========== Fused Two-Layer MLP backward ==========
+// Performs entire 2-layer MLP backward in a single C call:
+//   linear2 backward → relu backward → linear1 backward
+// Uses C-managed g_grad_buf, g_relu_pre, g_relu_dx as intermediates.
+// This minimizes GC interaction to a single closure dispatch.
+
+static uint64_t g_fused2_t_dw2 = 0;
+static uint64_t g_fused2_t_db2 = 0;
+static uint64_t g_fused2_t_da1 = 0;
+static uint64_t g_fused2_t_relu = 0;
+static uint64_t g_fused2_t_dw1_db1 = 0;
+
+void tensor_fused_two_layer_relu_backward(
+    const float* dy,         // [batch, output_dim] upstream gradient
+    const float* x_data,     // [batch, input_dim] original input
+    const float* w2_data,    // [output_dim, hidden_dim] layer2 weight
+    float* dw1,              // [hidden_dim, input_dim] output: layer1 weight grad
+    float* db1,              // [hidden_dim] output: layer1 bias grad
+    float* dw2,              // [output_dim, hidden_dim] output: layer2 weight grad
+    float* db2,              // [output_dim] output: layer2 bias grad
+    int batch, int input_dim, int hidden_dim, int output_dim
+) {
+    int a1_total = batch * hidden_dim;
+    uint64_t t0 = timer_clock_ns();
+
+    // --- Linear2 backward ---
+    // dW2 = dy^T @ a1 (reads from C-managed g_relu_out, NOT MoonBit old-gen)
+    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+        output_dim, hidden_dim, batch,
+        1.0f, dy, output_dim, g_relu_out, hidden_dim,
+        0.0f, dw2, hidden_dim);
+    uint64_t t1 = timer_clock_ns();
+
+    // db2 = sum(dy, axis=0)
+    memset(db2, 0, output_dim * sizeof(float));
+    for (int r = 0; r < batch; r++) {
+        cblas_saxpy(output_dim, 1.0f, dy + r * output_dim, 1, db2, 1);
+    }
+    uint64_t t2 = timer_clock_ns();
+
+    // d_a1 = dy @ W2 → g_grad_buf
+    ensure_grad_buf(a1_total);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+        batch, hidden_dim, output_dim,
+        1.0f, dy, output_dim, w2_data, hidden_dim,
+        0.0f, g_grad_buf, hidden_dim);
+    uint64_t t3 = timer_clock_ns();
+
+    // --- ReLU backward ---
+    // d_y1 = d_a1 * (relu_pre > 0) → g_relu_dx
+    ensure_relu_dx(a1_total);
+    for (int i = 0; i < a1_total; i++) {
+        g_relu_dx[i] = g_relu_out[i] > 0.0f ? g_grad_buf[i] : 0.0f;
+    }
+    uint64_t t4 = timer_clock_ns();
+
+    // --- Linear1 backward ---
+    // dW1 = d_y1^T @ x
+    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+        hidden_dim, input_dim, batch,
+        1.0f, g_relu_dx, hidden_dim, x_data, input_dim,
+        0.0f, dw1, input_dim);
+
+    // db1 = sum(d_y1, axis=0)
+    memset(db1, 0, hidden_dim * sizeof(float));
+    for (int r = 0; r < batch; r++) {
+        cblas_saxpy(hidden_dim, 1.0f, g_relu_dx + r * hidden_dim, 1, db1, 1);
+    }
+    uint64_t t5 = timer_clock_ns();
+
+    g_fused2_t_dw2 = t1 - t0;
+    g_fused2_t_db2 = t2 - t1;
+    g_fused2_t_da1 = t3 - t2;
+    g_fused2_t_relu = t4 - t3;
+    g_fused2_t_dw1_db1 = t5 - t4;
+}
+
+// Last fused two-layer backward profile:
+// [dw2, db2, da1, relu, dw1_db1] in nanoseconds.
+void tensor_fused_two_layer_last_profile(uint64_t* out5) {
+    out5[0] = g_fused2_t_dw2;
+    out5[1] = g_fused2_t_db2;
+    out5[2] = g_fused2_t_da1;
+    out5[3] = g_fused2_t_relu;
+    out5[4] = g_fused2_t_dw1_db1;
+}
+
+// ========== Fused Linear+ReLU backward ==========
+// Performs entire backward pass in C, avoiding GC interaction between operations.
+// Reads from C-managed g_grad_buf (upstream dy) and g_relu_pre (pre-relu values).
+// Writes to MoonBit FixedArrays for dw, db, and optionally dx.
+void tensor_fused_linear_relu_backward(
+    const float* x_data,    // [n_rows, in_features] — input to this linear layer
+    const float* w_data,    // [out_features, in_features] — weight matrix
+    float* dw_data,         // [out_features, in_features] — output: gradient for weight
+    float* db_data,         // [out_features] — output: gradient for bias
+    float* dx_data,         // [n_rows, in_features] — output: gradient for input (if compute_dx)
+    int n_rows, int in_features, int out_features,
+    int compute_dx
+) {
+    int total = n_rows * out_features;
+
+    // Step 1: relu backward — reads g_grad_buf + g_relu_pre, writes g_relu_dx
+    ensure_relu_dx(total);
+    for (int i = 0; i < total; i++) {
+        g_relu_dx[i] = g_relu_pre[i] > 0.0f ? g_grad_buf[i] : 0.0f;
+    }
+
+    // Step 2: dW = relu_dx^T @ x
+    cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans,
+        out_features, in_features, n_rows,
+        1.0f, g_relu_dx, out_features, x_data, in_features,
+        0.0f, dw_data, in_features);
+
+    // Step 3: dbias = sum(relu_dx, axis=0)
+    memset(db_data, 0, out_features * sizeof(float));
+    for (int r = 0; r < n_rows; r++) {
+        cblas_saxpy(out_features, 1.0f, g_relu_dx + r * out_features, 1, db_data, 1);
+    }
+
+    // Step 4: dx = relu_dx @ W (if needed)
+    if (compute_dx) {
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
+            n_rows, in_features, out_features,
+            1.0f, g_relu_dx, out_features, w_data, in_features,
+            0.0f, dx_data, in_features);
+    }
 }
 
 uint64_t timer_clock_ns(void) {

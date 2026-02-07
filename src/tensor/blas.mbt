@@ -671,3 +671,165 @@ pub fn bias_add_bwd_relu_dx(
 ) -> Unit {
   native_bias_add_bwd_relu_dx(db, total, last_dim)
 }
+
+// ========== Fused FFN backward ==========
+
+///|
+#borrow(dy, ff_post_gelu, ff_pre_gelu, ln2_out, w2, w1, d_w2, d_b2, d_w1, d_b1, dx)
+extern "C" fn native_fused_ffn_backward(
+  dy : FixedArray[Float],
+  ff_post_gelu : FixedArray[Float],
+  ff_pre_gelu : FixedArray[Float],
+  ln2_out : FixedArray[Float],
+  w2 : FixedArray[Float],
+  w1 : FixedArray[Float],
+  d_w2 : FixedArray[Float],
+  d_b2 : FixedArray[Float],
+  d_w1 : FixedArray[Float],
+  d_b1 : FixedArray[Float],
+  dx : FixedArray[Float],
+  n : Int,
+  d_model : Int,
+  d_ff : Int,
+) -> Unit = "tensor_fused_ffn_backward"
+
+///|
+/// Fused FFN backward for Transformer block:
+/// dy -> (d_w2, d_b2) -> GELU backward -> (d_w1, d_b1, dx).
+/// Accumulates gradients into d_w1/d_b1/d_w2/d_b2, writes dx.
+pub fn fused_ffn_backward(
+  dy : FixedArray[Float],
+  ff_post_gelu : FixedArray[Float],
+  ff_pre_gelu : FixedArray[Float],
+  ln2_out : FixedArray[Float],
+  w2 : FixedArray[Float],
+  w1 : FixedArray[Float],
+  d_w2 : FixedArray[Float],
+  d_b2 : FixedArray[Float],
+  d_w1 : FixedArray[Float],
+  d_b1 : FixedArray[Float],
+  dx : FixedArray[Float],
+  n : Int,
+  d_model : Int,
+  d_ff : Int,
+) -> Unit {
+  native_fused_ffn_backward(
+    dy,
+    ff_post_gelu,
+    ff_pre_gelu,
+    ln2_out,
+    w2,
+    w1,
+    d_w2,
+    d_b2,
+    d_w1,
+    d_b1,
+    dx,
+    n,
+    d_model,
+    d_ff,
+  )
+}
+
+// ========== Fused Two-Layer MLP backward ==========
+
+///|
+#borrow(out)
+extern "C" fn native_relu_from_pre_cached(
+  out : FixedArray[Float],
+  n : Int,
+) -> Unit = "tensor_relu_from_pre_cached"
+
+///|
+/// ReLU forward with caching: reads from C-managed relu_pre, writes to both out AND
+/// C-managed relu_out. The cached relu_out is used in backward to avoid reading GC old-gen.
+pub fn relu_from_pre_cached(out : FixedArray[Float], n : Int) -> Unit {
+  native_relu_from_pre_cached(out, n)
+}
+
+///|
+#borrow(dy, x_data, w2_data, dw1, db1, dw2, db2)
+extern "C" fn native_fused_two_layer_relu_backward(
+  dy : FixedArray[Float],
+  x_data : FixedArray[Float],
+  w2_data : FixedArray[Float],
+  dw1 : FixedArray[Float],
+  db1 : FixedArray[Float],
+  dw2 : FixedArray[Float],
+  db2 : FixedArray[Float],
+  batch : Int,
+  input_dim : Int,
+  hidden_dim : Int,
+  output_dim : Int,
+) -> Unit = "tensor_fused_two_layer_relu_backward"
+
+///|
+/// Fused 2-layer MLP backward: linear2 backward + relu backward + linear1 backward
+/// all in a single C call. Reads relu output from C-managed g_relu_out (not MoonBit old-gen).
+pub fn fused_two_layer_relu_backward(
+  dy : FixedArray[Float],
+  x_data : FixedArray[Float],
+  w2_data : FixedArray[Float],
+  dw1 : FixedArray[Float],
+  db1 : FixedArray[Float],
+  dw2 : FixedArray[Float],
+  db2 : FixedArray[Float],
+  batch : Int,
+  input_dim : Int,
+  hidden_dim : Int,
+  output_dim : Int,
+) -> Unit {
+  native_fused_two_layer_relu_backward(
+    dy, x_data, w2_data, dw1, db1, dw2, db2, batch, input_dim, hidden_dim, output_dim,
+  )
+}
+
+///|
+#borrow(out5)
+extern "C" fn native_fused_two_layer_last_profile(
+  out5 : FixedArray[UInt64],
+) -> Unit = "tensor_fused_two_layer_last_profile"
+
+///|
+/// Get last fused_two_layer backward profile in nanoseconds:
+/// [dw2, db2, da1, relu, dw1_db1]
+pub fn fused_two_layer_last_profile(out5 : FixedArray[UInt64]) -> Unit {
+  native_fused_two_layer_last_profile(out5)
+}
+
+// ========== Fused Linear+ReLU backward ==========
+
+///|
+#borrow(x_data, w_data, dw_data, db_data, dx_data)
+extern "C" fn native_fused_linear_relu_backward(
+  x_data : FixedArray[Float],
+  w_data : FixedArray[Float],
+  dw_data : FixedArray[Float],
+  db_data : FixedArray[Float],
+  dx_data : FixedArray[Float],
+  n_rows : Int,
+  in_features : Int,
+  out_features : Int,
+  compute_dx : Int,
+) -> Unit = "tensor_fused_linear_relu_backward"
+
+///|
+/// Fused Linear+ReLU backward: performs relu_backward + sgemm dW + bias_backward + sgemm dx
+/// all in a single C call. Reads from C-managed g_grad_buf and g_relu_pre.
+/// Avoids GC interaction between heavy compute operations.
+pub fn fused_linear_relu_backward(
+  x_data : FixedArray[Float],
+  w_data : FixedArray[Float],
+  dw_data : FixedArray[Float],
+  db_data : FixedArray[Float],
+  dx_data : FixedArray[Float],
+  n_rows : Int,
+  in_features : Int,
+  out_features : Int,
+  compute_dx : Int,
+) -> Unit {
+  native_fused_linear_relu_backward(
+    x_data, w_data, dw_data, db_data, dx_data, n_rows, in_features, out_features,
+    compute_dx,
+  )
+}

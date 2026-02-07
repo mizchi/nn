@@ -16,6 +16,6 @@ options(
       "output": "build-stamps/wgpu_native_build.stamp",
     },
   ],
-  "supported-targets": [ "js", "native" ],
-  targets: { "wgpu_js.mbt": [ "js" ], "wgpu_native.mbt": [ "native" ] },
+  "supported-targets": [ "native" ],
+  targets: { "wgpu_native.mbt": [ "native" ] },
 )

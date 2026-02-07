@@ -1,9 +1,0 @@
-import {
-  "mizchi/nn/tensor" as @tensor,
-  "moonbitlang/core/math" as @math,
-}
-
-options(
-  link: { "native": { "cc-link-flags": "-framework Accelerate" } },
-  targets: { },
-)

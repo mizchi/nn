@@ -1,0 +1,41 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/nn/native"
+
+import {
+  "mizchi/nn",
+}
+
+// Values
+pub fn configure_surface(Surface, @nn.Device, SurfaceConfiguration) -> Result[Unit, @nn.WgpuError]
+
+pub fn create_surface_from_window(@nn.Instance, NativeWindow) -> Result[Surface, @nn.WgpuError]
+
+pub fn get_current_texture(Surface) -> Result[@nn.Texture, @nn.WgpuError]
+
+pub fn present(Surface) -> Result[Unit, @nn.WgpuError]
+
+pub fn surface_configuration_default(@nn.TextureFormat, Int, Int) -> SurfaceConfiguration
+
+// Errors
+
+// Types and methods
+#external
+pub type NativeWindow
+
+#external
+pub type Surface
+
+pub struct SurfaceConfiguration {
+  format : @nn.TextureFormat
+  width : Int
+  height : Int
+  usage : Int
+  label : String?
+}
+pub impl Eq for SurfaceConfiguration
+pub impl Show for SurfaceConfiguration
+
+// Type aliases
+
+// Traits
+

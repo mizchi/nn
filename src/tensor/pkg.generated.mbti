@@ -4,6 +4,10 @@ package "mizchi/nn/tensor"
 // Values
 pub fn accumulate_inplace(FixedArray[Float], FixedArray[Float], Int) -> Unit
 
+pub fn adamw_config_default(Float) -> AdamwConfig
+
+pub fn adamw_step_inplace(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Float, Float, Float, Float, Float, Float, Float) -> Unit
+
 pub fn add_matrix_inplace(FixedArray[Float], FixedArray[Float], Int, Int) -> Unit
 
 pub fn add_matrix_inplace_offset(FixedArray[Float], Int, FixedArray[Float], Int, Int) -> Unit
@@ -13,6 +17,12 @@ pub fn add_positional_embedding(Tensor, Tensor) -> Tensor
 pub fn attention(Tensor, Tensor, Tensor, Tensor?) -> Result[Tensor, String]
 
 pub fn attention_backward_batch(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Int, Int, Float) -> Unit
+
+pub fn attention_backward_batch_interleaved(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Int, Int, Int, Float) -> Unit
+
+pub fn attention_forward_batch_interleaved(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Int, Int, Int, Float) -> Unit
+
+pub fn attention_forward_batch_interleaved_masked(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Int, Int, Int, Float) -> Unit
 
 pub fn attention_head_backward(FixedArray[Float], Int, FixedArray[Float], Int, FixedArray[Float], Int, FixedArray[Float], Int, FixedArray[Float], FixedArray[Float], Int, FixedArray[Float], Int, FixedArray[Float], Int, Int, Int, Float) -> Unit
 
@@ -71,6 +81,10 @@ pub fn grad_buf_to_fixed(FixedArray[Float], Int) -> Unit
 pub fn layer_norm_backward(Tensor, Tensor, FixedArray[Float], FixedArray[Float], Tensor, Tensor, Tensor) -> Tensor
 
 pub fn layer_norm_with_cache(Tensor, Tensor, Tensor, Float) -> (Tensor, FixedArray[Float], FixedArray[Float])
+
+pub fn mha_forward_batch_interleaved(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Int, Int, Int, Float) -> Unit
+
+pub fn mha_forward_batch_interleaved_masked(FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], FixedArray[Float], Int, Int, Int, Int, Float) -> Unit
 
 pub fn multi_head_attention(Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Int, Tensor?) -> Result[Tensor, String]
 
@@ -180,17 +194,41 @@ pub fn transformer_block(Tensor, TransformerBlockParams, TransformerConfig, Tens
 
 pub fn transformer_config(Int, Int, Int, Int, Int, Int) -> Result[TransformerConfig, String]
 
+pub fn transformer_eval_lm_ids(Array[Int], TransformerParams, TransformerConfig, Int, Int, Int) -> (Float, Float)
+
 pub fn transformer_forward(Array[Array[Int]], TransformerParams, TransformerConfig, Tensor?) -> Result[Tensor, String]
 
 pub fn transformer_forward_with_cache(Array[Array[Int]], TransformerParams, TransformerConfig, Tensor?) -> (Tensor, TransformerCache)
 
 pub fn transformer_init_params(TransformerConfig, Int) -> TransformerParams
 
+pub fn transformer_lm_checkpoint_from_bytes(TransformerConfig, Bytes) -> Result[TransformerLmCheckpoint, String]
+
+pub fn transformer_lm_checkpoint_to_bytes(TransformerConfig, TransformerParams, TransformerAdamwState?, Int) -> Bytes
+
 pub fn transformer_train(String, TransformerConfig, Int, Float, Int) -> Array[Float]
 
 pub fn transformer_train_lm_profile_steps(String, TransformerConfig, Int, Int, Int, Float, Int) -> Array[TransformerLmStepMetric]
 
+pub fn transformer_train_lm_profile_steps_adamw(String, TransformerConfig, Int, Int, Int, Float, Int) -> Array[TransformerLmStepMetric]
+
+pub fn transformer_train_lm_profile_steps_ids(Array[Int], TransformerConfig, Int, Int, Int, Float, Int) -> Array[TransformerLmStepMetric]
+
+pub fn transformer_train_lm_profile_steps_ids_adamw(Array[Int], TransformerConfig, Int, Int, Int, Float, Int) -> Array[TransformerLmStepMetric]
+
+pub fn transformer_train_lm_profile_steps_ids_inplace(Array[Int], TransformerParams, TransformerGrads, TransformerConfig, Int, Int, Int, Float, Int) -> Array[TransformerLmStepMetric]
+
+pub fn transformer_train_lm_profile_steps_ids_inplace_adamw(Array[Int], TransformerParams, TransformerGrads, TransformerAdamwState, TransformerConfig, Int, Int, Int, Float, Int) -> Array[TransformerLmStepMetric]
+
 pub fn transformer_train_lm_steps(String, TransformerConfig, Int, Int, Float, Int) -> Array[Float]
+
+pub fn transformer_train_lm_steps_adamw(String, TransformerConfig, Int, Int, Float, Int) -> Array[Float]
+
+pub fn transformer_train_lm_steps_ids(Array[Int], TransformerConfig, Int, Int, Float, Int) -> Array[Float]
+
+pub fn transformer_train_lm_steps_ids_adamw(Array[Int], TransformerConfig, Int, Int, Float, Int) -> Array[Float]
+
+pub fn transformer_zero_adamw_state(TransformerConfig) -> TransformerAdamwState
 
 pub fn transformer_zero_grads(TransformerConfig) -> TransformerGrads
 
@@ -222,9 +260,21 @@ pub fn vit_zero_grads(VitConfig) -> VitGrads
 
 pub fn vit_zero_grads_inplace(VitGrads) -> Unit
 
+pub fn zero_inplace(FixedArray[Float], Int) -> Unit
+
 // Errors
 
 // Types and methods
+pub struct AdamwConfig {
+  lr : Float
+  beta1 : Float
+  beta2 : Float
+  eps : Float
+  weight_decay : Float
+}
+pub impl Eq for AdamwConfig
+pub impl Show for AdamwConfig
+
 pub struct CharTokenizer {
   chars : Array[Char]
 }
@@ -267,6 +317,14 @@ pub fn Tensor::to_array(Self) -> Array[Float]
 pub fn Tensor::to_string(Self) -> String
 pub fn Tensor::transpose(Self, Int, Int) -> Result[Self, String]
 pub impl Show for Tensor
+
+pub struct TransformerAdamwState {
+  mut step : Int
+  mut beta1_pow : Float
+  mut beta2_pow : Float
+  m : TransformerGrads
+  v : TransformerGrads
+}
 
 pub struct TransformerBlockCache {
   x_input : Tensor
@@ -344,6 +402,12 @@ pub struct TransformerGrads {
   d_ln_final_gamma : Tensor
   d_ln_final_beta : Tensor
   d_lm_head : Tensor
+}
+
+pub struct TransformerLmCheckpoint {
+  params : TransformerParams
+  adamw_state : TransformerAdamwState?
+  global_step : Int
 }
 
 pub struct TransformerLmStepMetric {

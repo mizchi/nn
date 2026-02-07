@@ -1,0 +1,24 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/nn/examples/mnist-infer"
+
+// Values
+
+// Errors
+
+// Types and methods
+type EvalBackend
+
+type EvalReport
+
+type InferArgs
+pub impl Eq for InferArgs
+pub impl Show for InferArgs
+
+type InferBackend
+pub impl Eq for InferBackend
+pub impl Show for InferBackend
+
+// Type aliases
+
+// Traits
+

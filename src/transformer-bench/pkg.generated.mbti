@@ -1,0 +1,41 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/nn/transformer-bench"
+
+// Values
+pub async fn load_token_ids_from_shards(LmTokenShardsMeta, Int?, Int?) -> Result[Array[Int], String]
+
+pub async fn load_token_shards_meta(String) -> Result[LmTokenShardsMeta, String]
+
+// Errors
+
+// Types and methods
+type BenchArgs
+pub impl Eq for BenchArgs
+pub impl Show for BenchArgs
+
+type BenchCorpus
+pub impl Eq for BenchCorpus
+pub impl Show for BenchCorpus
+
+pub struct LmTokenShard {
+  file : String
+  tokens : Int
+}
+pub impl Eq for LmTokenShard
+pub impl Show for LmTokenShard
+
+pub struct LmTokenShardsMeta {
+  meta_path : String
+  base_dir : String
+  dtype : String
+  n_vocab : Int
+  total_tokens : Int
+  shards : Array[LmTokenShard]
+}
+pub impl Eq for LmTokenShardsMeta
+pub impl Show for LmTokenShardsMeta
+
+// Type aliases
+
+// Traits
+

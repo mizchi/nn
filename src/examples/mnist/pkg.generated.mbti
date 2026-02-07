@@ -1,0 +1,30 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/nn/examples/mnist"
+
+import {
+  "mizchi/nn/nn",
+}
+
+// Values
+pub async fn mnist_load_dataset(String, String) -> Result[MnistDataset, @nn.MnistError]
+
+pub async fn mnist_load_images(String) -> Result[@nn.MnistImages, @nn.MnistError]
+
+pub async fn mnist_load_labels(String) -> Result[@nn.MnistLabels, @nn.MnistError]
+
+pub async fn mnist_load_mlp_dataset(String, String, Int?) -> Result[@nn.MlpDataset, @nn.MnistError]
+
+// Errors
+
+// Types and methods
+pub struct MnistDataset {
+  images : @nn.MnistImages
+  labels : @nn.MnistLabels
+}
+pub impl Eq for MnistDataset
+pub impl Show for MnistDataset
+
+// Type aliases
+
+// Traits
+

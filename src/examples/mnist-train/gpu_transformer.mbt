@@ -232,7 +232,7 @@ async fn gpu_transformer_forward(
       }
     }
   }
-  gpu_write_f32(queue, mask_buf, mask_data)
+  gpu_write_f32(queue, mask_buf, FixedArray::from_array(mask_data))
   gpu_write_f32(
     queue,
     ln_final_g_buf,
@@ -372,7 +372,7 @@ async fn gpu_transformer_forward(
       }
     }
   }
-  gpu_write_f32(queue, pos_slice_buf, pos_slice)
+  gpu_write_f32(queue, pos_slice_buf, FixedArray::from_array(pos_slice))
   let add_layout = match gpu_create_layout(device, stage, [ro, ro, rw]) {
     Ok(v) => v
     Err(err) => return Err(err)
@@ -970,14 +970,14 @@ fn gpu_create_buf(
 fn gpu_write_f32(
   queue : @wgpu.Queue,
   buf : @wgpu.Buffer,
-  data : Array[Float],
+  data : FixedArray[Float],
 ) -> Unit {
   ignore(
     @wgpu.queue_write_buffer(
       queue,
       buf,
       0,
-      float_array_to_bytes(data).to_array(),
+      float_array_to_bytes(Array::from_fixed_array(data)).to_array(),
     ),
   )
 }
@@ -1131,7 +1131,10 @@ async fn gpu_transformer_test() -> Unit {
     }
   }
   let cpu_data = cpu_logits.contiguous().data
-  println("CPU logits (first 8): " + format_floats(cpu_data, 8))
+  println(
+    "CPU logits (first 8): " +
+    format_floats(Array::from_fixed_array(cpu_data), 8),
+  )
   // GPU forward pass
   let workgroup_size = 64
   let gpu_logits = match

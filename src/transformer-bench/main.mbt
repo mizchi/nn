@@ -24,6 +24,11 @@ struct BenchArgs {
   checkpoint_path : String?
   resume_checkpoint : String?
   log_jsonl : String?
+  preview_prompt_ids : Array[Int]?
+  preview_prompt_text : String?
+  preview_new_tokens : Int
+  preview_temperature : Float?
+  preview_seed : Int
 } derive(Show, Eq)
 
 ///|
@@ -53,6 +58,11 @@ fn bench_args_default() -> BenchArgs {
     checkpoint_path: None,
     resume_checkpoint: None,
     log_jsonl: None,
+    preview_prompt_ids: None,
+    preview_prompt_text: None,
+    preview_new_tokens: 32,
+    preview_temperature: None,
+    preview_seed: 42,
   }
 }
 
@@ -89,6 +99,26 @@ fn parse_positive_float(name : String, value : String) -> Result[Float, String] 
 }
 
 ///|
+fn parse_prompt_ids_csv(value : String) -> Result[Array[Int], String] {
+  let ids : Array[Int] = []
+  for part in value.split(",") {
+    let token = part.to_string().trim().to_string()
+    if token.length() == 0 {
+      return Err("invalid preview-prompt-ids: empty token")
+    }
+    let id = match parse_nonnegative_int("preview-prompt-ids", token) {
+      Ok(v) => v
+      Err(msg) => return Err(msg)
+    }
+    ids.push(id)
+  }
+  if ids.length() == 0 {
+    return Err("preview-prompt-ids must not be empty")
+  }
+  Ok(ids)
+}
+
+///|
 fn print_usage(program : String) -> Unit {
   println("Usage: " + program + " [options]")
   println("  --steps N         measured steps (default 40)")
@@ -115,6 +145,13 @@ fn print_usage(program : String) -> Unit {
   println("  --checkpoint-path P checkpoint file path")
   println("  --resume-checkpoint P resume from checkpoint file")
   println("  --log-jsonl P     append training/eval events as JSONL")
+  println("  --preview-prompt-ids CSV run generation preview from token ids")
+  println("  --preview-prompt-text S run generation preview from prompt text")
+  println(
+    "  --preview-new-tokens N max generated tokens for preview (default 32)",
+  )
+  println("  --preview-temperature X sampling temperature (>0, default greedy)")
+  println("  --preview-seed N  sampling RNG seed for preview (default 42)")
 }
 
 ///|
@@ -144,6 +181,11 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let mut checkpoint_path : String? = default.checkpoint_path
   let mut resume_checkpoint : String? = default.resume_checkpoint
   let mut log_jsonl : String? = default.log_jsonl
+  let mut preview_prompt_ids : Array[Int]? = default.preview_prompt_ids
+  let mut preview_prompt_text : String? = default.preview_prompt_text
+  let mut preview_new_tokens = default.preview_new_tokens
+  let mut preview_temperature : Float? = default.preview_temperature
+  let mut preview_seed = default.preview_seed
   let mut i = 1
   while i < args.length() {
     let arg = args[i]
@@ -620,8 +662,115 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       i = i + 1
       continue
     }
+    if arg == "--preview-prompt-ids" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --preview-prompt-ids")
+      }
+      match parse_prompt_ids_csv(args[i + 1]) {
+        Ok(v) => preview_prompt_ids = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--preview-prompt-ids=") {
+      let view = arg.sub(start=21) catch {
+        _ => return Err("invalid --preview-prompt-ids value")
+      }
+      match parse_prompt_ids_csv(view.to_string()) {
+        Ok(v) => preview_prompt_ids = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--preview-prompt-text" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --preview-prompt-text")
+      }
+      preview_prompt_text = Some(args[i + 1])
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--preview-prompt-text=") {
+      let view = arg.sub(start=22) catch {
+        _ => return Err("invalid --preview-prompt-text value")
+      }
+      preview_prompt_text = Some(view.to_string())
+      i = i + 1
+      continue
+    }
+    if arg == "--preview-new-tokens" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --preview-new-tokens")
+      }
+      match parse_positive_int("preview-new-tokens", args[i + 1]) {
+        Ok(v) => preview_new_tokens = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--preview-new-tokens=") {
+      let view = arg.sub(start=21) catch {
+        _ => return Err("invalid --preview-new-tokens value")
+      }
+      match parse_positive_int("preview-new-tokens", view.to_string()) {
+        Ok(v) => preview_new_tokens = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--preview-temperature" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --preview-temperature")
+      }
+      match parse_positive_float("preview-temperature", args[i + 1]) {
+        Ok(v) => preview_temperature = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--preview-temperature=") {
+      let view = arg.sub(start=22) catch {
+        _ => return Err("invalid --preview-temperature value")
+      }
+      match parse_positive_float("preview-temperature", view.to_string()) {
+        Ok(v) => preview_temperature = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--preview-seed" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --preview-seed")
+      }
+      match parse_nonnegative_int("preview-seed", args[i + 1]) {
+        Ok(v) => preview_seed = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--preview-seed=") {
+      let view = arg.sub(start=15) catch {
+        _ => return Err("invalid --preview-seed value")
+      }
+      match parse_nonnegative_int("preview-seed", view.to_string()) {
+        Ok(v) => preview_seed = v
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
     return Err("unknown option: " + arg)
   }
+  let has_preview_prompt_ids = preview_prompt_ids is Some(_)
+  let has_preview_prompt_text = preview_prompt_text is Some(_)
+  let preview_mode = has_preview_prompt_ids || has_preview_prompt_text
   if shard_meta is None {
     match shard_max_shards {
       Some(_) => return Err("--shard-max-shards requires --shard-meta")
@@ -648,13 +797,49 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       }
     }
     None =>
-      if eval_every > 0 ||
-        checkpoint_every > 0 ||
-        checkpoint_path is Some(_) ||
-        resume_checkpoint is Some(_) ||
-        log_jsonl is Some(_) {
+      if !preview_mode &&
+        (
+          eval_every > 0 ||
+          checkpoint_every > 0 ||
+          checkpoint_path is Some(_) ||
+          resume_checkpoint is Some(_) ||
+          log_jsonl is Some(_)
+        ) {
         return Err("--eval/--checkpoint options require --long-steps")
       }
+  }
+  if preview_mode {
+    if has_preview_prompt_ids && has_preview_prompt_text {
+      return Err(
+        "--preview-prompt-ids and --preview-prompt-text are mutually exclusive",
+      )
+    }
+    if resume_checkpoint is None {
+      if has_preview_prompt_ids {
+        return Err("--preview-prompt-ids requires --resume-checkpoint")
+      } else {
+        return Err("--preview-prompt-text requires --resume-checkpoint")
+      }
+    }
+    if long_steps is Some(_) {
+      return Err("--preview mode cannot be used with --long-steps")
+    }
+    if sweep {
+      return Err("--preview mode cannot be used with --sweep")
+    }
+    if eval_every > 0 ||
+      checkpoint_every > 0 ||
+      checkpoint_path is Some(_) ||
+      log_jsonl is Some(_) {
+      return Err(
+        "--preview mode does not support --eval/--checkpoint/--log-jsonl options",
+      )
+    }
+    if has_preview_prompt_text && shard_meta is Some(_) {
+      return Err(
+        "--preview-prompt-text currently requires default corpus (no --shard-meta)",
+      )
+    }
   }
   Ok({
     steps,
@@ -681,6 +866,11 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     checkpoint_path,
     resume_checkpoint,
     log_jsonl,
+    preview_prompt_ids,
+    preview_prompt_text,
+    preview_new_tokens,
+    preview_temperature,
+    preview_seed,
   })
 }
 
@@ -742,6 +932,29 @@ async fn load_bench_corpus(cfg : BenchArgs) -> Result[BenchCorpus, String] {
         vocab: tokenizer.vocab_size(),
         source: "default-corpus",
       })
+    }
+  }
+}
+
+///|
+async fn resolve_preview_vocab(
+  cfg : BenchArgs,
+) -> Result[(Int, String), String] {
+  match cfg.shard_meta {
+    Some(meta_path) => {
+      let meta = match load_token_shards_meta(meta_path) {
+        Ok(v) => v
+        Err(msg) => return Err(msg)
+      }
+      if meta.n_vocab <= 0 {
+        return Err("invalid n_vocab in shard meta: " + meta.n_vocab.to_string())
+      }
+      Ok((meta.n_vocab, "shards(" + meta_path + ")"))
+    }
+    None => {
+      let text = make_default_corpus(cfg.repeat)
+      let tokenizer = @tensor.char_tokenizer_from_text(text)
+      Ok((tokenizer.vocab_size(), "default-corpus"))
     }
   }
 }
@@ -845,6 +1058,27 @@ fn jsonl_checkpoint_event_line(
     "latest_path": Json::string(latest_path),
     "step_path": Json::string(step_path),
   }).stringify()
+}
+
+///|
+fn tail_ids(ids : Array[Int], start : Int) -> Array[Int] {
+  let out : Array[Int] = []
+  if start < 0 || start >= ids.length() {
+    return out
+  }
+  for i = start; i < ids.length(); i = i + 1 {
+    out.push(ids[i])
+  }
+  out
+}
+
+///|
+fn ids_to_json(ids : Array[Int]) -> Json {
+  let arr : Array[Json] = []
+  for i = 0; i < ids.length(); i = i + 1 {
+    arr.push(Json::number(ids[i].to_double()))
+  }
+  Json::array(arr)
 }
 
 ///|
@@ -968,6 +1202,127 @@ async fn read_checkpoint(
     Err(err) => return Err("checkpoint read error: " + err.to_string())
   }
   @tensor.transformer_lm_checkpoint_from_bytes(config, data.binary())
+}
+
+///|
+async fn run_preview(cfg : BenchArgs) -> Unit {
+  let checkpoint_path = match cfg.resume_checkpoint {
+    Some(v) => v
+    None => {
+      println("error: --resume-checkpoint is required in preview mode")
+      return
+    }
+  }
+  let (vocab, source) = match resolve_preview_vocab(cfg) {
+    Ok(v) => v
+    Err(msg) => {
+      println("error: " + msg)
+      return
+    }
+  }
+  let tokenizer = match cfg.shard_meta {
+    Some(_) => None
+    None =>
+      Some(@tensor.char_tokenizer_from_text(make_default_corpus(cfg.repeat)))
+  }
+  let prompt_ids = match cfg.preview_prompt_ids {
+    Some(v) => v
+    None =>
+      match cfg.preview_prompt_text {
+        Some(text) =>
+          match tokenizer {
+            Some(tok) => tok.encode(text)
+            None => {
+              println(
+                "error: --preview-prompt-text requires default corpus tokenizer",
+              )
+              return
+            }
+          }
+        None => {
+          println(
+            "error: --preview-prompt-ids or --preview-prompt-text is required in preview mode",
+          )
+          return
+        }
+      }
+  }
+  if prompt_ids.length() == 0 {
+    println("error: prompt produced zero token ids")
+    return
+  }
+  let config = @tensor.transformer_config(
+    vocab,
+    cfg.d_model,
+    cfg.num_heads,
+    cfg.num_layers,
+    cfg.d_ff,
+    cfg.seq_len,
+  ).unwrap()
+  if prompt_ids.length() >= config.max_seq_len {
+    println(
+      "error: prompt length must be < seq-len (" +
+      config.max_seq_len.to_string() +
+      ")",
+    )
+    return
+  }
+  let restored = match read_checkpoint(checkpoint_path, config) {
+    Ok(v) => v
+    Err(msg) => {
+      println("error: failed to load checkpoint: " + msg)
+      return
+    }
+  }
+  let generated = match cfg.preview_temperature {
+    Some(temp) =>
+      @tensor.generate_with_temperature(
+        restored.params,
+        config,
+        prompt_ids,
+        cfg.preview_new_tokens,
+        temp,
+        cfg.preview_seed,
+      )
+    None =>
+      @tensor.generate_greedy(
+        restored.params,
+        config,
+        prompt_ids,
+        cfg.preview_new_tokens,
+      )
+  }
+  let output_ids = match generated {
+    Ok(v) => v
+    Err(msg) => {
+      println("error: generation failed: " + msg)
+      return
+    }
+  }
+  let new_ids = tail_ids(output_ids, prompt_ids.length())
+  println("=== Transformer Preview ===")
+  println("checkpoint=" + checkpoint_path)
+  println("source=" + source)
+  println("prompt_ids=" + prompt_ids.to_string())
+  println("output_ids=" + output_ids.to_string())
+  println("new_ids=" + new_ids.to_string())
+  match tokenizer {
+    Some(tokenizer) => {
+      println("prompt_text=" + tokenizer.decode(prompt_ids))
+      println("output_text=" + tokenizer.decode(output_ids))
+      println("new_text=" + tokenizer.decode(new_ids))
+    }
+    None => ()
+  }
+  let payload = Json::object({
+    "kind": Json::string("preview"),
+    "checkpoint": Json::string(checkpoint_path),
+    "source": Json::string(source),
+    "prompt_ids": ids_to_json(prompt_ids),
+    "output_ids": ids_to_json(output_ids),
+    "new_ids": ids_to_json(new_ids),
+  })
+  println("preview_json=" + payload.stringify())
 }
 
 ///|
@@ -1541,6 +1896,12 @@ async fn bench_main() -> Unit {
       print_usage(program)
       return
     }
+  }
+  let preview_mode = cfg.preview_prompt_ids is Some(_) ||
+    cfg.preview_prompt_text is Some(_)
+  if preview_mode {
+    run_preview(cfg)
+    return
   }
   match cfg.long_steps {
     Some(_) => run_long_train(cfg)

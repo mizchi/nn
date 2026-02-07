@@ -81,7 +81,7 @@ pub async fn readback_example(
 }
 ```
 
-Browser entry sample: `mizchi/wgpu/browser` (calls WebGPU + `@web.device_read_buffer_bytes` and
+Browser entry sample: `mizchi/nn/browser` (calls WebGPU + `@web.device_read_buffer_bytes` and
 publishes results to `window.__E2E_RESULT__`).
 
 ## Enum helpers

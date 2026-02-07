@@ -1,6 +1,6 @@
-# mizchi/wgpu
+# mizchi/nn
 
-Minimal WebGPU contract layer for MoonBit.
+Neural network training library for MoonBit.
 
 ```mbt check
 ///|

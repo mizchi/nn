@@ -1,5 +1,5 @@
 {
-  "name": "mizchi/wgpu",
+  "name": "mizchi/nn",
   "version": "0.1.0",
   "deps": {
     "moonbitlang/async": "0.16.4",
@@ -8,13 +8,14 @@
     "mizchi/numbt": "0.2.0"
   },
   "readme": "src/README.mbt.md",
-  "repository": "https://github.com/mizchi/wgpu.mbt",
+  "repository": "https://github.com/mizchi/nn",
   "license": "Apache-2.0",
   "keywords": [
-    "webgpu",
-    "wgpu"
+    "neural-network",
+    "tensor",
+    "moonbit"
   ],
-  "description": "Minimal WebGPU contract layer for MoonBit",
+  "description": "Neural network training library for MoonBit",
   "source": "src",
   "preferred-target": "js"
 }

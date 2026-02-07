@@ -1,7 +1,7 @@
 import {
   "mizchi/numbt" as @numbt,
-  "mizchi/wgpu" as @wgpu,
-  "mizchi/wgpu/nn" as @nn,
+  "mizchi/nn" as @wgpu,
+  "mizchi/nn/nn" as @nn,
 }
 
 options(

@@ -1,9 +1,9 @@
 import {
   "mizchi/js/core" as @core,
-  "mizchi/wgpu" as @wgpu,
-  "mizchi/wgpu/mnist" as @mnist,
-  "mizchi/wgpu/nn" as @nn,
-  "mizchi/wgpu/web" as @web,
+  "mizchi/nn" as @wgpu,
+  "mizchi/nn/mnist" as @mnist,
+  "mizchi/nn/nn" as @nn,
+  "mizchi/nn/web" as @web,
   "moonbitlang/core/math" as @math,
   "moonbitlang/async",
   "moonbitlang/async/js_async",

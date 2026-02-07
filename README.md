@@ -1,6 +1,6 @@
-# mizchi/wgpu.mbt
+# mizchi/nn
 
-Minimal WebGPU contract layer for MoonBit.
+Neural network training library for MoonBit.
 
 ## Goals
 
@@ -15,15 +15,15 @@ Minimal WebGPU contract layer for MoonBit.
 
 ## Packages
 
-- `mizchi/wgpu` : core contract (no surface)
-- `mizchi/wgpu/web` : browser surface API (Canvas)
-- `mizchi/wgpu/native` : native surface API (window handle)
-- `mizchi/wgpu/nn` : minimal 2-layer MLP planning + CPU reference
-- `mizchi/wgpu/glfw` : GLFW contract (native stub, may be split out)
-- `mizchi/wgpu/browser` : browser entry sample (WebGPU readback)
-- `mizchi/wgpu/mnist` : MNIST loader (native)
-- `mizchi/wgpu/train` : MNIST training entry (native)
-- `mizchi/wgpu/infer` : MNIST inference entry (native)
+- `mizchi/nn` : core contract (no surface)
+- `mizchi/nn/web` : browser surface API (Canvas)
+- `mizchi/nn/native` : native surface API (window handle)
+- `mizchi/nn/nn` : minimal 2-layer MLP planning + CPU reference
+- `mizchi/nn/glfw` : GLFW contract (native stub, may be split out)
+- `mizchi/nn/browser` : browser entry sample (WebGPU readback)
+- `mizchi/nn/mnist` : MNIST loader (native)
+- `mizchi/nn/train` : MNIST training entry (native)
+- `mizchi/nn/infer` : MNIST inference entry (native)
 
 ## Web I/O note
 

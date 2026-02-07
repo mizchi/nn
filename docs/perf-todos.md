@@ -25,6 +25,6 @@
   - mizchi/blas: native のみ
   - mizchi/js: js のみ
 - [ ] 将来的にはパッケージ分離を検討:
-  - `mizchi/wgpu-core`: 共通コード（wgpu_common, nn のWGSL生成など）
-  - `mizchi/wgpu-js`: WebGPU browser bindings
-  - `mizchi/wgpu-native`: wgpu-native bindings + BLAS training
+  - `mizchi/nn-core`: 共通コード（wgpu_common, nn のWGSL生成など）
+  - `mizchi/nn-js`: WebGPU browser bindings
+  - `mizchi/nn-native`: wgpu-native bindings + BLAS training

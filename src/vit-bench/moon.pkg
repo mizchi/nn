@@ -1,5 +1,5 @@
 import {
-  "mizchi/wgpu/tensor" as @tensor,
+  "mizchi/nn/tensor" as @tensor,
   "moonbitlang/core/env" as @env,
   "moonbitlang/core/strconv" as @strconv,
   "moonbitlang/async",

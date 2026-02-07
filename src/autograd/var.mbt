@@ -39,14 +39,42 @@ pub fn var_matmul(a : Var, b : Var) -> Var {
       // dA = dY @ B^T (skip if a doesn't need gradient)
       if a_needs_grad {
         let da_data = FixedArray::make(m * k, zero)
-        @tensor.sgemm(0, 1, m, k, n, one, dyc.data, n, b_data.data, n, zero, da_data, k)
+        @tensor.sgemm(
+          0,
+          1,
+          m,
+          k,
+          n,
+          one,
+          dyc.data,
+          n,
+          b_data.data,
+          n,
+          zero,
+          da_data,
+          k,
+        )
         let da = @tensor.tensor_new_fixed(a_data.shape, da_data)
         accumulate(tape, a.id, da)
       }
       // dB = A^T @ dY (skip if b doesn't need gradient)
       if b_needs_grad {
         let db_data = FixedArray::make(k * n, zero)
-        @tensor.sgemm(1, 0, k, n, m, one, a_data.data, k, dyc.data, n, zero, db_data, n)
+        @tensor.sgemm(
+          1,
+          0,
+          k,
+          n,
+          m,
+          one,
+          a_data.data,
+          k,
+          dyc.data,
+          n,
+          zero,
+          db_data,
+          n,
+        )
         let db = @tensor.tensor_new_fixed(b_data.shape, db_data)
         accumulate(tape, b.id, db)
       }
@@ -63,7 +91,19 @@ pub fn var_matmul(a : Var, b : Var) -> Var {
       if a_needs_grad {
         let da_data = FixedArray::make(n_rows * k, zero)
         @tensor.sgemm(
-          0, 1, n_rows, k, n, one, dyc.data, n, b_data.data, n, zero, da_data, k,
+          0,
+          1,
+          n_rows,
+          k,
+          n,
+          one,
+          dyc.data,
+          n,
+          b_data.data,
+          n,
+          zero,
+          da_data,
+          k,
         )
         let da = @tensor.tensor_new_fixed(a_data.shape, da_data)
         accumulate(tape, a.id, da)
@@ -72,7 +112,19 @@ pub fn var_matmul(a : Var, b : Var) -> Var {
       if b_needs_grad {
         let db_data = FixedArray::make(k * n, zero)
         @tensor.sgemm(
-          1, 0, k, n, n_rows, one, a_data.data, k, dyc.data, n, zero, db_data, n,
+          1,
+          0,
+          k,
+          n,
+          n_rows,
+          one,
+          a_data.data,
+          k,
+          dyc.data,
+          n,
+          zero,
+          db_data,
+          n,
         )
         let db = @tensor.tensor_new_fixed(b_data.shape, db_data)
         accumulate(tape, b.id, db)

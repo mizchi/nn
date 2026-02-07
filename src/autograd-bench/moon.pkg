@@ -1,0 +1,11 @@
+import {
+  "mizchi/nn/autograd" as @autograd,
+  "mizchi/nn/tensor" as @tensor,
+  "moonbitlang/core/env" as @env,
+}
+
+options(
+  "is-main": true,
+  link: { "native": { "cc-link-flags": "-framework Accelerate" } },
+  targets: { "main.mbt": [ "not", "js" ] },
+)

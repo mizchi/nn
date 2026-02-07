@@ -110,6 +110,25 @@ extern "C" fn native_reshape_from_heads(
 ) -> Unit = "tensor_reshape_from_heads"
 
 ///|
+pub fn sgemm(
+  trans_a : Int,
+  trans_b : Int,
+  m : Int,
+  n : Int,
+  k : Int,
+  alpha : Float,
+  a : FixedArray[Float],
+  lda : Int,
+  b : FixedArray[Float],
+  ldb : Int,
+  beta : Float,
+  c : FixedArray[Float],
+  ldc : Int,
+) -> Unit {
+  native_sgemm(trans_a, trans_b, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+}
+
+///|
 #borrow(a, b, c)
 extern "C" fn native_sgemm_offset(
   trans_a : Int,

@@ -50,20 +50,30 @@ serve:
 # MNIST (native)
 mnist_primary := "http://yann.lecun.com/exdb/mnist"
 mnist_mirror := "https://storage.googleapis.com/cvdf-datasets/mnist"
+data_root := env_var_or_default("NN_DATA_DIR", env_var_or_default("HOME", justfile_directory()) + "/data")
+mnist_dir := data_root + "/mnist"
+pytorch_mnist_dir := data_root + "/pytorch_mnist"
 
-mnist-download:
-    mkdir -p data/mnist
-    rm -f data/mnist/*.gz
-    curl -fL -o data/mnist/train-images-idx3-ubyte.gz {{mnist_primary}}/train-images-idx3-ubyte.gz || curl -fL -o data/mnist/train-images-idx3-ubyte.gz {{mnist_mirror}}/train-images-idx3-ubyte.gz
-    curl -fL -o data/mnist/train-labels-idx1-ubyte.gz {{mnist_primary}}/train-labels-idx1-ubyte.gz || curl -fL -o data/mnist/train-labels-idx1-ubyte.gz {{mnist_mirror}}/train-labels-idx1-ubyte.gz
-    curl -fL -o data/mnist/t10k-images-idx3-ubyte.gz {{mnist_primary}}/t10k-images-idx3-ubyte.gz || curl -fL -o data/mnist/t10k-images-idx3-ubyte.gz {{mnist_mirror}}/t10k-images-idx3-ubyte.gz
-    curl -fL -o data/mnist/t10k-labels-idx1-ubyte.gz {{mnist_primary}}/t10k-labels-idx1-ubyte.gz || curl -fL -o data/mnist/t10k-labels-idx1-ubyte.gz {{mnist_mirror}}/t10k-labels-idx1-ubyte.gz
-    gunzip -f data/mnist/*.gz
+data-migrate:
+    mkdir -p data "{{data_root}}" "{{mnist_dir}}" "{{pytorch_mnist_dir}}"
+    if [ -d data/mnist ] && [ ! -L data/mnist ]; then cp -a data/mnist/. "{{mnist_dir}}"/ && rm -rf data/mnist; fi
+    if [ -d data/pytorch_mnist ] && [ ! -L data/pytorch_mnist ]; then cp -a data/pytorch_mnist/. "{{pytorch_mnist_dir}}"/ && rm -rf data/pytorch_mnist; fi
+    ln -sfn "{{mnist_dir}}" data/mnist
+    ln -sfn "{{pytorch_mnist_dir}}" data/pytorch_mnist
+    @echo "MNIST data dir: {{mnist_dir}}"
 
-mnist-train:
+mnist-download: data-migrate
+    rm -f "{{mnist_dir}}"/*.gz
+    curl -fL -o "{{mnist_dir}}"/train-images-idx3-ubyte.gz {{mnist_primary}}/train-images-idx3-ubyte.gz || curl -fL -o "{{mnist_dir}}"/train-images-idx3-ubyte.gz {{mnist_mirror}}/train-images-idx3-ubyte.gz
+    curl -fL -o "{{mnist_dir}}"/train-labels-idx1-ubyte.gz {{mnist_primary}}/train-labels-idx1-ubyte.gz || curl -fL -o "{{mnist_dir}}"/train-labels-idx1-ubyte.gz {{mnist_mirror}}/train-labels-idx1-ubyte.gz
+    curl -fL -o "{{mnist_dir}}"/t10k-images-idx3-ubyte.gz {{mnist_primary}}/t10k-images-idx3-ubyte.gz || curl -fL -o "{{mnist_dir}}"/t10k-images-idx3-ubyte.gz {{mnist_mirror}}/t10k-images-idx3-ubyte.gz
+    curl -fL -o "{{mnist_dir}}"/t10k-labels-idx1-ubyte.gz {{mnist_primary}}/t10k-labels-idx1-ubyte.gz || curl -fL -o "{{mnist_dir}}"/t10k-labels-idx1-ubyte.gz {{mnist_mirror}}/t10k-labels-idx1-ubyte.gz
+    gunzip -f "{{mnist_dir}}"/*.gz
+
+mnist-train: data-migrate
     moon run --target native src/examples/mnist-train
 
-mnist-infer *ARGS:
+mnist-infer *ARGS: data-migrate
     moon run --target native src/examples/mnist-infer -- {{ARGS}}
 
 # Update snapshot tests

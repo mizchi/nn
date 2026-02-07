@@ -57,11 +57,13 @@ just bench-gpu
 ## MNIST
 
 ```
+just data-migrate
 just mnist-download
 just mnist-train
 just mnist-infer
 ```
 
+- `just data-migrate` moves/links MNIST data to `~/data/mnist` by default (`NN_DATA_DIR` override)
 - `just mnist-download` tries the official URL first and falls back to a mirror
 - `just mnist-train` trains a 784-128-10 MLP for 20 epochs (target ~95% test acc)
 - `just mnist-train --backend gpu` runs training on wgpu-native (compute)

@@ -54,6 +54,7 @@ just bench-cpu # run CPU loss benchmark (native)
 just bench-gpu # run WebGPU loss benchmark (Playwright)
 just wgpu-native-build # build wgpu-native (native target)
 just serve     # build browser entry + serve repo root
+just data-migrate # move/link MNIST data under ~/data (or $NN_DATA_DIR)
 just mnist-download # download MNIST (official URL + mirror fallback)
 just mnist-train # run MNIST training (native, ~95% test acc)
 just mnist-infer # run MNIST inference with saved weights (native)
@@ -111,6 +112,7 @@ Notes:
 - These numbers are for a small subset and are not directly comparable across
   runtimes; they are included only for rough, local comparison.
 - PyTorch uses the MNIST data from `data/mnist` in this repo by default.
+- MNIST files are stored under `~/data/mnist` by default (`NN_DATA_DIR` で変更可) and exposed as `data/mnist` via symlink.
 
 ## Benchmarks (MNIST full)
 

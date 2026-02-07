@@ -401,6 +401,23 @@ extern "C" fn native_accumulate(
 extern "C" fn native_zero(dst : FixedArray[Float], n : Int) -> Unit = "tensor_zero"
 
 ///|
+#borrow(param, grad, m, v)
+extern "C" fn native_adamw_step(
+  param : FixedArray[Float],
+  grad : FixedArray[Float],
+  m : FixedArray[Float],
+  v : FixedArray[Float],
+  n : Int,
+  lr : Float,
+  beta1 : Float,
+  beta2 : Float,
+  eps : Float,
+  weight_decay : Float,
+  bias_c1 : Float,
+  bias_c2 : Float,
+) -> Unit = "tensor_adamw_step"
+
+///|
 /// Softmax in-place over rows: data is [rows, cols], each row is softmaxed.
 pub fn softmax_inplace(
   data : FixedArray[Float],
@@ -531,6 +548,27 @@ pub fn accumulate_inplace(
 ///|
 pub fn zero_inplace(dst : FixedArray[Float], n : Int) -> Unit {
   native_zero(dst, n)
+}
+
+///|
+/// AdamW step in-place for one tensor.
+pub fn adamw_step_inplace(
+  param : FixedArray[Float],
+  grad : FixedArray[Float],
+  m : FixedArray[Float],
+  v : FixedArray[Float],
+  n : Int,
+  lr : Float,
+  beta1 : Float,
+  beta2 : Float,
+  eps : Float,
+  weight_decay : Float,
+  bias_c1 : Float,
+  bias_c2 : Float,
+) -> Unit {
+  native_adamw_step(
+    param, grad, m, v, n, lr, beta1, beta2, eps, weight_decay, bias_c1, bias_c2,
+  )
 }
 
 ///|

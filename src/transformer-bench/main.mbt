@@ -13,6 +13,7 @@ struct BenchArgs {
   print_every : Int
   repeat : Int
   sweep : Bool
+  adamw : Bool
 } derive(Show, Eq)
 
 ///|
@@ -31,6 +32,7 @@ fn bench_args_default() -> BenchArgs {
     print_every: 10,
     repeat: 256,
     sweep: false,
+    adamw: false,
   }
 }
 
@@ -82,6 +84,7 @@ fn print_usage(program : String) -> Unit {
   println("  --print-every N   progress interval (default 10)")
   println("  --repeat N        corpus repeat count (default 256)")
   println("  --sweep           sweep seq/head/layer combinations")
+  println("  --adamw           use AdamW optimizer (default SGD)")
 }
 
 ///|
@@ -100,6 +103,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let mut print_every = default.print_every
   let mut repeat = default.repeat
   let mut sweep = default.sweep
+  let mut adamw = default.adamw
   let mut i = 1
   while i < args.length() {
     let arg = args[i]
@@ -108,6 +112,11 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     }
     if arg == "--sweep" {
       sweep = true
+      i = i + 1
+      continue
+    }
+    if arg == "--adamw" {
+      adamw = true
       i = i + 1
       continue
     }
@@ -391,6 +400,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     print_every,
     repeat,
     sweep,
+    adamw,
   })
 }
 
@@ -433,15 +443,27 @@ fn run_bench(cfg : BenchArgs) -> Unit {
     cfg.d_ff,
     cfg.seq_len,
   ).unwrap()
-  let metrics = @tensor.transformer_train_lm_profile_steps(
-    text,
-    config,
-    cfg.warmup,
-    cfg.steps,
-    effective_batch,
-    cfg.lr,
-    cfg.seed,
-  )
+  let metrics = if cfg.adamw {
+    @tensor.transformer_train_lm_profile_steps_adamw(
+      text,
+      config,
+      cfg.warmup,
+      cfg.steps,
+      effective_batch,
+      cfg.lr,
+      cfg.seed,
+    )
+  } else {
+    @tensor.transformer_train_lm_profile_steps(
+      text,
+      config,
+      cfg.warmup,
+      cfg.steps,
+      effective_batch,
+      cfg.lr,
+      cfg.seed,
+    )
+  }
   if metrics.length() == 0 {
     println("no measured steps")
     return
@@ -469,7 +491,15 @@ fn run_bench(cfg : BenchArgs) -> Unit {
     " vocab=" +
     vocab.to_string(),
   )
-  println("lr=" + cfg.lr.to_string() + " seed=" + cfg.seed.to_string())
+  let optim = if cfg.adamw { "adamw" } else { "sgd" }
+  println(
+    "lr=" +
+    cfg.lr.to_string() +
+    " seed=" +
+    cfg.seed.to_string() +
+    " optim=" +
+    optim,
+  )
   println("")
   let mut total_ns = 0UL
   let mut total_loss = Float::from_int(0)
@@ -572,15 +602,27 @@ fn run_sweep(cfg : BenchArgs) -> Unit {
           cfg.d_ff,
           seq,
         ).unwrap()
-        let metrics = @tensor.transformer_train_lm_profile_steps(
-          text,
-          config,
-          cfg.warmup,
-          cfg.steps,
-          effective_batch,
-          cfg.lr,
-          cfg.seed,
-        )
+        let metrics = if cfg.adamw {
+          @tensor.transformer_train_lm_profile_steps_adamw(
+            text,
+            config,
+            cfg.warmup,
+            cfg.steps,
+            effective_batch,
+            cfg.lr,
+            cfg.seed,
+          )
+        } else {
+          @tensor.transformer_train_lm_profile_steps(
+            text,
+            config,
+            cfg.warmup,
+            cfg.steps,
+            effective_batch,
+            cfg.lr,
+            cfg.seed,
+          )
+        }
         if metrics.length() == 0 {
           continue
         }

@@ -370,6 +370,31 @@ Transformer LM 学習ループの継続チューニング用に、比較条件�
 - 目標 `+20%` は未達だが、二桁改善に近い伸びを確認
 - 次は `AdamW step` 融合か、`LayerNorm/FFN` の step 間 scratch 再利用で継続
 
+### Iteration: AdamW Step Fusion + Optimizer Path
+
+実装:
+
+- `tensor_adamw_step` を追加（`param/m/v` 更新を 1 pass C kernel 化）
+- `TransformerAdamwState`（`m/v` を `TransformerGrads` 形で保持）を追加
+- `transformer_train_lm_profile_steps_adamw` /
+  `transformer_train_lm_steps_adamw` を追加
+- `transformer-bench` に `--adamw` フラグを追加
+- whitebox test:
+  - `adamw_step_inplace_matches_reference`
+  - `training_lm_profile_records_metrics_adamw`
+
+再計測（A/B, `--adamw`）:
+
+| Case | Baseline tok/s | AdamW tok/s | Delta |
+|------|----------------|-------------|-------|
+| A (`seq=128, layers=6`) | `11140.0488` | `15514.1523` | `+39.28%` |
+| B (`seq=256, layers=12`) | `5016.9336` | `7488.0811` | `+49.25%` |
+
+評価:
+
+- 固定KPI目標（`+20%`）を A/B ともに達成
+- 中期ゴール（GPT-2 相当学習）に向け、Optimizer は AdamW 経路を基準にできる状態
+
 ## PyTorch Comparison
 
 ```

@@ -551,6 +551,29 @@ void tensor_zero(float* dst, int n) {
   memset(dst, 0, (size_t)n * sizeof(float));
 }
 
+void tensor_adamw_step(
+  float* param, const float* grad, float* m, float* v, int n,
+  float lr, float beta1, float beta2, float eps, float weight_decay,
+  float bias_c1, float bias_c2
+) {
+  float one_minus_beta1 = 1.0f - beta1;
+  float one_minus_beta2 = 1.0f - beta2;
+  float inv_bias_c1 = 1.0f / bias_c1;
+  float inv_bias_c2 = 1.0f / bias_c2;
+  for (int i = 0; i < n; i++) {
+    float gi = grad[i];
+    float mi = beta1 * m[i] + one_minus_beta1 * gi;
+    float vi = beta2 * v[i] + one_minus_beta2 * gi * gi;
+    m[i] = mi;
+    v[i] = vi;
+    float m_hat = mi * inv_bias_c1;
+    float v_hat = vi * inv_bias_c2;
+    float denom = sqrtf(v_hat) + eps;
+    float update = m_hat / denom + weight_decay * param[i];
+    param[i] -= lr * update;
+  }
+}
+
 // Arena-based ReLU backward: all buffers are offsets into one contiguous arena
 void tensor_relu_backward_arena(
   float* arena, int dy_off, int x_off, int dx_off, int n

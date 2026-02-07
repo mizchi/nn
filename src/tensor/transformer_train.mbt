@@ -67,6 +67,48 @@ pub struct TransformerLmStepMetric {
 }
 
 ///|
+pub struct AdamwConfig {
+  lr : Float
+  beta1 : Float
+  beta2 : Float
+  eps : Float
+  weight_decay : Float
+} derive(Show, Eq)
+
+///|
+pub struct TransformerAdamwState {
+  mut step : Int
+  mut beta1_pow : Float
+  mut beta2_pow : Float
+  m : TransformerGrads
+  v : TransformerGrads
+}
+
+///|
+pub fn adamw_config_default(lr : Float) -> AdamwConfig {
+  AdamwConfig::{
+    lr,
+    beta1: Float::from_double(0.9),
+    beta2: Float::from_double(0.999),
+    eps: Float::from_double(0.00000001),
+    weight_decay: Float::from_double(0.01),
+  }
+}
+
+///|
+pub fn transformer_zero_adamw_state(
+  config : TransformerConfig,
+) -> TransformerAdamwState {
+  TransformerAdamwState::{
+    step: 0,
+    beta1_pow: Float::from_int(1),
+    beta2_pow: Float::from_int(1),
+    m: transformer_zero_grads(config),
+    v: transformer_zero_grads(config),
+  }
+}
+
+///|
 /// Initialize zero gradients matching the parameter shapes
 pub fn transformer_zero_grads(config : TransformerConfig) -> TransformerGrads {
   let d = config.d_model
@@ -1123,6 +1165,208 @@ fn sgd_update(
 }
 
 ///|
+fn adamw_update_tensor(
+  param : Tensor,
+  grad : Tensor,
+  m : Tensor,
+  v : Tensor,
+  cfg : AdamwConfig,
+  bias_c1 : Float,
+  bias_c2 : Float,
+) -> Unit {
+  adamw_step_inplace(
+    param.data,
+    grad.data,
+    m.data,
+    v.data,
+    param.data.length(),
+    cfg.lr,
+    cfg.beta1,
+    cfg.beta2,
+    cfg.eps,
+    cfg.weight_decay,
+    bias_c1,
+    bias_c2,
+  )
+}
+
+///|
+fn adamw_update(
+  params : TransformerParams,
+  grads : TransformerGrads,
+  state : TransformerAdamwState,
+  cfg : AdamwConfig,
+) -> Unit {
+  let one = Float::from_int(1)
+  state.step = state.step + 1
+  state.beta1_pow = state.beta1_pow * cfg.beta1
+  state.beta2_pow = state.beta2_pow * cfg.beta2
+  let bias_c1 = one - state.beta1_pow
+  let bias_c2 = one - state.beta2_pow
+  let m = state.m
+  let v = state.v
+  adamw_update_tensor(
+    params.token_embedding,
+    grads.d_token_embedding,
+    m.d_token_embedding,
+    v.d_token_embedding,
+    cfg,
+    bias_c1,
+    bias_c2,
+  )
+  adamw_update_tensor(
+    params.pos_embedding,
+    grads.d_pos_embedding,
+    m.d_pos_embedding,
+    v.d_pos_embedding,
+    cfg,
+    bias_c1,
+    bias_c2,
+  )
+  for i = 0; i < params.blocks.length(); i = i + 1 {
+    let p = params.blocks[i]
+    let g = grads.d_blocks[i]
+    let m_b = m.d_blocks[i]
+    let v_b = v.d_blocks[i]
+    adamw_update_tensor(
+      p.ln1_gamma,
+      g.d_ln1_gamma,
+      m_b.d_ln1_gamma,
+      v_b.d_ln1_gamma,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ln1_beta,
+      g.d_ln1_beta,
+      m_b.d_ln1_beta,
+      v_b.d_ln1_beta,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.w_q,
+      g.d_w_q,
+      m_b.d_w_q,
+      v_b.d_w_q,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.w_k,
+      g.d_w_k,
+      m_b.d_w_k,
+      v_b.d_w_k,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.w_v,
+      g.d_w_v,
+      m_b.d_w_v,
+      v_b.d_w_v,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.w_o,
+      g.d_w_o,
+      m_b.d_w_o,
+      v_b.d_w_o,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ln2_gamma,
+      g.d_ln2_gamma,
+      m_b.d_ln2_gamma,
+      v_b.d_ln2_gamma,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ln2_beta,
+      g.d_ln2_beta,
+      m_b.d_ln2_beta,
+      v_b.d_ln2_beta,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ff_w1,
+      g.d_ff_w1,
+      m_b.d_ff_w1,
+      v_b.d_ff_w1,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ff_b1,
+      g.d_ff_b1,
+      m_b.d_ff_b1,
+      v_b.d_ff_b1,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ff_w2,
+      g.d_ff_w2,
+      m_b.d_ff_w2,
+      v_b.d_ff_w2,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+    adamw_update_tensor(
+      p.ff_b2,
+      g.d_ff_b2,
+      m_b.d_ff_b2,
+      v_b.d_ff_b2,
+      cfg,
+      bias_c1,
+      bias_c2,
+    )
+  }
+  adamw_update_tensor(
+    params.ln_final_gamma,
+    grads.d_ln_final_gamma,
+    m.d_ln_final_gamma,
+    v.d_ln_final_gamma,
+    cfg,
+    bias_c1,
+    bias_c2,
+  )
+  adamw_update_tensor(
+    params.ln_final_beta,
+    grads.d_ln_final_beta,
+    m.d_ln_final_beta,
+    v.d_ln_final_beta,
+    cfg,
+    bias_c1,
+    bias_c2,
+  )
+  adamw_update_tensor(
+    params.lm_head,
+    grads.d_lm_head,
+    m.d_lm_head,
+    v.d_lm_head,
+    cfg,
+    bias_c1,
+    bias_c2,
+  )
+}
+
+///|
 /// Zero all gradients
 fn zero_grads(grads : TransformerGrads) -> Unit {
   zero_tensor(grads.d_token_embedding)
@@ -1174,9 +1418,27 @@ pub fn transformer_train_lm_steps(
 }
 
 ///|
-/// Train a tiny transformer on text data and record per-step metrics.
-/// Returns one metric per measured step (warmup is excluded from results).
-pub fn transformer_train_lm_profile_steps(
+/// Train a tiny transformer with AdamW and return loss history.
+pub fn transformer_train_lm_steps_adamw(
+  text : String,
+  config : TransformerConfig,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[Float] {
+  let metrics = transformer_train_lm_profile_steps_adamw(
+    text, config, 0, steps, batch_size, lr, seed,
+  )
+  let loss_history : Array[Float] = []
+  for i = 0; i < metrics.length(); i = i + 1 {
+    loss_history.push(metrics[i].loss)
+  }
+  loss_history
+}
+
+///|
+fn transformer_train_lm_profile_steps_impl(
   text : String,
   config : TransformerConfig,
   warmup_steps : Int,
@@ -1184,11 +1446,14 @@ pub fn transformer_train_lm_profile_steps(
   batch_size : Int,
   lr : Float,
   seed : Int,
+  use_adamw : Bool,
 ) -> Array[TransformerLmStepMetric] {
   let tokenizer = char_tokenizer_from_text(text)
   let all_ids = tokenizer.encode(text)
   let params = transformer_init_params(config, seed)
   let grads = transformer_zero_grads(config)
+  let adamw_state = transformer_zero_adamw_state(config)
+  let adamw_cfg = adamw_config_default(lr)
   let metrics : Array[TransformerLmStepMetric] = []
   let seq_len = config.max_seq_len
 
@@ -1241,9 +1506,11 @@ pub fn transformer_train_lm_profile_steps(
     let loss = transformer_backward_lm(
       cache, params, config, grads, batch_targets,
     )
-
-    // SGD update
-    sgd_update(params, grads, lr)
+    if use_adamw {
+      adamw_update(params, grads, adamw_state, adamw_cfg)
+    } else {
+      sgd_update(params, grads, lr)
+    }
     let t1 = clock_ns()
     if step >= effective_warmup {
       metrics.push(TransformerLmStepMetric::{
@@ -1254,6 +1521,39 @@ pub fn transformer_train_lm_profile_steps(
     }
   }
   metrics
+}
+
+///|
+/// Train a tiny transformer on text data and record per-step metrics.
+/// Returns one metric per measured step (warmup is excluded from results).
+pub fn transformer_train_lm_profile_steps(
+  text : String,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[TransformerLmStepMetric] {
+  transformer_train_lm_profile_steps_impl(
+    text, config, warmup_steps, steps, batch_size, lr, seed, false,
+  )
+}
+
+///|
+/// AdamW variant of transformer_train_lm_profile_steps.
+pub fn transformer_train_lm_profile_steps_adamw(
+  text : String,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[TransformerLmStepMetric] {
+  transformer_train_lm_profile_steps_impl(
+    text, config, warmup_steps, steps, batch_size, lr, seed, true,
+  )
 }
 
 ///|

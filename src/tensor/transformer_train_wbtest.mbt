@@ -266,6 +266,60 @@ test "zero_inplace_sets_all_values_to_zero" {
 }
 
 ///|
+test "adamw_step_inplace_matches_reference" {
+  let n = 13
+  let lr = Float::from_double(0.001)
+  let beta1 = Float::from_double(0.9)
+  let beta2 = Float::from_double(0.999)
+  let eps = Float::from_double(0.00000001)
+  let weight_decay = Float::from_double(0.01)
+  let one = Float::from_int(1)
+  let bias_c1 = one - beta1
+  let bias_c2 = one - beta2
+  let param = FixedArray::make(n, Float::from_int(0))
+  let grad = FixedArray::make(n, Float::from_int(0))
+  let m = FixedArray::make(n, Float::from_int(0))
+  let v = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    param[i] = Float::from_int(i * 5 % 17 - 8) / Float::from_int(7)
+    grad[i] = Float::from_int(i * 3 % 13 - 6) / Float::from_int(9)
+    m[i] = Float::from_int(i * 2 % 7 - 3) / Float::from_int(11)
+    v[i] = Float::from_int(i * 4 % 19 + 1) / Float::from_int(100)
+  }
+  let p_ref = FixedArray::make(n, Float::from_int(0))
+  let m_ref = FixedArray::make(n, Float::from_int(0))
+  let v_ref = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    p_ref[i] = param[i]
+    m_ref[i] = m[i]
+    v_ref[i] = v[i]
+  }
+  for i = 0; i < n; i = i + 1 {
+    let gi = grad[i]
+    let mi = beta1 * m_ref[i] + (one - beta1) * gi
+    let vi = beta2 * v_ref[i] + (one - beta2) * gi * gi
+    m_ref[i] = mi
+    v_ref[i] = vi
+    let m_hat = mi / bias_c1
+    let v_hat = vi / bias_c2
+    let denom = Float::from_double(v_hat.to_double().sqrt()) + eps
+    let update = m_hat / denom + weight_decay * p_ref[i]
+    p_ref[i] = p_ref[i] - lr * update
+  }
+  adamw_step_inplace(
+    param, grad, m, v, n, lr, beta1, beta2, eps, weight_decay, bias_c1, bias_c2,
+  )
+  for i = 0; i < n; i = i + 1 {
+    let p_diff = (param[i] - p_ref[i]).to_double().abs()
+    let m_diff = (m[i] - m_ref[i]).to_double().abs()
+    let v_diff = (v[i] - v_ref[i]).to_double().abs()
+    assert_true(p_diff < 1.0e-5)
+    assert_true(m_diff < 1.0e-6)
+    assert_true(v_diff < 1.0e-6)
+  }
+}
+
+///|
 test "softmax_backward_rows_matches_reference" {
   let rows = 2
   let cols = 3
@@ -756,6 +810,30 @@ test "training_lm_profile_records_metrics" {
   let vocab = tokenizer.vocab_size()
   let config = transformer_config(vocab, 8, 1, 1, 16, 8).unwrap()
   let metrics = transformer_train_lm_profile_steps(
+    text,
+    config,
+    2,
+    6,
+    8,
+    Float::from_double(0.01),
+    42,
+  )
+  assert_true(metrics.length() == 6)
+  for i = 0; i < metrics.length(); i = i + 1 {
+    let m = metrics[i]
+    assert_true(m.loss.to_double() > 0.0)
+    assert_true(m.perplexity.to_double() > 0.0)
+    assert_true(m.step_ns > 0UL)
+  }
+}
+
+///|
+test "training_lm_profile_records_metrics_adamw" {
+  let text = "abcabcabcabcabcabcabcabcabcabcabcabc"
+  let tokenizer = char_tokenizer_from_text(text)
+  let vocab = tokenizer.vocab_size()
+  let config = transformer_config(vocab, 8, 1, 1, 16, 8).unwrap()
+  let metrics = transformer_train_lm_profile_steps_adamw(
     text,
     config,
     2,

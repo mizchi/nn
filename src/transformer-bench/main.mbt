@@ -23,6 +23,7 @@ struct BenchArgs {
   checkpoint_every : Int
   checkpoint_path : String?
   resume_checkpoint : String?
+  log_jsonl : String?
 } derive(Show, Eq)
 
 ///|
@@ -51,6 +52,7 @@ fn bench_args_default() -> BenchArgs {
     checkpoint_every: 0,
     checkpoint_path: None,
     resume_checkpoint: None,
+    log_jsonl: None,
   }
 }
 
@@ -112,6 +114,7 @@ fn print_usage(program : String) -> Unit {
   println("  --checkpoint-every N write checkpoint every N steps (default 0)")
   println("  --checkpoint-path P checkpoint file path")
   println("  --resume-checkpoint P resume from checkpoint file")
+  println("  --log-jsonl P     append training/eval events as JSONL")
 }
 
 ///|
@@ -140,6 +143,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let mut checkpoint_every = default.checkpoint_every
   let mut checkpoint_path : String? = default.checkpoint_path
   let mut resume_checkpoint : String? = default.resume_checkpoint
+  let mut log_jsonl : String? = default.log_jsonl
   let mut i = 1
   while i < args.length() {
     let arg = args[i]
@@ -600,6 +604,22 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       i = i + 1
       continue
     }
+    if arg == "--log-jsonl" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --log-jsonl")
+      }
+      log_jsonl = Some(args[i + 1])
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--log-jsonl=") {
+      let view = arg.sub(start=12) catch {
+        _ => return Err("invalid --log-jsonl value")
+      }
+      log_jsonl = Some(view.to_string())
+      i = i + 1
+      continue
+    }
     return Err("unknown option: " + arg)
   }
   if shard_meta is None {
@@ -631,7 +651,8 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       if eval_every > 0 ||
         checkpoint_every > 0 ||
         checkpoint_path is Some(_) ||
-        resume_checkpoint is Some(_) {
+        resume_checkpoint is Some(_) ||
+        log_jsonl is Some(_) {
         return Err("--eval/--checkpoint options require --long-steps")
       }
   }
@@ -659,6 +680,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     checkpoint_every,
     checkpoint_path,
     resume_checkpoint,
+    log_jsonl,
   })
 }
 
@@ -738,6 +760,135 @@ fn checkpoint_dirname(path : String) -> String {
 }
 
 ///|
+fn zero_pad_step(step : Int) -> String {
+  let safe = if step < 0 { 0 } else { step }
+  let s = safe.to_string()
+  let mut out = ""
+  for _i = s.length(); _i < 8; _i = _i + 1 {
+    out = out + "0"
+  }
+  out + s
+}
+
+///|
+fn checkpoint_path_with_step(path : String, step : Int) -> String {
+  let suffix = ".step-" + zero_pad_step(step)
+  let slash = path.rev_find("/")
+  let dot = path.rev_find(".")
+  let has_ext = match dot {
+    Some(di) =>
+      match slash {
+        Some(si) => di > si
+        None => di > 0
+      }
+    None => false
+  }
+  if !has_ext {
+    return path + suffix
+  }
+  match dot {
+    Some(di) => {
+      let head = path.unsafe_substring(start=0, end=di)
+      let tail = path.unsafe_substring(start=di, end=path.length())
+      head + suffix + tail
+    }
+    None => path + suffix
+  }
+}
+
+///|
+fn ascii_bytes(text : String) -> Bytes {
+  let out : Array[Byte] = []
+  for c in text {
+    out.push(c.to_int().to_byte())
+  }
+  Bytes::from_array(out)
+}
+
+///|
+fn jsonl_step_event_line(
+  step : Int,
+  loss : Float,
+  ppl : Float,
+  step_ms : Float,
+  tok_per_sec : Float,
+) -> String {
+  Json::object({
+    "kind": Json::string("step"),
+    "step": Json::number(step.to_double()),
+    "loss": Json::number(loss.to_double()),
+    "ppl": Json::number(ppl.to_double()),
+    "step_ms": Json::number(step_ms.to_double()),
+    "tok_per_sec": Json::number(tok_per_sec.to_double()),
+  }).stringify()
+}
+
+///|
+fn jsonl_eval_event_line(step : Int, loss : Float, ppl : Float) -> String {
+  Json::object({
+    "kind": Json::string("eval"),
+    "step": Json::number(step.to_double()),
+    "loss": Json::number(loss.to_double()),
+    "ppl": Json::number(ppl.to_double()),
+  }).stringify()
+}
+
+///|
+fn jsonl_checkpoint_event_line(
+  step : Int,
+  latest_path : String,
+  step_path : String,
+) -> String {
+  Json::object({
+    "kind": Json::string("checkpoint"),
+    "step": Json::number(step.to_double()),
+    "latest_path": Json::string(latest_path),
+    "step_path": Json::string(step_path),
+  }).stringify()
+}
+
+///|
+async fn append_jsonl(path : String, line : String) -> Result[Unit, String] {
+  let exists_result = try? @afs.exists(path)
+  let old = match exists_result {
+    Ok(true) => {
+      let read_result = try? @afs.read_file(path)
+      match read_result {
+        Ok(v) => v.binary()
+        Err(err) => return Err("jsonl read error: " + err.to_string())
+      }
+    }
+    Ok(false) => Bytes::new(0)
+    Err(err) => return Err("jsonl exists error: " + err.to_string())
+  }
+  let data = old + ascii_bytes(line + "\n")
+  let write_result = try? @afs.write_file(
+    path,
+    data,
+    create=0o644,
+    truncate=true,
+  )
+  match write_result {
+    Ok(_) => Ok(())
+    Err(err) => Err("jsonl write error: " + err.to_string())
+  }
+}
+
+///|
+async fn write_bytes_file(path : String, data : Bytes) -> Result[Unit, String] {
+  let write_result = try? @afs.write_file(
+    path,
+    data,
+    create=0o644,
+    truncate=true,
+  )
+  match write_result {
+    Ok(_) => Ok(())
+    Err(err) => Err("write error: " + err.to_string())
+  }
+}
+
+///|
 fn split_train_eval_ids(
   all_ids : Array[Int],
   seq_len : Int,
@@ -772,7 +923,7 @@ async fn write_checkpoint(
   params : @tensor.TransformerParams,
   adamw_state : @tensor.TransformerAdamwState?,
   step : Int,
-) -> Result[Unit, String] {
+) -> Result[String, String] {
   let dir = checkpoint_dirname(path)
   if dir != "." {
     let exists_result = try? @afs.exists(dir)
@@ -795,15 +946,14 @@ async fn write_checkpoint(
   let bytes = @tensor.transformer_lm_checkpoint_to_bytes(
     config, params, adamw_state, step,
   )
-  let write_result = try? @afs.write_file(
-    path,
-    bytes,
-    create=0o644,
-    truncate=true,
-  )
-  match write_result {
-    Ok(_) => Ok(())
-    Err(err) => Err("checkpoint write error: " + err.to_string())
+  let version_path = checkpoint_path_with_step(path, step)
+  match write_bytes_file(version_path, bytes) {
+    Ok(_) => ()
+    Err(msg) => return Err("checkpoint write error: " + msg)
+  }
+  match write_bytes_file(path, bytes) {
+    Ok(_) => Ok(version_path)
+    Err(msg) => Err("checkpoint write error: " + msg)
   }
 }
 
@@ -893,6 +1043,7 @@ async fn run_long_train(cfg : BenchArgs) -> Unit {
   let mut total_loss = Float::from_int(0)
   let mut total_ppl = Float::from_int(0)
   let mut measured_steps = 0
+  let mut last_checkpoint_step = -1
   println("=== Transformer LM Long Train ===")
   println(
     "data=" +
@@ -950,19 +1101,37 @@ async fn run_long_train(cfg : BenchArgs) -> Unit {
     for i = 0; i < metrics.length(); i = i + 1 {
       let m = metrics[i]
       let step = global_step + i + 1
+      let tok_per_step = effective_batch * cfg.seq_len
+      let step_tps = if m.step_ns > 0UL {
+        Float::from_int(tok_per_step) *
+        Float::from_int(1000000000) /
+        Float::from_uint64(m.step_ns)
+      } else {
+        Float::from_int(0)
+      }
+      let step_ms = ns_to_ms(m.step_ns)
       total_ns = total_ns + m.step_ns
       total_loss = total_loss + m.loss
       total_ppl = total_ppl + m.perplexity
       measured_steps = measured_steps + 1
-      if step % cfg.print_every == 0 || step == total_steps {
-        let tok_per_step = effective_batch * cfg.seq_len
-        let step_tps = if m.step_ns > 0UL {
-          Float::from_int(tok_per_step) *
-          Float::from_int(1000000000) /
-          Float::from_uint64(m.step_ns)
-        } else {
-          Float::from_int(0)
+      match cfg.log_jsonl {
+        Some(log_path) => {
+          let line = jsonl_step_event_line(
+            step,
+            m.loss,
+            m.perplexity,
+            step_ms,
+            step_tps,
+          )
+          let write_log = append_jsonl(log_path, line)
+          match write_log {
+            Ok(_) => ()
+            Err(msg) => println("jsonl error: " + msg)
+          }
         }
+        None => ()
+      }
+      if step % cfg.print_every == 0 || step == total_steps {
         println(
           "step " +
           step.to_string() +
@@ -973,7 +1142,7 @@ async fn run_long_train(cfg : BenchArgs) -> Unit {
           " ppl=" +
           m.perplexity.to_string() +
           " step_ms=" +
-          ns_to_ms(m.step_ns).to_string() +
+          step_ms.to_string() +
           " tok/s=" +
           step_tps.to_string(),
         )
@@ -995,6 +1164,17 @@ async fn run_long_train(cfg : BenchArgs) -> Unit {
           " ppl=" +
           eval_ppl.to_string(),
         )
+        match cfg.log_jsonl {
+          Some(log_path) => {
+            let line = jsonl_eval_event_line(step, eval_loss, eval_ppl)
+            let write_log = append_jsonl(log_path, line)
+            match write_log {
+              Ok(_) => ()
+              Err(msg) => println("jsonl error: " + msg)
+            }
+          }
+          None => ()
+        }
       }
       if cfg.checkpoint_every > 0 && step % cfg.checkpoint_every == 0 {
         match cfg.checkpoint_path {
@@ -1002,7 +1182,28 @@ async fn run_long_train(cfg : BenchArgs) -> Unit {
             let state_opt = if cfg.adamw { Some(adamw_state) } else { None }
             let save = write_checkpoint(path, config, params, state_opt, step)
             match save {
-              Ok(_) => println("checkpoint saved: step=" + step.to_string())
+              Ok(version_path) => {
+                println(
+                  "checkpoint saved: step=" +
+                  step.to_string() +
+                  " path=" +
+                  version_path,
+                )
+                match cfg.log_jsonl {
+                  Some(log_path) => {
+                    let line = jsonl_checkpoint_event_line(
+                      step, path, version_path,
+                    )
+                    let write_log = append_jsonl(log_path, line)
+                    match write_log {
+                      Ok(_) => ()
+                      Err(msg) => println("jsonl error: " + msg)
+                    }
+                  }
+                  None => ()
+                }
+                last_checkpoint_step = step
+              }
               Err(msg) => println("checkpoint error: " + msg)
             }
           }
@@ -1020,15 +1221,41 @@ async fn run_long_train(cfg : BenchArgs) -> Unit {
     println("  avg_ppl=" + (total_ppl / n).to_string())
   }
   match cfg.checkpoint_path {
-    Some(path) => {
-      let state_opt = if cfg.adamw { Some(adamw_state) } else { None }
-      let save = write_checkpoint(path, config, params, state_opt, global_step)
-      match save {
-        Ok(_) =>
-          println("checkpoint saved: final step=" + global_step.to_string())
-        Err(msg) => println("checkpoint error: " + msg)
+    Some(path) =>
+      if global_step != last_checkpoint_step {
+        let state_opt = if cfg.adamw { Some(adamw_state) } else { None }
+        let save = write_checkpoint(
+          path, config, params, state_opt, global_step,
+        )
+        match save {
+          Ok(version_path) => {
+            println(
+              "checkpoint saved: final step=" +
+              global_step.to_string() +
+              " path=" +
+              version_path,
+            )
+            match cfg.log_jsonl {
+              Some(log_path) => {
+                let line = jsonl_checkpoint_event_line(
+                  global_step, path, version_path,
+                )
+                let write_log = append_jsonl(log_path, line)
+                match write_log {
+                  Ok(_) => ()
+                  Err(msg) => println("jsonl error: " + msg)
+                }
+              }
+              None => ()
+            }
+          }
+          Err(msg) => println("checkpoint error: " + msg)
+        }
+      } else {
+        println(
+          "checkpoint already saved at final step=" + global_step.to_string(),
+        )
       }
-    }
     None => ()
   }
 }

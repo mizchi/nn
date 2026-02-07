@@ -140,6 +140,36 @@ bench: backend=pytorch device=mps train_ms=10282
 result: split=test loss=0.079558 acc=0.976200
 ```
 
+## Benchmarks (ViT MNIST)
+
+Measured on 2026-02-07, Apple M3 Max.
+ViT config: image=28, patch=7, d_model=64, heads=4, layers=2, d_ff=128.
+Training: 1000 samples, 5 epochs, batch_size=64, lr=0.001, SGD.
+
+```
+# MoonBit (native, Apple Accelerate BLAS + C FFI)
+moon run src/vit-bench --target native -- --limit=1000 --epochs=5
+Total training time: 1.000s
+
+# PyTorch CPU baseline
+python bench_vit_pytorch.py --limit=1000 --epochs=5
+Total training time: 0.54s
+```
+
+| Implementation | Time | vs PyTorch |
+|---------------|------|-----------|
+| PyTorch CPU | 0.54s | 1.0x |
+| MoonBit (native) | ~1.0s | ~1.9x |
+
+Optimization history:
+
+| Version | Time | Notes |
+|---------|------|-------|
+| Pure MoonBit | 11s | No BLAS |
+| + BLAS (cblas_sgemm) | 8s | Apple Accelerate |
+| + GELU/Softmax C FFI | 3s | Replaced @math.exp/tanh with C expf/tanhf |
+| + LayerNorm/Reshape C FFI | ~1s | Eliminated Float→Double→sqrt overhead |
+
 ## numbt - NumPy-like library for MoonBit
 
 This project uses [`mizchi/numbt`](https://github.com/mizchi/numbt) for NumPy-like vector/matrix operations with BLAS/LAPACK acceleration via Apple Accelerate framework.

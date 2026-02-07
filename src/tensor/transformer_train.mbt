@@ -60,6 +60,13 @@ pub struct TransformerCache {
 }
 
 ///|
+pub struct TransformerLmStepMetric {
+  step_ns : UInt64
+  loss : Float
+  perplexity : Float
+}
+
+///|
 /// Initialize zero gradients matching the parameter shapes
 pub fn transformer_zero_grads(config : TransformerConfig) -> TransformerGrads {
   let d = config.d_model
@@ -1181,11 +1188,33 @@ pub fn transformer_train_lm_steps(
   lr : Float,
   seed : Int,
 ) -> Array[Float] {
+  let metrics = transformer_train_lm_profile_steps(
+    text, config, 0, steps, batch_size, lr, seed,
+  )
+  let loss_history : Array[Float] = []
+  for i = 0; i < metrics.length(); i = i + 1 {
+    loss_history.push(metrics[i].loss)
+  }
+  loss_history
+}
+
+///|
+/// Train a tiny transformer on text data and record per-step metrics.
+/// Returns one metric per measured step (warmup is excluded from results).
+pub fn transformer_train_lm_profile_steps(
+  text : String,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[TransformerLmStepMetric] {
   let tokenizer = char_tokenizer_from_text(text)
   let all_ids = tokenizer.encode(text)
   let params = transformer_init_params(config, seed)
   let grads = transformer_zero_grads(config)
-  let loss_history : Array[Float] = []
+  let metrics : Array[TransformerLmStepMetric] = []
   let seq_len = config.max_seq_len
 
   // Create training examples: sliding window
@@ -1202,8 +1231,9 @@ pub fn transformer_train_lm_steps(
     targets.push(target_seq)
   }
   if inputs.length() == 0 || steps <= 0 {
-    return loss_history
+    return metrics
   }
+  let effective_warmup = if warmup_steps < 0 { 0 } else { warmup_steps }
   let effective_batch = if batch_size <= 0 {
     1
   } else if batch_size > inputs.length() {
@@ -1212,7 +1242,8 @@ pub fn transformer_train_lm_steps(
     batch_size
   }
   let mask = causal_mask(seq_len).unwrap()
-  for step = 0; step < steps; step = step + 1 {
+  let total_steps = effective_warmup + steps
+  for step = 0; step < total_steps; step = step + 1 {
     zero_grads(grads)
     let batch_inputs : Array[Array[Int]] = []
     let batch_targets : Array[Array[Int]] = []
@@ -1222,7 +1253,7 @@ pub fn transformer_train_lm_steps(
       batch_inputs.push(inputs[idx])
       batch_targets.push(targets[idx])
     }
-
+    let t0 = clock_ns()
     // Forward with cache (mini-batch)
     let (_, cache) = transformer_forward_with_cache(
       batch_inputs,
@@ -1235,12 +1266,19 @@ pub fn transformer_train_lm_steps(
     let loss = transformer_backward_lm(
       cache, params, config, grads, batch_targets,
     )
-    loss_history.push(loss)
 
     // SGD update
     sgd_update(params, grads, lr)
+    let t1 = clock_ns()
+    if step >= effective_warmup {
+      metrics.push(TransformerLmStepMetric::{
+        step_ns: t1 - t0,
+        loss,
+        perplexity: @math.expf(loss),
+      })
+    }
   }
-  loss_history
+  metrics
 }
 
 ///|

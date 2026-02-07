@@ -463,6 +463,30 @@ test "training_lm_minibatch_loss_decreases" {
 }
 
 ///|
+test "training_lm_profile_records_metrics" {
+  let text = "abcabcabcabcabcabcabcabcabcabcabcabc"
+  let tokenizer = char_tokenizer_from_text(text)
+  let vocab = tokenizer.vocab_size()
+  let config = transformer_config(vocab, 8, 1, 1, 16, 8).unwrap()
+  let metrics = transformer_train_lm_profile_steps(
+    text,
+    config,
+    2,
+    6,
+    8,
+    Float::from_double(0.01),
+    42,
+  )
+  assert_true(metrics.length() == 6)
+  for i = 0; i < metrics.length(); i = i + 1 {
+    let m = metrics[i]
+    assert_true(m.loss.to_double() > 0.0)
+    assert_true(m.perplexity.to_double() > 0.0)
+    assert_true(m.step_ns > 0UL)
+  }
+}
+
+///|
 test "training_loss_decreases" {
   let text = "abcabcabcabcabcabc"
   let tokenizer = char_tokenizer_from_text(text)

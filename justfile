@@ -32,6 +32,9 @@ bench-cpu *ARGS:
 bench-gpu:
     pnpm bench:gpu
 
+bench-transformer-lm *ARGS:
+    moon run --target native src/transformer-bench -- {{ARGS}}
+
 # Build wgpu-native (required for native target)
 wgpu-native-build:
     bash src/scripts/build-wgpu-native.sh src/build-stamps/wgpu_native_build.stamp

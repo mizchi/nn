@@ -197,6 +197,29 @@ attention forward のメモリ移動コストも下げる。
    - `transformer_train` は互換ラッパーとして full-batch 学習を維持。
    - whitebox test で mini-batch 学習の loss 低下を確認。
 
+### Benchmark baseline (Transformer LM training loop)
+
+`transformer_train_lm_steps` の効果測定を固定化するため、
+`src/transformer-bench` を追加し、`step time / loss / perplexity` を継続出力できるようにした。
+
+実行コマンド:
+
+```bash
+just bench-transformer-lm
+# = moon run --target native src/transformer-bench --
+```
+
+ベースライン（2026-02-07, default config）:
+
+- `steps=40, warmup=5, batch_size=8, seq_len=32`
+- `d_model=64, heads=4, layers=2, d_ff=256, vocab=17`
+- `avg_step_ms=4.3418`
+- `avg_loss=2.4247`
+- `avg_ppl=11.4175`
+- `avg_tok/s=58961`
+
+この値を次の最適化（MHA backward 融合、mask さらなる融合、学習器改善）の比較基準にする。
+
 ## PyTorch Comparison
 
 ```

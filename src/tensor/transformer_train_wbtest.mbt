@@ -311,6 +311,56 @@ test "cross_entropy_backward_shape" {
 }
 
 ///|
+test "transformer_backward_lm_matches_last_token_when_seq_is_one" {
+  let config = transformer_config(8, 8, 1, 1, 16, 1).unwrap()
+  let params = transformer_init_params(config, 123)
+  let grads_last = transformer_zero_grads(config)
+  let grads_lm = transformer_zero_grads(config)
+  let tokens = [[1], [2]]
+  let labels_last = [3, 4]
+  let labels_lm = [[3], [4]]
+  let (logits_last, cache_last) = transformer_forward_with_cache(
+    tokens,
+    params,
+    config,
+    None,
+  )
+  ignore(logits_last)
+  let loss_last = transformer_backward(
+    cache_last,
+    params,
+    config,
+    grads_last,
+    labels_last,
+  )
+  let (logits_lm, cache_lm) = transformer_forward_with_cache(
+    tokens,
+    params,
+    config,
+    None,
+  )
+  ignore(logits_lm)
+  let loss_lm = transformer_backward_lm(
+    cache_lm,
+    params,
+    config,
+    grads_lm,
+    labels_lm,
+  )
+  let loss_diff = (loss_last - loss_lm).to_double().abs()
+  assert_true(loss_diff < 1.0e-6)
+  let mut max_grad_diff = 0.0
+  for i = 0; i < grads_last.d_lm_head.numel(); i = i + 1 {
+    let diff = (grads_last.d_lm_head.data[i] - grads_lm.d_lm_head.data[i]).to_double()
+      .abs()
+    if diff > max_grad_diff {
+      max_grad_diff = diff
+    }
+  }
+  assert_true(max_grad_diff < 1.0e-6)
+}
+
+///|
 test "forward_with_cache_matches_forward" {
   let config = transformer_config(4, 8, 1, 1, 16, 8).unwrap()
   let params = transformer_init_params(config, 123)

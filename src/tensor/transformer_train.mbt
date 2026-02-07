@@ -754,7 +754,6 @@ pub fn transformer_forward_with_cache(
       total_heads,
       fn(_i) { FixedArray::make(scores_size, Float::from_int(0)) },
     )
-    let scores = FixedArray::make(scores_size, Float::from_int(0))
     let attn_result_data = FixedArray::make(
       batch * num_heads * seq * d_k,
       Float::from_int(0),
@@ -763,6 +762,7 @@ pub fn transformer_forward_with_cache(
       for h = 0; h < num_heads; h = h + 1 {
         let head_idx = b * num_heads + h
         let head_base = head_idx * seq * d_k
+        let scores = attn_weights_all[head_idx]
         // scores = Q @ K^T * scale : [seq, d_k] @ [d_k, seq] -> [seq, seq]
         native_sgemm_offset(
           0,
@@ -794,10 +794,6 @@ pub fn transformer_forward_with_cache(
         }
         // Softmax
         native_softmax_inplace(scores, seq, seq)
-        let scores_copy = attn_weights_all[head_idx]
-        for idx = 0; idx < scores_size; idx = idx + 1 {
-          scores_copy[idx] = scores[idx]
-        }
         // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
         native_sgemm_offset(
           0,
@@ -924,6 +920,53 @@ pub fn transformer_forward_with_cache(
 }
 
 ///|
+fn transformer_backward_from_d_logits(
+  cache : TransformerCache,
+  params : TransformerParams,
+  config : TransformerConfig,
+  grads : TransformerGrads,
+  d_logits : Tensor,
+) -> Unit {
+  let seq = cache.tokens[0].length()
+  // LM head backward: logits = ln_final_out @ lm_head
+  let d_ln_final_out = batched_linear_backward(
+    d_logits,
+    cache.ln_final_out,
+    params.lm_head,
+    grads.d_lm_head,
+  )
+
+  // Final LN backward
+  let d_hidden = layer_norm_backward(
+    d_ln_final_out,
+    cache.hidden_before_final_ln,
+    cache.ln_final_mean,
+    cache.ln_final_rstd,
+    params.ln_final_gamma,
+    grads.d_ln_final_gamma,
+    grads.d_ln_final_beta,
+  )
+
+  // Blocks backward (reverse order)
+  let mut dy = d_hidden
+  for i = config.num_layers - 1; i >= 0; i = i - 1 {
+    dy = transformer_block_backward(
+      dy,
+      cache.block_caches[i],
+      params.blocks[i],
+      config,
+      grads.d_blocks[i],
+    )
+  }
+
+  // Positional embedding backward
+  positional_embedding_backward(dy, grads.d_pos_embedding, seq)
+
+  // Token embedding backward
+  embedding_backward(dy, cache.tokens, grads.d_token_embedding)
+}
+
+///|
 /// Full transformer backward pass
 /// Returns the loss value
 pub fn transformer_backward(
@@ -976,43 +1019,46 @@ pub fn transformer_backward(
     offset: 0,
     strides: cache.logits.shape.strides(),
   }
+  transformer_backward_from_d_logits(cache, params, config, grads, d_logits)
+  loss
+}
 
-  // LM head backward: logits = ln_final_out @ lm_head
-  let d_ln_final_out = batched_linear_backward(
-    d_logits,
-    cache.ln_final_out,
-    params.lm_head,
-    grads.d_lm_head,
-  )
-
-  // Final LN backward
-  let d_hidden = layer_norm_backward(
-    d_ln_final_out,
-    cache.hidden_before_final_ln,
-    cache.ln_final_mean,
-    cache.ln_final_rstd,
-    params.ln_final_gamma,
-    grads.d_ln_final_gamma,
-    grads.d_ln_final_beta,
-  )
-
-  // Blocks backward (reverse order)
-  let mut dy = d_hidden
-  for i = config.num_layers - 1; i >= 0; i = i - 1 {
-    dy = transformer_block_backward(
-      dy,
-      cache.block_caches[i],
-      params.blocks[i],
-      config,
-      grads.d_blocks[i],
-    )
+///|
+/// Full transformer backward for causal LM objective over all positions.
+/// labels: [batch, seq], where labels[b][s] is the target token for logits[b, s, :]
+pub fn transformer_backward_lm(
+  cache : TransformerCache,
+  params : TransformerParams,
+  config : TransformerConfig,
+  grads : TransformerGrads,
+  labels : Array[Array[Int]],
+) -> Float {
+  let batch = cache.tokens.length()
+  let seq = cache.tokens[0].length()
+  let vocab = config.vocab_size
+  let flat_labels : Array[Int] = []
+  for b = 0; b < batch; b = b + 1 {
+    for s = 0; s < seq; s = s + 1 {
+      flat_labels.push(labels[b][s])
+    }
   }
-
-  // Positional embedding backward
-  positional_embedding_backward(dy, grads.d_pos_embedding, seq)
-
-  // Token embedding backward
-  embedding_backward(dy, cache.tokens, grads.d_token_embedding)
+  let logits_c = cache.logits.contiguous()
+  let flat_shape = shape_new_unchecked([batch * seq, vocab])
+  let flat_logits = Tensor::{
+    data: logits_c.data,
+    shape: flat_shape,
+    offset: 0,
+    strides: flat_shape.strides(),
+  }
+  let loss = tensor_cross_entropy(flat_logits, flat_labels).unwrap()
+  let d_flat_logits = cross_entropy_backward(flat_logits, flat_labels)
+  let d_logits = Tensor::{
+    data: d_flat_logits.data,
+    shape: cache.logits.shape,
+    offset: 0,
+    strides: cache.logits.shape.strides(),
+  }
+  transformer_backward_from_d_logits(cache, params, config, grads, d_logits)
   loss
 }
 
@@ -1105,14 +1151,16 @@ pub fn transformer_train(
 
   // Create training examples: sliding window
   let inputs : Array[Array[Int]] = []
-  let targets : Array[Int] = []
+  let targets : Array[Array[Int]] = []
   for i = 0; i + seq_len < all_ids.length(); i = i + 1 {
     let input_seq : Array[Int] = []
+    let target_seq : Array[Int] = []
     for j = 0; j < seq_len; j = j + 1 {
       input_seq.push(all_ids[i + j])
+      target_seq.push(all_ids[i + j + 1])
     }
     inputs.push(input_seq)
-    targets.push(all_ids[i + seq_len])
+    targets.push(target_seq)
   }
   if inputs.length() == 0 {
     return loss_history
@@ -1130,7 +1178,7 @@ pub fn transformer_train(
     )
 
     // Backward
-    let loss = transformer_backward(cache, params, config, grads, targets)
+    let loss = transformer_backward_lm(cache, params, config, grads, targets)
     loss_history.push(loss)
 
     // SGD update

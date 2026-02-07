@@ -157,6 +157,26 @@ Transformer/ViT の attention cache を `Array[Array[Float]]` から
 
 これにより、MHA backward の GC 圧力と MoonBit 側ループ負荷を低減。
 
+### Additional progress (LM objective + forward copy removal)
+
+1. **Token-wise causal LM backward を追加**
+   - `transformer_backward_lm` を追加し、`[batch, seq, vocab]` を
+     `[batch * seq, vocab]` に flatten して cross-entropy を計算。
+   - `transformer_train` は last-token だけでなく、系列全位置の
+     next-token 目的 (`labels[b][s] = input[b][s+1]`) で学習するよう更新。
+   - whitebox test で `seq=1` 時に既存 `transformer_backward` と
+     損失・`d_lm_head` が一致することを確認。
+
+2. **MHA forward の head copy を削減**
+   - これまで `scores` の一時バッファから `attn_weights_all[head]` へ
+     head ごとに copy していたが、`sgemm` の出力先を直接
+     `attn_weights_all[head]` に変更。
+   - 同バッファをそのまま softmax と `attn @ V` に再利用し、
+     Transformer / ViT / ViT profile の forward で copy ループを除去。
+
+この変更は GPT-2 相当の簡易LMトレーニングに向けた学習目的の整合性を上げつつ、
+attention forward のメモリ移動コストも下げる。
+
 ## PyTorch Comparison
 
 ```

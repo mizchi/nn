@@ -185,7 +185,6 @@ pub fn vit_profile_step(
       total_heads,
       fn(_i) { FixedArray::make(scores_size, Float::from_int(0)) },
     )
-    let scores = FixedArray::make(scores_size, Float::from_int(0))
     let attn_result_data = FixedArray::make(
       batch * num_heads * seq_len * d_k,
       Float::from_int(0),
@@ -194,6 +193,7 @@ pub fn vit_profile_step(
       for h = 0; h < num_heads; h = h + 1 {
         let head_idx = b * num_heads + h
         let head_base = head_idx * seq_len * d_k
+        let scores = attn_weights_all[head_idx]
         let t0 = clock_ns()
         native_sgemm_offset(
           0,
@@ -219,10 +219,6 @@ pub fn vit_profile_step(
         native_softmax_inplace(scores, seq_len, seq_len)
         let t1 = clock_ns()
         fwd_softmax_ns = fwd_softmax_ns + t1 - t0
-        let scores_copy = attn_weights_all[head_idx]
-        for idx = 0; idx < scores_size; idx = idx + 1 {
-          scores_copy[idx] = scores[idx]
-        }
         let t0 = clock_ns()
         native_sgemm_offset(
           0,

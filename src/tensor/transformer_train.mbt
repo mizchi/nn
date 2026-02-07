@@ -659,17 +659,11 @@ fn multi_head_attention_backward(
     grads.d_w_v,
   )
 
-  // Sum the three dx contributions (self-attention)
-  let dx_data = FixedArray::make(batch * seq * d_model, Float::from_int(0))
-  for i = 0; i < dx_data.length(); i = i + 1 {
-    dx_data[i] = dx_q.data[i] + dx_k.data[i] + dx_v.data[i]
-  }
-  Tensor::{
-    data: dx_data,
-    shape: dx_q.shape,
-    offset: 0,
-    strides: dx_q.shape.strides(),
-  }
+  // Reuse dx_q buffer and accumulate the remaining two contributions.
+  let n = batch * seq * d_model
+  accumulate_inplace(dx_q.data, dx_k.data, n)
+  accumulate_inplace(dx_q.data, dx_v.data, n)
+  dx_q
 }
 
 ///|

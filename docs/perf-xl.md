@@ -351,6 +351,25 @@ Transformer LM 学習ループの継続チューニング用に、比較条件�
 - 改善は確認できたが、`+20%` 目標には未達
 - 次は MHA backward の `dx_q + dx_k + dx_v` 合算を kernel 化してメモリ走査を 1 回に寄せる
 
+### Iteration: MHA Backward DX Merge In-place
+
+実装:
+
+- MHA backward の最終合算 (`dx_q + dx_k + dx_v`) で新規 `FixedArray` を廃止
+- `dx_q` バッファを再利用し、`accumulate_inplace` 2 回で in-place 合算
+
+再計測（同一条件）:
+
+| Case | Baseline tok/s | New tok/s | Delta |
+|------|----------------|-----------|-------|
+| A (`seq=128, layers=6`) | `11140.0488` | `12058.6426` | `+8.25%` |
+| B (`seq=256, layers=12`) | `5016.9336` | `5559.0059` | `+10.81%` |
+
+評価:
+
+- 目標 `+20%` は未達だが、二桁改善に近い伸びを確認
+- 次は `AdamW step` 融合か、`LayerNorm/FFN` の step 間 scratch 再利用で継続
+
 ## PyTorch Comparison
 
 ```

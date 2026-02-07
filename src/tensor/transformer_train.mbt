@@ -775,16 +775,11 @@ pub fn transformer_forward_with_cache(
     let k_proj = batched_linear(ln1_out, bp.w_k).unwrap()
     let v_proj = batched_linear(ln1_out, bp.w_v).unwrap()
 
-    // Reshape for heads
-    let q_heads = reshape_for_heads(q_proj, batch, seq, num_heads, d_k)
-    let k_heads = reshape_for_heads(k_proj, batch, seq, num_heads, d_k)
-    let v_heads = reshape_for_heads(v_proj, batch, seq, num_heads, d_k)
-
-    // Attention with cached weights
+    // Attention with cached weights (interleaved layout, no head reshape copies).
     let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
-    let qc = q_heads.contiguous()
-    let kc = k_heads.contiguous()
-    let vc = v_heads.contiguous()
+    let qc = q_proj.contiguous()
+    let kc = k_proj.contiguous()
+    let vc = v_proj.contiguous()
     let mc = match mask {
       None => None
       Some(m) => Some(m.contiguous())
@@ -795,78 +790,46 @@ pub fn transformer_forward_with_cache(
       total_heads * scores_size,
       Float::from_int(0),
     )
-    let attn_result_data = FixedArray::make(
-      batch * num_heads * seq * d_k,
+    let attn_concat_data = FixedArray::make(
+      batch * seq * d_model,
       Float::from_int(0),
     )
-    for b = 0; b < batch; b = b + 1 {
-      for h = 0; h < num_heads; h = h + 1 {
-        let head_idx = b * num_heads + h
-        let head_base = head_idx * seq * d_k
-        let scores_off = head_idx * scores_size
-        // scores = Q @ K^T * scale : [seq, d_k] @ [d_k, seq] -> [seq, seq]
-        native_sgemm_offset(
-          0,
-          1,
-          seq,
+    match mc {
+      Some(m) =>
+        attention_forward_batch_interleaved_masked(
+          qc.data,
+          kc.data,
+          vc.data,
+          m.data,
+          attn_weights_all,
+          attn_concat_data,
+          batch,
+          num_heads,
           seq,
           d_k,
           scale,
+        )
+      None =>
+        attention_forward_batch_interleaved(
           qc.data,
-          head_base,
-          d_k,
           kc.data,
-          head_base,
-          d_k,
-          Float::from_int(0),
-          attn_weights_all,
-          scores_off,
-          seq,
-        )
-        // Apply mask
-        match mc {
-          Some(m) =>
-            add_matrix_inplace_offset(
-              attn_weights_all,
-              scores_off,
-              m.data,
-              seq,
-              seq,
-            )
-          None => ()
-        }
-        // Softmax
-        softmax_inplace_offset(attn_weights_all, scores_off, seq, seq)
-        // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
-        native_sgemm_offset(
-          0,
-          0,
-          seq,
-          d_k,
-          seq,
-          Float::from_int(1),
-          attn_weights_all,
-          scores_off,
-          seq,
           vc.data,
-          head_base,
+          attn_weights_all,
+          attn_concat_data,
+          batch,
+          num_heads,
+          seq,
           d_k,
-          Float::from_int(0),
-          attn_result_data,
-          head_base,
-          d_k,
+          scale,
         )
-      }
     }
-    let attn_heads_out = Tensor::{
-      data: attn_result_data,
-      shape: shape_new_unchecked([batch, num_heads, seq, d_k]),
+    let attn_concat_shape = shape_new_unchecked([batch, seq, d_model])
+    let attn_concat = Tensor::{
+      data: attn_concat_data,
+      shape: attn_concat_shape,
       offset: 0,
-      strides: shape_new_unchecked([batch, num_heads, seq, d_k]).strides(),
+      strides: attn_concat_shape.strides(),
     }
-    let attn_concat = reshape_from_heads(
-      attn_heads_out, batch, seq, num_heads, d_k,
-    )
 
     // W_o projection
     let attn_out = batched_linear(attn_concat, bp.w_o).unwrap()

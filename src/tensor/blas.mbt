@@ -122,6 +122,37 @@ extern "C" fn native_attention_backward_batch(
 ) -> Unit = "tensor_attention_backward_batch"
 
 ///|
+#borrow(q, k, v, attn_w, out)
+extern "C" fn native_attention_forward_batch_interleaved(
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  num_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit = "tensor_attention_forward_batch_interleaved"
+
+///|
+#borrow(q, k, v, mask, attn_w, out)
+extern "C" fn native_attention_forward_batch_interleaved_masked(
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  mask : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  num_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit = "tensor_attention_forward_batch_interleaved_masked"
+
+///|
 #borrow(d_out, q, k, v, attn_w, dq, dk, dv)
 extern "C" fn native_attention_backward_batch_interleaved(
   d_out : FixedArray[Float],
@@ -516,6 +547,48 @@ pub fn attention_backward_batch(
 ) -> Unit {
   native_attention_backward_batch(
     d_out, q, k, v, attn_w, dq, dk, dv, total_heads, seq, d_k, scale,
+  )
+}
+
+///|
+/// Fused forward for interleaved layout:
+/// q/k/v and out are [batch, seq, d_model], with d_model = num_heads * d_k.
+/// attn_w is [batch * num_heads, seq, seq] flattened.
+pub fn attention_forward_batch_interleaved(
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  num_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit {
+  native_attention_forward_batch_interleaved(
+    q, k, v, attn_w, out, batch, num_heads, seq, d_k, scale,
+  )
+}
+
+///|
+/// Masked variant of attention_forward_batch_interleaved.
+/// mask is [seq, seq].
+pub fn attention_forward_batch_interleaved_masked(
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  mask : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  out : FixedArray[Float],
+  batch : Int,
+  num_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit {
+  native_attention_forward_batch_interleaved_masked(
+    q, k, v, mask, attn_w, out, batch, num_heads, seq, d_k, scale,
   )
 }
 

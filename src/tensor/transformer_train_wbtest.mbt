@@ -695,6 +695,136 @@ test "attention_backward_batch_interleaved_matches_reshape_path" {
 }
 
 ///|
+test "attention_forward_batch_interleaved_masked_matches_reshape_path" {
+  let batch = 2
+  let seq = 3
+  let num_heads = 2
+  let d_k = 4
+  let d_model = num_heads * d_k
+  let total = batch * seq * d_model
+  let total_heads = batch * num_heads
+  let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
+  let q = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 5 % 23 - 11) / Float::from_int(9)
+    }),
+  ).unwrap()
+  let k = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 3 % 19 - 9) / Float::from_int(8)
+    }),
+  ).unwrap()
+  let v = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 7 % 29 - 14) / Float::from_int(10)
+    }),
+  ).unwrap()
+  let mask = causal_mask(seq).unwrap()
+
+  // Reference path: reshape -> per-head attention loop -> reshape back.
+  let q_heads = reshape_for_heads(q, batch, seq, num_heads, d_k)
+  let k_heads = reshape_for_heads(k, batch, seq, num_heads, d_k)
+  let v_heads = reshape_for_heads(v, batch, seq, num_heads, d_k)
+  let qh = q_heads.contiguous()
+  let kh = k_heads.contiguous()
+  let vh = v_heads.contiguous()
+  let mask_c = mask.contiguous()
+  let scores_size = seq * seq
+  let attn_w_ref = FixedArray::make(
+    total_heads * scores_size,
+    Float::from_int(0),
+  )
+  let out_heads_ref = FixedArray::make(
+    total_heads * seq * d_k,
+    Float::from_int(0),
+  )
+  for b = 0; b < batch; b = b + 1 {
+    for h = 0; h < num_heads; h = h + 1 {
+      let head_idx = b * num_heads + h
+      let head_base = head_idx * seq * d_k
+      let scores_off = head_idx * scores_size
+      sgemm_offset(
+        0,
+        1,
+        seq,
+        seq,
+        d_k,
+        scale,
+        qh.data,
+        head_base,
+        d_k,
+        kh.data,
+        head_base,
+        d_k,
+        Float::from_int(0),
+        attn_w_ref,
+        scores_off,
+        seq,
+      )
+      add_matrix_inplace_offset(attn_w_ref, scores_off, mask_c.data, seq, seq)
+      softmax_inplace_offset(attn_w_ref, scores_off, seq, seq)
+      sgemm_offset(
+        0,
+        0,
+        seq,
+        d_k,
+        seq,
+        Float::from_int(1),
+        attn_w_ref,
+        scores_off,
+        seq,
+        vh.data,
+        head_base,
+        d_k,
+        Float::from_int(0),
+        out_heads_ref,
+        head_base,
+        d_k,
+      )
+    }
+  }
+  let heads_shape = shape_new_unchecked([batch, num_heads, seq, d_k])
+  let out_ref_heads = Tensor::{
+    data: out_heads_ref,
+    shape: heads_shape,
+    offset: 0,
+    strides: heads_shape.strides(),
+  }
+  let out_ref = reshape_from_heads(out_ref_heads, batch, seq, num_heads, d_k)
+
+  // Candidate path: direct interleaved layout.
+  let attn_w = FixedArray::make(total_heads * scores_size, Float::from_int(0))
+  let out = FixedArray::make(total, Float::from_int(0))
+  let q_c = q.contiguous()
+  let k_c = k.contiguous()
+  let v_c = v.contiguous()
+  attention_forward_batch_interleaved_masked(
+    q_c.data,
+    k_c.data,
+    v_c.data,
+    mask_c.data,
+    attn_w,
+    out,
+    batch,
+    num_heads,
+    seq,
+    d_k,
+    scale,
+  )
+  for i = 0; i < total; i = i + 1 {
+    let diff = (out[i] - out_ref.data[i]).to_double().abs()
+    assert_true(diff < 1.0e-6)
+  }
+  for i = 0; i < total_heads * scores_size; i = i + 1 {
+    let diff = (attn_w[i] - attn_w_ref[i]).to_double().abs()
+    assert_true(diff < 1.0e-6)
+  }
+}
+
+///|
 test "ffn_backward_fused_matches_reference" {
   let config = transformer_config(8, 8, 1, 1, 16, 4).unwrap()
   let params = transformer_init_params(config, 123)

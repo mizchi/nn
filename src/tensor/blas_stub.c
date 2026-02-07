@@ -394,6 +394,101 @@ void tensor_attention_backward_batch_interleaved(
   }
 }
 
+// Fused forward for interleaved layout:
+// q/k/v and out are [batch, seq, d_model] (d_model = num_heads * d_k).
+// attn_w is [batch * num_heads, seq, seq] flattened.
+static void tensor_attention_forward_batch_interleaved_impl(
+  const float* q,
+  const float* k,
+  const float* v,
+  const float* mask,
+  float* attn_w,
+  float* out,
+  int batch,
+  int num_heads,
+  int seq,
+  int d_k,
+  float scale
+) {
+  int d_model = num_heads * d_k;
+  int w_stride = seq * seq;
+  for (int b = 0; b < batch; b++) {
+    int batch_off = b * seq * d_model;
+    for (int h = 0; h < num_heads; h++) {
+      int head_off = batch_off + h * d_k;
+      int w_off = (b * num_heads + h) * w_stride;
+      float* scores = attn_w + w_off;
+
+      // scores = Q @ K^T * scale : [seq, d_k] @ [d_k, seq] -> [seq, seq]
+      cblas_sgemm(
+        CblasRowMajor, CblasNoTrans, CblasTrans,
+        seq, seq, d_k,
+        scale,
+        q + head_off, d_model,
+        k + head_off, d_model,
+        0.0f,
+        scores, seq
+      );
+
+      // Apply causal mask if provided.
+      if (mask != NULL) {
+        for (int r = 0; r < seq; r++) {
+          cblas_saxpy(seq, 1.0f, mask + r * seq, 1, scores + r * seq, 1);
+        }
+      }
+
+      // softmax(scores)
+      tensor_softmax_inplace(scores, seq, seq);
+
+      // out_head = scores @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
+      cblas_sgemm(
+        CblasRowMajor, CblasNoTrans, CblasNoTrans,
+        seq, d_k, seq,
+        1.0f,
+        scores, seq,
+        v + head_off, d_model,
+        0.0f,
+        out + head_off, d_model
+      );
+    }
+  }
+}
+
+void tensor_attention_forward_batch_interleaved(
+  const float* q,
+  const float* k,
+  const float* v,
+  float* attn_w,
+  float* out,
+  int batch,
+  int num_heads,
+  int seq,
+  int d_k,
+  float scale
+) {
+  tensor_attention_forward_batch_interleaved_impl(
+    q, k, v, NULL, attn_w, out, batch, num_heads, seq, d_k, scale
+  );
+}
+
+void tensor_attention_forward_batch_interleaved_masked(
+  const float* q,
+  const float* k,
+  const float* v,
+  const float* mask,
+  float* attn_w,
+  float* out,
+  int batch,
+  int num_heads,
+  int seq,
+  int d_k,
+  float scale
+) {
+  tensor_attention_forward_batch_interleaved_impl(
+    q, k, v, mask, attn_w, out, batch, num_heads, seq, d_k, scale
+  );
+}
+
 // Row-wise matrix add:
 // dst[row, col] += add[row, col]
 void tensor_add_matrix_inplace(float* dst, const float* add, int rows, int cols) {

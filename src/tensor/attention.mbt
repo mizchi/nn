@@ -300,12 +300,7 @@ fn multi_head_attention_core(
       )
       // Apply mask
       match mc {
-        Some(m) =>
-          for i = 0; i < seq_q; i = i + 1 {
-            for j = 0; j < seq_k; j = j + 1 {
-              scores[i * seq_k + j] = scores[i * seq_k + j] + m.at2(i, j)
-            }
-          }
+        Some(m) => add_matrix_inplace(scores, m.data, seq_q, seq_k)
         None => ()
       }
       // Softmax over seq_k dimension

@@ -159,6 +159,42 @@ pub fn cross_entropy_backward(logits : Tensor, labels : Array[Int]) -> Tensor {
 }
 
 ///|
+fn cross_entropy_forward_backward_fixed(
+  logits : Tensor,
+  labels : FixedArray[Int],
+) -> (Float, Tensor) {
+  let batch = logits.dim(0)
+  let vocab = logits.dim(1)
+  let lc = logits.contiguous()
+  let d_logits_data = FixedArray::make(batch * vocab, Float::from_int(0))
+  let loss = cross_entropy_fwd_bwd(lc.data, labels, d_logits_data, batch, vocab)
+  (
+    loss,
+    Tensor::{
+      data: d_logits_data,
+      shape: logits.shape,
+      offset: 0,
+      strides: logits.shape.strides(),
+    },
+  )
+}
+
+///|
+/// Cross-entropy forward + backward.
+/// Returns `(loss, d_logits)` where `d_logits = (softmax - one_hot) / batch`.
+pub fn cross_entropy_forward_backward(
+  logits : Tensor,
+  labels : Array[Int],
+) -> (Float, Tensor) {
+  let batch = logits.dim(0)
+  let labels_fixed = FixedArray::make(batch, 0)
+  for i = 0; i < batch; i = i + 1 {
+    labels_fixed[i] = labels[i]
+  }
+  cross_entropy_forward_backward_fixed(logits, labels_fixed)
+}
+
+///|
 /// Batched linear backward
 /// dy: [batch, seq, out_dim], x_cached: [batch, seq, in_dim], w: [in_dim, out_dim]
 /// Returns dx: [batch, seq, in_dim]
@@ -407,7 +443,12 @@ fn feed_forward_backward_fused(
     d_model,
     d_ff,
   )
-  Tensor::{ data: dx_data, shape: dy.shape, offset: 0, strides: dy.shape.strides() }
+  Tensor::{
+    data: dx_data,
+    shape: dy.shape,
+    offset: 0,
+    strides: dy.shape.strides(),
+  }
 }
 
 ///|
@@ -784,12 +825,7 @@ pub fn transformer_forward_with_cache(
         )
         // Apply mask
         match mc {
-          Some(m) =>
-            for i = 0; i < seq; i = i + 1 {
-              for j = 0; j < seq; j = j + 1 {
-                scores[i * seq + j] = scores[i * seq + j] + m.at2(i, j)
-              }
-            }
+          Some(m) => add_matrix_inplace(scores, m.data, seq, seq)
           None => ()
         }
         // Softmax
@@ -998,11 +1034,10 @@ pub fn transformer_backward(
     strides: shape_new_unchecked([batch, vocab]).strides(),
   }
 
-  // Compute loss
-  let loss = tensor_cross_entropy(last_logits, labels).unwrap()
-
-  // Cross-entropy backward on last position only
-  let d_last_logits = cross_entropy_backward(last_logits, labels)
+  // Cross-entropy forward + backward on last position only
+  let (loss, d_last_logits) = cross_entropy_forward_backward(
+    last_logits, labels,
+  )
 
   // Expand to full sequence gradient: [batch, seq, vocab]
   let d_logits_data = FixedArray::make(batch * seq * vocab, Float::from_int(0))
@@ -1036,10 +1071,12 @@ pub fn transformer_backward_lm(
   let batch = cache.tokens.length()
   let seq = cache.tokens[0].length()
   let vocab = config.vocab_size
-  let flat_labels : Array[Int] = []
+  let flat_labels = FixedArray::make(batch * seq, 0)
+  let mut idx = 0
   for b = 0; b < batch; b = b + 1 {
     for s = 0; s < seq; s = s + 1 {
-      flat_labels.push(labels[b][s])
+      flat_labels[idx] = labels[b][s]
+      idx = idx + 1
     }
   }
   let logits_c = cache.logits.contiguous()
@@ -1050,8 +1087,9 @@ pub fn transformer_backward_lm(
     offset: 0,
     strides: flat_shape.strides(),
   }
-  let loss = tensor_cross_entropy(flat_logits, flat_labels).unwrap()
-  let d_flat_logits = cross_entropy_backward(flat_logits, flat_labels)
+  let (loss, d_flat_logits) = cross_entropy_forward_backward_fixed(
+    flat_logits, flat_labels,
+  )
   let d_logits = Tensor::{
     data: d_flat_logits.data,
     shape: cache.logits.shape,
@@ -1133,12 +1171,13 @@ fn zero_tensor(t : Tensor) -> Unit {
 }
 
 ///|
-/// Train a tiny transformer on text data
-/// Returns loss history (one value per epoch)
-pub fn transformer_train(
+/// Train a tiny transformer on text data with step-based mini-batch updates.
+/// Returns loss history (one value per step).
+pub fn transformer_train_lm_steps(
   text : String,
   config : TransformerConfig,
-  epochs : Int,
+  steps : Int,
+  batch_size : Int,
   lr : Float,
   seed : Int,
 ) -> Array[Float] {
@@ -1162,27 +1201,57 @@ pub fn transformer_train(
     inputs.push(input_seq)
     targets.push(target_seq)
   }
-  if inputs.length() == 0 {
+  if inputs.length() == 0 || steps <= 0 {
     return loss_history
   }
+  let effective_batch = if batch_size <= 0 {
+    1
+  } else if batch_size > inputs.length() {
+    inputs.length()
+  } else {
+    batch_size
+  }
   let mask = causal_mask(seq_len).unwrap()
-  for _epoch = 0; _epoch < epochs; _epoch = _epoch + 1 {
+  for step = 0; step < steps; step = step + 1 {
     zero_grads(grads)
+    let batch_inputs : Array[Array[Int]] = []
+    let batch_targets : Array[Array[Int]] = []
+    let base = step * effective_batch % inputs.length()
+    for i = 0; i < effective_batch; i = i + 1 {
+      let idx = (base + i) % inputs.length()
+      batch_inputs.push(inputs[idx])
+      batch_targets.push(targets[idx])
+    }
 
-    // Forward with cache (batch = all examples)
+    // Forward with cache (mini-batch)
     let (_, cache) = transformer_forward_with_cache(
-      inputs,
+      batch_inputs,
       params,
       config,
       Some(mask),
     )
 
     // Backward
-    let loss = transformer_backward_lm(cache, params, config, grads, targets)
+    let loss = transformer_backward_lm(
+      cache, params, config, grads, batch_targets,
+    )
     loss_history.push(loss)
 
     // SGD update
     sgd_update(params, grads, lr)
   }
   loss_history
+}
+
+///|
+/// Train with full-batch updates (compat wrapper).
+/// Returns loss history (one value per epoch).
+pub fn transformer_train(
+  text : String,
+  config : TransformerConfig,
+  epochs : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[Float] {
+  transformer_train_lm_steps(text, config, epochs, 1 << 30, lr, seed)
 }

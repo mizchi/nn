@@ -105,6 +105,51 @@ void tensor_softmax_backward_rows(
   }
 }
 
+// Row-wise matrix add:
+// dst[row, col] += add[row, col]
+void tensor_add_matrix_inplace(float* dst, const float* add, int rows, int cols) {
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(cols, 1.0f, add + r * cols, 1, dst + r * cols, 1);
+  }
+}
+
+// Cross-entropy forward + backward over rows.
+// logits: [rows, cols], labels: [rows]
+// returns average loss, writes d_logits = (softmax - one_hot(labels)) / rows
+float tensor_cross_entropy_fwd_bwd(
+  const float* logits,
+  const int* labels,
+  float* d_logits,
+  int rows,
+  int cols
+) {
+  float loss_sum = 0.0f;
+  float inv_rows = 1.0f / (float)rows;
+  for (int i = 0; i < rows; i++) {
+    const float* row = logits + i * cols;
+    float* d_row = d_logits + i * cols;
+    int label = labels[i];
+    float max_val = row[0];
+    for (int j = 1; j < cols; j++) {
+      if (row[j] > max_val) max_val = row[j];
+    }
+    float sum = 0.0f;
+    for (int j = 0; j < cols; j++) {
+      float ex = expf(row[j] - max_val);
+      d_row[j] = ex;
+      sum += ex;
+    }
+    float inv_sum = 1.0f / sum;
+    float log_sum = logf(sum);
+    loss_sum += -((row[label] - max_val) - log_sum);
+    for (int j = 0; j < cols; j++) {
+      d_row[j] = d_row[j] * inv_sum * inv_rows;
+    }
+    d_row[label] -= inv_rows;
+  }
+  return loss_sum * inv_rows;
+}
+
 // Log-softmax: result[i] = (x[i] - max) - log(sum(exp(x - max)))
 void tensor_log_softmax(const float* input, float* output, int rows, int cols) {
   for (int i = 0; i < rows; i++) {

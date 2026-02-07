@@ -60,6 +60,25 @@ extern "C" fn native_softmax_backward_rows(
 ) -> Unit = "tensor_softmax_backward_rows"
 
 ///|
+#borrow(dst, add)
+extern "C" fn native_add_matrix_inplace(
+  dst : FixedArray[Float],
+  add : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit = "tensor_add_matrix_inplace"
+
+///|
+#borrow(logits, labels, d_logits)
+extern "C" fn native_cross_entropy_fwd_bwd(
+  logits : FixedArray[Float],
+  labels : FixedArray[Int],
+  d_logits : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Float = "tensor_cross_entropy_fwd_bwd"
+
+///|
 #borrow(input, output)
 extern "C" fn native_log_softmax(
   input : FixedArray[Float],
@@ -295,6 +314,29 @@ pub fn softmax_backward_rows(
   cols : Int,
 ) -> Unit {
   native_softmax_backward_rows(d_attn, attn, out, rows, cols)
+}
+
+///|
+pub fn add_matrix_inplace(
+  dst : FixedArray[Float],
+  add : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit {
+  native_add_matrix_inplace(dst, add, rows, cols)
+}
+
+///|
+/// Cross-entropy forward + backward over rows.
+/// Returns average loss and writes d_logits = (softmax - one_hot(labels)) / rows.
+pub fn cross_entropy_fwd_bwd(
+  logits : FixedArray[Float],
+  labels : FixedArray[Int],
+  d_logits : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Float {
+  native_cross_entropy_fwd_bwd(logits, labels, d_logits, rows, cols)
 }
 
 ///|
@@ -737,20 +779,8 @@ pub fn fused_ffn_backward(
   d_ff : Int,
 ) -> Unit {
   native_fused_ffn_backward(
-    dy,
-    ff_post_gelu,
-    ff_pre_gelu,
-    ln2_out,
-    w2,
-    w1,
-    d_w2,
-    d_b2,
-    d_w1,
-    d_b1,
-    dx,
-    n,
-    d_model,
-    d_ff,
+    dy, ff_post_gelu, ff_pre_gelu, ln2_out, w2, w1, d_w2, d_b2, d_w1, d_b1, dx, n,
+    d_model, d_ff,
   )
 }
 

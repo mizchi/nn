@@ -177,6 +177,26 @@ Transformer/ViT の attention cache を `Array[Array[Float]]` から
 この変更は GPT-2 相当の簡易LMトレーニングに向けた学習目的の整合性を上げつつ、
 attention forward のメモリ移動コストも下げる。
 
+### Additional progress (CE fusion + mini-batch steps)
+
+1. **Cross-entropy forward/backward を C kernel に融合**
+   - `tensor_cross_entropy_fwd_bwd` を追加し、`loss` と
+     `d_logits = (softmax - one_hot) / batch` を 1 pass で生成。
+   - `transformer_backward` / `transformer_backward_lm` はこの fused 経路を使用。
+   - whitebox test で従来実装（`tensor_cross_entropy + cross_entropy_backward`）と
+     loss/gradient 一致を確認。
+
+2. **causal mask 適用を row-wise kernel 化**
+   - `tensor_add_matrix_inplace` を追加し、`scores += mask` を C 側で実行。
+   - `transformer_train` と `attention` の MHA path から
+     MoonBit 二重ループ (`m.at2`) を除去。
+
+3. **step-based mini-batch 学習 API を追加**
+   - `transformer_train_lm_steps(text, config, steps, batch_size, lr, seed)` を追加。
+   - sliding window データを mini-batch で分割して学習可能にした。
+   - `transformer_train` は互換ラッパーとして full-batch 学習を維持。
+   - whitebox test で mini-batch 学習の loss 低下を確認。
+
 ## PyTorch Comparison
 
 ```

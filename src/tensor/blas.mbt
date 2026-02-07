@@ -221,6 +221,41 @@ pub fn scale_inplace(x : FixedArray[Float], s : Float, n : Int) -> Unit {
 }
 
 ///|
+#borrow(x, out)
+extern "C" fn native_relu_forward(
+  x : FixedArray[Float],
+  out : FixedArray[Float],
+  n : Int,
+) -> Unit = "tensor_relu_forward"
+
+///|
+pub fn relu_forward(
+  x : FixedArray[Float],
+  out : FixedArray[Float],
+  n : Int,
+) -> Unit {
+  native_relu_forward(x, out, n)
+}
+
+///|
+#borrow(dst, src)
+extern "C" fn native_accumulate(
+  dst : FixedArray[Float],
+  src : FixedArray[Float],
+  n : Int,
+) -> Unit = "tensor_accumulate"
+
+///|
+/// dst[i] += src[i] (BLAS saxpy with alpha=1)
+pub fn accumulate_inplace(
+  dst : FixedArray[Float],
+  src : FixedArray[Float],
+  n : Int,
+) -> Unit {
+  native_accumulate(dst, src, n)
+}
+
+///|
 #borrow(a, b, c)
 extern "C" fn native_sgemm_offset(
   trans_a : Int,

@@ -64,15 +64,13 @@ pub fn Tape::backward(self : Tape, output : Var) -> Unit {
 
 ///|
 /// Accumulate gradient for node at given id.
+/// Uses BLAS saxpy for vectorized addition.
 fn accumulate(tape : Tape, id : Int, g : @tensor.Tensor) -> Unit {
   match tape.nodes[id].grad {
     None => tape.nodes[id].grad = Some(g)
     Some(existing) => {
-      let ed = existing.data
       let gd = g.contiguous().data
-      for i = 0; i < ed.length(); i = i + 1 {
-        ed[i] += gd[i]
-      }
+      @tensor.accumulate_inplace(existing.data, gd, existing.data.length())
     }
   }
 }

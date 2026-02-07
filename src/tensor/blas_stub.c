@@ -233,6 +233,18 @@ void tensor_scale_inplace(float* x, float s, int n) {
   cblas_sscal(n, s, x, 1);
 }
 
+// ReLU forward: out[i] = max(0, x[i])
+void tensor_relu_forward(const float* x, float* out, int n) {
+  for (int i = 0; i < n; i++) {
+    out[i] = x[i] > 0.0f ? x[i] : 0.0f;
+  }
+}
+
+// Element-wise accumulate: dst[i] += src[i] (same as saxpy with alpha=1)
+void tensor_accumulate(float* dst, const float* src, int n) {
+  cblas_saxpy(n, 1.0f, src, 1, dst, 1);
+}
+
 uint64_t timer_clock_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

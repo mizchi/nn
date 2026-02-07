@@ -100,12 +100,19 @@ pub fn tensor_matmul_2d(a : Tensor, b : Tensor) -> Result[Tensor, String] {
   let bc = b.contiguous()
   let result = FixedArray::make(m * n, Float::from_int(0))
   native_sgemm(
-    0, 0, m, n, k1,
+    0,
+    0,
+    m,
+    n,
+    k1,
     Float::from_int(1),
-    ac.data, k1,
-    bc.data, n,
+    ac.data,
+    k1,
+    bc.data,
+    n,
     Float::from_int(0),
-    result, n,
+    result,
+    n,
   )
   Ok(tensor_new_fixed(out_shape, result))
 }
@@ -138,12 +145,22 @@ pub fn tensor_matmul(a : Tensor, b : Tensor) -> Result[Tensor, String] {
     let result = FixedArray::make(batch * m * n, Float::from_int(0))
     for bi = 0; bi < batch; bi = bi + 1 {
       native_sgemm_offset(
-        0, 0, m, n, k1,
+        0,
+        0,
+        m,
+        n,
+        k1,
         Float::from_int(1),
-        ac.data, bi * m * k1, k1,
-        bc.data, bi * k1 * n, n,
+        ac.data,
+        bi * m * k1,
+        k1,
+        bc.data,
+        bi * k1 * n,
+        n,
         Float::from_int(0),
-        result, bi * m * n, n,
+        result,
+        bi * m * n,
+        n,
       )
     }
     return Ok(tensor_new_fixed(out_shape, result))
@@ -167,12 +184,22 @@ pub fn tensor_matmul(a : Tensor, b : Tensor) -> Result[Tensor, String] {
     let result = FixedArray::make(batch * m * n, Float::from_int(0))
     for bi = 0; bi < batch; bi = bi + 1 {
       native_sgemm_offset(
-        0, 0, m, n, k1,
+        0,
+        0,
+        m,
+        n,
+        k1,
         Float::from_int(1),
-        ac.data, bi * m * k1, k1,
-        bc.data, 0, n,
+        ac.data,
+        bi * m * k1,
+        k1,
+        bc.data,
+        0,
+        n,
         Float::from_int(0),
-        result, bi * m * n, n,
+        result,
+        bi * m * n,
+        n,
       )
     }
     return Ok(tensor_new_fixed(out_shape, result))
@@ -207,11 +234,9 @@ pub fn tensor_softmax(t : Tensor) -> Result[Tensor, String] {
 /// ReLU activation
 pub fn tensor_relu(t : Tensor) -> Tensor {
   let tc = t.contiguous()
-  let result = FixedArray::make(tc.numel(), Float::from_int(0))
-  let zero = Float::from_int(0)
-  for i = 0; i < result.length(); i = i + 1 {
-    result[i] = if tc.data[i] > zero { tc.data[i] } else { zero }
-  }
+  let n = tc.numel()
+  let result = FixedArray::make(n, Float::from_int(0))
+  relu_forward(tc.data, result, n)
   Tensor::{
     data: result,
     shape: t.shape,

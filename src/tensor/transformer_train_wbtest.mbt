@@ -552,6 +552,149 @@ test "attention_backward_batch_matches_head_loop" {
 }
 
 ///|
+test "attention_backward_batch_interleaved_matches_reshape_path" {
+  let batch = 2
+  let seq = 3
+  let num_heads = 2
+  let d_k = 4
+  let d_model = num_heads * d_k
+  let total = batch * seq * d_model
+  let total_heads = batch * num_heads
+  let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
+  let d_out = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 5 % 23 - 11) / Float::from_int(9)
+    }),
+  ).unwrap()
+  let q = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 3 % 19 - 9) / Float::from_int(8)
+    }),
+  ).unwrap()
+  let k = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 7 % 29 - 14) / Float::from_int(10)
+    }),
+  ).unwrap()
+  let v = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    Array::makei(total, fn(i) {
+      Float::from_int(i * 11 % 31 - 15) / Float::from_int(11)
+    }),
+  ).unwrap()
+  let q_heads = reshape_for_heads(q, batch, seq, num_heads, d_k)
+  let k_heads = reshape_for_heads(k, batch, seq, num_heads, d_k)
+  let v_heads = reshape_for_heads(v, batch, seq, num_heads, d_k)
+  let d_out_heads = reshape_for_heads(d_out, batch, seq, num_heads, d_k)
+  let attn_w = FixedArray::make(total_heads * seq * seq, Float::from_int(0))
+  for h = 0; h < total_heads; h = h + 1 {
+    let base = h * seq * seq
+    // Each row sums to 1.0.
+    attn_w[base] = Float::from_double(0.6)
+    attn_w[base + 1] = Float::from_double(0.3)
+    attn_w[base + 2] = Float::from_double(0.1)
+    attn_w[base + 3] = Float::from_double(0.2)
+    attn_w[base + 4] = Float::from_double(0.5)
+    attn_w[base + 5] = Float::from_double(0.3)
+    attn_w[base + 6] = Float::from_double(0.1)
+    attn_w[base + 7] = Float::from_double(0.2)
+    attn_w[base + 8] = Float::from_double(0.7)
+  }
+
+  // Reference path: reshape -> attention_backward_batch -> reshape back.
+  let n_heads = total_heads * seq * d_k
+  let dq_heads_ref = FixedArray::make(n_heads, Float::from_int(0))
+  let dk_heads_ref = FixedArray::make(n_heads, Float::from_int(0))
+  let dv_heads_ref = FixedArray::make(n_heads, Float::from_int(0))
+  attention_backward_batch(
+    d_out_heads.data,
+    q_heads.data,
+    k_heads.data,
+    v_heads.data,
+    attn_w,
+    dq_heads_ref,
+    dk_heads_ref,
+    dv_heads_ref,
+    total_heads,
+    seq,
+    d_k,
+    scale,
+  )
+  let heads_shape = shape_new_unchecked([batch, num_heads, seq, d_k])
+  let dq_ref = reshape_from_heads(
+    Tensor::{
+      data: dq_heads_ref,
+      shape: heads_shape,
+      offset: 0,
+      strides: heads_shape.strides(),
+    },
+    batch,
+    seq,
+    num_heads,
+    d_k,
+  )
+  let dk_ref = reshape_from_heads(
+    Tensor::{
+      data: dk_heads_ref,
+      shape: heads_shape,
+      offset: 0,
+      strides: heads_shape.strides(),
+    },
+    batch,
+    seq,
+    num_heads,
+    d_k,
+  )
+  let dv_ref = reshape_from_heads(
+    Tensor::{
+      data: dv_heads_ref,
+      shape: heads_shape,
+      offset: 0,
+      strides: heads_shape.strides(),
+    },
+    batch,
+    seq,
+    num_heads,
+    d_k,
+  )
+
+  // Candidate path: direct interleaved layout.
+  let dq = FixedArray::make(total, Float::from_int(0))
+  let dk = FixedArray::make(total, Float::from_int(0))
+  let dv = FixedArray::make(total, Float::from_int(0))
+  let d_out_c = d_out.contiguous()
+  let q_c = q.contiguous()
+  let k_c = k.contiguous()
+  let v_c = v.contiguous()
+  attention_backward_batch_interleaved(
+    d_out_c.data,
+    q_c.data,
+    k_c.data,
+    v_c.data,
+    attn_w,
+    dq,
+    dk,
+    dv,
+    batch,
+    num_heads,
+    seq,
+    d_k,
+    scale,
+  )
+  for i = 0; i < total; i = i + 1 {
+    let dq_diff = (dq[i] - dq_ref.data[i]).to_double().abs()
+    let dk_diff = (dk[i] - dk_ref.data[i]).to_double().abs()
+    let dv_diff = (dv[i] - dv_ref.data[i]).to_double().abs()
+    assert_true(dq_diff < 1.0e-6)
+    assert_true(dk_diff < 1.0e-6)
+    assert_true(dv_diff < 1.0e-6)
+  }
+}
+
+///|
 test "ffn_backward_fused_matches_reference" {
   let config = transformer_config(8, 8, 1, 1, 16, 4).unwrap()
   let params = transformer_init_params(config, 123)

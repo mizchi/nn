@@ -616,70 +616,51 @@ fn multi_head_attention_backward(
   )
 
   // d_concat is [batch, seq, d_model]
-  // Reshape to [batch, num_heads, seq, d_k] for per-head backward
-  let d_concat_heads = reshape_for_heads(d_concat, batch, seq, num_heads, d_k)
-
-  // Reshape cached projections to head format
-  let q_heads = reshape_for_heads(cache.q_proj, batch, seq, num_heads, d_k)
-  let k_heads = reshape_for_heads(cache.k_proj, batch, seq, num_heads, d_k)
-  let v_heads = reshape_for_heads(cache.v_proj, batch, seq, num_heads, d_k)
+  // Run attention backward directly on [batch, seq, d_model] interleaved layout.
+  // This removes reshape_for_heads/reshape_from_heads copies.
   let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
-
-  // Per-head attention backward
-  let dq_heads_data = FixedArray::make(
-    batch * num_heads * seq * d_k,
-    Float::from_int(0),
-  )
-  let dk_heads_data = FixedArray::make(
-    batch * num_heads * seq * d_k,
-    Float::from_int(0),
-  )
-  let dv_heads_data = FixedArray::make(
-    batch * num_heads * seq * d_k,
-    Float::from_int(0),
-  )
-  let dc = d_concat_heads.contiguous()
-  let qc = q_heads.contiguous()
-  let kc = k_heads.contiguous()
-  let vc = v_heads.contiguous()
-  let total_heads = batch * num_heads
-  attention_backward_batch(
+  let proj_size = batch * seq * d_model
+  let dq_proj_data = FixedArray::make(proj_size, Float::from_int(0))
+  let dk_proj_data = FixedArray::make(proj_size, Float::from_int(0))
+  let dv_proj_data = FixedArray::make(proj_size, Float::from_int(0))
+  let dc = d_concat.contiguous()
+  let qc = cache.q_proj.contiguous()
+  let kc = cache.k_proj.contiguous()
+  let vc = cache.v_proj.contiguous()
+  attention_backward_batch_interleaved(
     dc.data,
     qc.data,
     kc.data,
     vc.data,
     cache.attn_weights,
-    dq_heads_data,
-    dk_heads_data,
-    dv_heads_data,
-    total_heads,
+    dq_proj_data,
+    dk_proj_data,
+    dv_proj_data,
+    batch,
+    num_heads,
     seq,
     d_k,
     scale,
   )
-
-  // Reshape heads back to [batch, seq, d_model]
-  let dq_heads = Tensor::{
-    data: dq_heads_data,
-    shape: shape_new_unchecked([batch, num_heads, seq, d_k]),
+  let proj_shape = shape_new_unchecked([batch, seq, d_model])
+  let dq_proj = Tensor::{
+    data: dq_proj_data,
+    shape: proj_shape,
     offset: 0,
-    strides: shape_new_unchecked([batch, num_heads, seq, d_k]).strides(),
+    strides: proj_shape.strides(),
   }
-  let dk_heads = Tensor::{
-    data: dk_heads_data,
-    shape: shape_new_unchecked([batch, num_heads, seq, d_k]),
+  let dk_proj = Tensor::{
+    data: dk_proj_data,
+    shape: proj_shape,
     offset: 0,
-    strides: shape_new_unchecked([batch, num_heads, seq, d_k]).strides(),
+    strides: proj_shape.strides(),
   }
-  let dv_heads = Tensor::{
-    data: dv_heads_data,
-    shape: shape_new_unchecked([batch, num_heads, seq, d_k]),
+  let dv_proj = Tensor::{
+    data: dv_proj_data,
+    shape: proj_shape,
     offset: 0,
-    strides: shape_new_unchecked([batch, num_heads, seq, d_k]).strides(),
+    strides: proj_shape.strides(),
   }
-  let dq_proj = reshape_from_heads(dq_heads, batch, seq, num_heads, d_k)
-  let dk_proj = reshape_from_heads(dk_heads, batch, seq, num_heads, d_k)
-  let dv_proj = reshape_from_heads(dv_heads, batch, seq, num_heads, d_k)
 
   // W_q, W_k, W_v backward (self-attention: input is the same for Q, K, V)
   let dx_q = batched_linear_backward_fused(

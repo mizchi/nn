@@ -122,6 +122,24 @@ extern "C" fn native_attention_backward_batch(
 ) -> Unit = "tensor_attention_backward_batch"
 
 ///|
+#borrow(d_out, q, k, v, attn_w, dq, dk, dv)
+extern "C" fn native_attention_backward_batch_interleaved(
+  d_out : FixedArray[Float],
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  dq : FixedArray[Float],
+  dk : FixedArray[Float],
+  dv : FixedArray[Float],
+  batch : Int,
+  num_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit = "tensor_attention_backward_batch_interleaved"
+
+///|
 #borrow(dst, add)
 extern "C" fn native_add_matrix_inplace(
   dst : FixedArray[Float],
@@ -498,6 +516,29 @@ pub fn attention_backward_batch(
 ) -> Unit {
   native_attention_backward_batch(
     d_out, q, k, v, attn_w, dq, dk, dv, total_heads, seq, d_k, scale,
+  )
+}
+
+///|
+/// Fused backward for interleaved layout:
+/// d_out/q/k/v, dq/dk/dv are [batch, seq, d_model], with d_model = num_heads * d_k.
+pub fn attention_backward_batch_interleaved(
+  d_out : FixedArray[Float],
+  q : FixedArray[Float],
+  k : FixedArray[Float],
+  v : FixedArray[Float],
+  attn_w : FixedArray[Float],
+  dq : FixedArray[Float],
+  dk : FixedArray[Float],
+  dv : FixedArray[Float],
+  batch : Int,
+  num_heads : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit {
+  native_attention_backward_batch_interleaved(
+    d_out, q, k, v, attn_w, dq, dk, dv, batch, num_heads, seq, d_k, scale,
   )
 }
 

@@ -395,6 +395,44 @@ Transformer LM 学習ループの継続チューニング用に、比較条件�
 - 固定KPI目標（`+20%`）を A/B ともに達成
 - 中期ゴール（GPT-2 相当学習）に向け、Optimizer は AdamW 経路を基準にできる状態
 
+### Iteration: MHA Backward Interleaved Head Kernel
+
+実装:
+
+- `tensor_attention_backward_batch_interleaved` を追加
+  - 入出力を `[batch, seq, d_model]`（head interleaved）で直接処理
+  - `seq x d_k` head view は `lda=d_model` の strided GEMM で計算
+- `multi_head_attention_backward` から
+  `reshape_for_heads/reshape_from_heads` を除去
+- whitebox test:
+  - `attention_backward_batch_interleaved_matches_reshape_path`
+
+再計測（A/B, `--adamw`, 直列実行）:
+
+| Case | Previous AdamW tok/s | New tok/s | Delta |
+|------|-----------------------|-----------|-------|
+| A (`seq=128, layers=6`) | `15514.1523` | `15960.3994` | `+2.88%` |
+| B (`seq=256, layers=12`) | `7488.0811` | `7572.8301` | `+1.13%` |
+
+補足:
+
+- `avg_loss` は A/B とも前回同等レンジで品質ガード内
+- head reshape の大規模 copy を削減できたため、次は forward 側の
+  interleaved 化（QKV head 変換/concat copy 削減）を優先候補にする
+
+### GPT-2-like Probe (AdamW)
+
+- command:
+  `just bench-transformer-lm --adamw --steps=10 --warmup=3 --batch-size=2 --seq-len=256 --d-model=256 --heads=8 --layers=12 --d-ff=1024 --repeat=1024 --print-every=5`
+- result:
+  - `avg_step_ms=150.5286`
+  - `avg_tok/s=3401.3469`
+  - `avg_loss=2.6241`
+  - `avg_ppl=13.8389`
+
+`Reference C`（`avg_tok/s=2125.3704`）比で `+60.04%`。  
+この構成で loss が step 進行に伴って低下することも確認でき、GPT-2 相当の簡易LM学習に向けた throughput 基盤は前進。
+
 ## PyTorch Comparison
 
 ```

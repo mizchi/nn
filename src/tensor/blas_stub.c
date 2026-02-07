@@ -269,6 +269,131 @@ void tensor_attention_backward_batch(
   }
 }
 
+// Fused backward for one attention head with explicit leading dimensions.
+// d_out/q/k/v and dq/dk/dv each represent [seq, d_k] matrices with row stride ld.
+static void tensor_attention_head_backward_ld(
+  const float* d_out,
+  int d_out_off,
+  int d_out_ld,
+  const float* q,
+  int q_off,
+  int q_ld,
+  const float* k,
+  int k_off,
+  int k_ld,
+  const float* v,
+  int v_off,
+  int v_ld,
+  const float* attn_w,
+  float* dq,
+  int dq_off,
+  int dq_ld,
+  float* dk,
+  int dk_off,
+  int dk_ld,
+  float* dv,
+  int dv_off,
+  int dv_ld,
+  int seq,
+  int d_k,
+  float scale
+) {
+  int scores_size = seq * seq;
+  ensure_attn_tmp(scores_size * 2);
+  float* d_attn = g_attn_tmp;
+  float* d_scores = g_attn_tmp + scores_size;
+
+  // d_attn = d_out @ v^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasTrans,
+    seq, seq, d_k,
+    1.0f,
+    d_out + d_out_off, d_out_ld,
+    v + v_off, v_ld,
+    0.0f,
+    d_attn, seq
+  );
+
+  // dv = attn_w^T @ d_out : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
+  cblas_sgemm(
+    CblasRowMajor, CblasTrans, CblasNoTrans,
+    seq, d_k, seq,
+    1.0f,
+    attn_w, seq,
+    d_out + d_out_off, d_out_ld,
+    0.0f,
+    dv + dv_off, dv_ld
+  );
+
+  // d_scores = softmax_backward(d_attn, attn_w)
+  tensor_softmax_backward_rows(d_attn, attn_w, d_scores, seq, seq);
+  cblas_sscal(scores_size, scale, d_scores, 1);
+
+  // dq = d_scores @ k : [seq, seq] @ [seq, d_k] -> [seq, d_k]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasNoTrans,
+    seq, d_k, seq,
+    1.0f,
+    d_scores, seq,
+    k + k_off, k_ld,
+    0.0f,
+    dq + dq_off, dq_ld
+  );
+
+  // dk = d_scores^T @ q : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
+  cblas_sgemm(
+    CblasRowMajor, CblasTrans, CblasNoTrans,
+    seq, d_k, seq,
+    1.0f,
+    d_scores, seq,
+    q + q_off, q_ld,
+    0.0f,
+    dk + dk_off, dk_ld
+  );
+}
+
+// Fused backward for interleaved layout:
+// d_out/q/k/v, dq/dk/dv are [batch, seq, d_model] (d_model = num_heads * d_k).
+// Each head slice is taken as [seq, d_k] with leading dimension d_model.
+void tensor_attention_backward_batch_interleaved(
+  const float* d_out,
+  const float* q,
+  const float* k,
+  const float* v,
+  const float* attn_w,
+  float* dq,
+  float* dk,
+  float* dv,
+  int batch,
+  int num_heads,
+  int seq,
+  int d_k,
+  float scale
+) {
+  int d_model = num_heads * d_k;
+  int w_stride = seq * seq;
+  for (int b = 0; b < batch; b++) {
+    int batch_off = b * seq * d_model;
+    for (int h = 0; h < num_heads; h++) {
+      int head_off = batch_off + h * d_k;
+      int w_off = (b * num_heads + h) * w_stride;
+      tensor_attention_head_backward_ld(
+        d_out, head_off, d_model,
+        q, head_off, d_model,
+        k, head_off, d_model,
+        v, head_off, d_model,
+        attn_w + w_off,
+        dq, head_off, d_model,
+        dk, head_off, d_model,
+        dv, head_off, d_model,
+        seq,
+        d_k,
+        scale
+      );
+    }
+  }
+}
+
 // Row-wise matrix add:
 // dst[row, col] += add[row, col]
 void tensor_add_matrix_inplace(float* dst, const float* add, int rows, int cols) {

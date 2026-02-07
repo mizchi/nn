@@ -26,6 +26,8 @@ pub fn var_matmul(a : Var, b : Var) -> Var {
   let a_data = a.data().contiguous()
   let b_data = b.data().contiguous()
   let result = @tensor.tensor_matmul(a_data, b_data).unwrap()
+  let a_needs_grad = needs_grad(tape, a.id)
+  let b_needs_grad = needs_grad(tape, b.id)
   tape.push_node(result, fn(dy) {
     let dyc = dy.contiguous()
     if a_data.ndim() == 2 && b_data.ndim() == 2 {
@@ -34,16 +36,20 @@ pub fn var_matmul(a : Var, b : Var) -> Var {
       let n = b_data.dim(1)
       let one = Float::from_int(1)
       let zero = Float::from_int(0)
-      // dA = dY @ B^T: sgemm(NoTrans, Trans, m, k, n, 1, dy, n, b, n, 0, da, k)
-      let da_data = FixedArray::make(m * k, zero)
-      @tensor.sgemm(0, 1, m, k, n, one, dyc.data, n, b_data.data, n, zero, da_data, k)
-      let da = @tensor.tensor_new_fixed(a_data.shape, da_data)
-      accumulate(tape, a.id, da)
-      // dB = A^T @ dY: sgemm(Trans, NoTrans, k, n, m, 1, a, k, dy, n, 0, db, n)
-      let db_data = FixedArray::make(k * n, zero)
-      @tensor.sgemm(1, 0, k, n, m, one, a_data.data, k, dyc.data, n, zero, db_data, n)
-      let db = @tensor.tensor_new_fixed(b_data.shape, db_data)
-      accumulate(tape, b.id, db)
+      // dA = dY @ B^T (skip if a doesn't need gradient)
+      if a_needs_grad {
+        let da_data = FixedArray::make(m * k, zero)
+        @tensor.sgemm(0, 1, m, k, n, one, dyc.data, n, b_data.data, n, zero, da_data, k)
+        let da = @tensor.tensor_new_fixed(a_data.shape, da_data)
+        accumulate(tape, a.id, da)
+      }
+      // dB = A^T @ dY (skip if b doesn't need gradient)
+      if b_needs_grad {
+        let db_data = FixedArray::make(k * n, zero)
+        @tensor.sgemm(1, 0, k, n, m, one, a_data.data, k, dyc.data, n, zero, db_data, n)
+        let db = @tensor.tensor_new_fixed(b_data.shape, db_data)
+        accumulate(tape, b.id, db)
+      }
     } else if a_data.ndim() == 3 && b_data.ndim() == 2 {
       // [batch, m, k] @ [k, n] -> [batch, m, n]
       let batch = a_data.dim(0)
@@ -53,21 +59,24 @@ pub fn var_matmul(a : Var, b : Var) -> Var {
       let n_rows = batch * m
       let one = Float::from_int(1)
       let zero = Float::from_int(0)
-      // dA = dY @ B^T: treat dY as [batch*m, n], da as [batch*m, k]
-      let da_data = FixedArray::make(n_rows * k, zero)
-      @tensor.sgemm(
-        0, 1, n_rows, k, n, one, dyc.data, n, b_data.data, n, zero, da_data, k,
-      )
-      let da = @tensor.tensor_new_fixed(a_data.shape, da_data)
-      accumulate(tape, a.id, da)
-      // dB = A_flat^T @ dY_flat: treat a as [batch*m, k], dy as [batch*m, n]
-      // sgemm(Trans, NoTrans, k, n, batch*m, 1, a, k, dy, n, 0, db, n)
-      let db_data = FixedArray::make(k * n, zero)
-      @tensor.sgemm(
-        1, 0, k, n, n_rows, one, a_data.data, k, dyc.data, n, zero, db_data, n,
-      )
-      let db = @tensor.tensor_new_fixed(b_data.shape, db_data)
-      accumulate(tape, b.id, db)
+      // dA = dY @ B^T (skip if a doesn't need gradient)
+      if a_needs_grad {
+        let da_data = FixedArray::make(n_rows * k, zero)
+        @tensor.sgemm(
+          0, 1, n_rows, k, n, one, dyc.data, n, b_data.data, n, zero, da_data, k,
+        )
+        let da = @tensor.tensor_new_fixed(a_data.shape, da_data)
+        accumulate(tape, a.id, da)
+      }
+      // dB = A_flat^T @ dY_flat (skip if b doesn't need gradient)
+      if b_needs_grad {
+        let db_data = FixedArray::make(k * n, zero)
+        @tensor.sgemm(
+          1, 0, k, n, n_rows, one, a_data.data, k, dyc.data, n, zero, db_data, n,
+        )
+        let db = @tensor.tensor_new_fixed(b_data.shape, db_data)
+        accumulate(tape, b.id, db)
+      }
     } else {
       abort("var_matmul backward: unsupported shape combination")
     }

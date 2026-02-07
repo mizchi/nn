@@ -1,5 +1,6 @@
 import {
   "mizchi/nn/tensor" as @tensor,
+  "moonbitlang/core/math" as @math,
 }
 
 options(

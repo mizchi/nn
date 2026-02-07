@@ -265,6 +265,16 @@ extern "C" fn native_accumulate(
 ) -> Unit = "tensor_accumulate"
 
 ///|
+/// Softmax in-place over rows: data is [rows, cols], each row is softmaxed.
+pub fn softmax_inplace(
+  data : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit {
+  native_softmax_inplace(data, rows, cols)
+}
+
+///|
 /// dst[i] += src[i] (BLAS saxpy with alpha=1)
 pub fn accumulate_inplace(
   dst : FixedArray[Float],

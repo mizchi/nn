@@ -63,6 +63,19 @@ pub fn Tape::backward(self : Tape, output : Var) -> Unit {
 }
 
 ///|
+/// Check if a node needs gradient (either it requires_grad or has a backward_fn).
+fn needs_grad(tape : Tape, id : Int) -> Bool {
+  let node = tape.nodes[id]
+  if node.requires_grad {
+    return true
+  }
+  match node.backward_fn {
+    Some(_) => true
+    None => false
+  }
+}
+
+///|
 /// Accumulate gradient for node at given id.
 /// Uses BLAS saxpy for vectorized addition.
 fn accumulate(tape : Tape, id : Int, g : @tensor.Tensor) -> Unit {

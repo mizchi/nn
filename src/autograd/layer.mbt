@@ -95,15 +95,18 @@ pub fn Linear::forward(self : Linear, x : Var) -> Var {
   let w_id = self.weight.id
   let x_id = x.id
   let bias_id = self.bias.id
+  let x_needs_grad = needs_grad(tape, x_id)
   tape.push_node(result, fn(dy) {
     let dyc = dy.contiguous()
-    // dx = dy @ W
-    let dx_data = FixedArray::make(n_rows * in_features, zero)
-    @tensor.sgemm(
-      0, 0, n_rows, in_features, out_features, one, dyc.data, out_features,
-      wd.data, in_features, zero, dx_data, in_features,
-    )
-    accumulate(tape, x_id, @tensor.tensor_new_fixed(xd.shape, dx_data))
+    // dx = dy @ W (skip if x doesn't need gradient)
+    if x_needs_grad {
+      let dx_data = FixedArray::make(n_rows * in_features, zero)
+      @tensor.sgemm(
+        0, 0, n_rows, in_features, out_features, one, dyc.data, out_features,
+        wd.data, in_features, zero, dx_data, in_features,
+      )
+      accumulate(tape, x_id, @tensor.tensor_new_fixed(xd.shape, dx_data))
+    }
     // dW = dy^T @ x
     let dw_data = FixedArray::make(out_features * in_features, zero)
     @tensor.sgemm(
@@ -151,14 +154,17 @@ pub fn Linear::forward_ws(
   let w_id = self.weight.id
   let x_id = x.id
   let bias_id = self.bias.id
+  let x_needs_grad = needs_grad(tape, x_id)
   tape.push_node(result, fn(dy) {
     let dyc = dy.contiguous()
-    // dx = dy @ W (reuse ws.dx_data, sgemm beta=0 overwrites)
-    @tensor.sgemm(
-      0, 0, n_rows, in_features, out_features, one, dyc.data, out_features,
-      wd.data, in_features, zero, ws.dx_data, in_features,
-    )
-    accumulate(tape, x_id, @tensor.tensor_new_fixed(xd.shape, ws.dx_data))
+    // dx = dy @ W (skip if x doesn't need gradient)
+    if x_needs_grad {
+      @tensor.sgemm(
+        0, 0, n_rows, in_features, out_features, one, dyc.data, out_features,
+        wd.data, in_features, zero, ws.dx_data, in_features,
+      )
+      accumulate(tape, x_id, @tensor.tensor_new_fixed(xd.shape, ws.dx_data))
+    }
     // dW = dy^T @ x (reuse ws.dw_data)
     @tensor.sgemm(
       1, 0, out_features, in_features, n_rows, one, dyc.data, out_features,

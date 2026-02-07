@@ -35,24 +35,42 @@ pub fn var_layer_norm(x : Var, gamma : Var, beta : Var, eps : Float) -> Var {
 
 ///|
 /// Cross-entropy loss: logits [batch, vocab], labels [batch] -> scalar loss.
-/// Uses existing cross_entropy_backward from @tensor.
+/// Computes softmax once and caches for backward (avoids double computation).
 pub fn var_cross_entropy(logits : Var, labels : Array[Int]) -> Var {
   let tape = logits.tape
   let ld = logits.data().contiguous()
-  let loss_val = @tensor.tensor_cross_entropy(ld, labels).unwrap()
+  let batch = ld.dim(0)
+  let vocab = ld.dim(1)
+  let total = batch * vocab
+  // Compute softmax once and cache for backward
+  let probs = FixedArray::make(total, Float::from_int(0))
+  for i = 0; i < total; i = i + 1 {
+    probs[i] = ld.data[i]
+  }
+  @tensor.softmax_inplace(probs, batch, vocab)
+  // Compute loss = -sum(log(probs[label])) / batch
+  let mut loss = Float::from_int(0)
+  for i = 0; i < batch; i = i + 1 {
+    loss = loss - @math.lnf(probs[i * vocab + labels[i]])
+  }
+  let inv_batch = Float::from_int(1) / Float::from_int(batch)
+  loss = loss * inv_batch
   let result_shape = @tensor.shape_new([1]).unwrap()
   let result = @tensor.tensor_new_fixed(
     result_shape,
-    FixedArray::make(1, loss_val),
+    FixedArray::make(1, loss),
   )
   tape.push_node(result, fn(dy) {
     let dy_scalar = dy.contiguous().data[0]
-    let d_logits = @tensor.cross_entropy_backward(ld, labels)
-    // Scale by upstream gradient
-    if dy_scalar != Float::from_int(1) {
-      let d_data = d_logits.contiguous().data
-      @tensor.scale_inplace(d_data, dy_scalar, d_data.length())
+    // d_logits = (probs - one_hot) / batch, scaled by dy
+    let scale = inv_batch * dy_scalar
+    let d_data = FixedArray::make(total, Float::from_int(0))
+    // d_data = scale * probs (saxpy: d_data += scale * probs, d_data starts at 0)
+    @tensor.saxpy(total, scale, probs, d_data)
+    for i = 0; i < batch; i = i + 1 {
+      d_data[i * vocab + labels[i]] = d_data[i * vocab + labels[i]] - scale
     }
+    let d_logits = @tensor.tensor_new_fixed(ld.shape, d_data)
     accumulate(tape, logits.id, d_logits)
   })
 }

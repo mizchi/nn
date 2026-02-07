@@ -77,6 +77,65 @@ test "layer_norm_backward_numerical" {
 }
 
 ///|
+test "layer_norm_backward_add_matches_reference" {
+  let batch = 2
+  let seq = 3
+  let d_model = 4
+  let n = batch * seq * d_model
+  let x_data = Array::makei(n, fn(i) {
+    Float::from_int(i * 5 % 19 - 9) / Float::from_int(7)
+  })
+  let dy_data = Array::makei(n, fn(i) {
+    Float::from_int(i * 3 % 17 - 8) / Float::from_int(9)
+  })
+  let residual_data = Array::makei(n, fn(i) {
+    Float::from_int(i * 7 % 23 - 11) / Float::from_int(11)
+  })
+  let gamma_data = Array::makei(d_model, fn(i) {
+    Float::from_int(i * 2 % 7 + 1) / Float::from_int(5)
+  })
+  let beta_data = Array::makei(d_model, fn(i) {
+    Float::from_int(i * 3 % 11 - 5) / Float::from_int(13)
+  })
+  let x = tensor_new(shape_new_unchecked([batch, seq, d_model]), x_data).unwrap()
+  let dy = tensor_new(shape_new_unchecked([batch, seq, d_model]), dy_data).unwrap()
+  let residual = tensor_new(
+    shape_new_unchecked([batch, seq, d_model]),
+    residual_data,
+  ).unwrap()
+  let gamma = tensor_new(shape_new_unchecked([d_model]), gamma_data).unwrap()
+  let beta = tensor_new(shape_new_unchecked([d_model]), beta_data).unwrap()
+  let eps_ln = Float::from_double(0.00001)
+  let (_, mean, rstd) = layer_norm_with_cache(x, gamma, beta, eps_ln)
+  let d_gamma_ref = tensor_zeros(shape_new_unchecked([d_model]))
+  let d_beta_ref = tensor_zeros(shape_new_unchecked([d_model]))
+  let dx_ref = layer_norm_backward(
+    dy, x, mean, rstd, gamma, d_gamma_ref, d_beta_ref,
+  )
+  let out_ref_data = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    out_ref_data[i] = residual.data[i] + dx_ref.data[i]
+  }
+  let d_gamma_fused = tensor_zeros(shape_new_unchecked([d_model]))
+  let d_beta_fused = tensor_zeros(shape_new_unchecked([d_model]))
+  let out_fused = layer_norm_backward_add(
+    dy, residual, x, mean, rstd, gamma, d_gamma_fused, d_beta_fused,
+  )
+  for i = 0; i < n; i = i + 1 {
+    let diff = (out_ref_data[i] - out_fused.data[i]).to_double().abs()
+    assert_true(diff < 1.0e-6)
+  }
+  for i = 0; i < d_model; i = i + 1 {
+    let dg_diff = (d_gamma_ref.data[i] - d_gamma_fused.data[i])
+      .to_double()
+      .abs()
+    let db_diff = (d_beta_ref.data[i] - d_beta_fused.data[i]).to_double().abs()
+    assert_true(dg_diff < 1.0e-6)
+    assert_true(db_diff < 1.0e-6)
+  }
+}
+
+///|
 test "batched_linear_backward_numerical" {
   let x_data : Array[Float] = [
     Float::from_double(0.1),

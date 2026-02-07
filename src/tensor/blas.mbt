@@ -189,6 +189,22 @@ extern "C" fn native_layer_norm_bwd(
 ) -> Unit = "tensor_layer_norm_bwd"
 
 ///|
+#borrow(dy, add, x, mean, rstd, gamma, out, d_gamma, d_beta)
+extern "C" fn native_layer_norm_bwd_add(
+  dy : FixedArray[Float],
+  add : FixedArray[Float],
+  x : FixedArray[Float],
+  mean : FixedArray[Float],
+  rstd : FixedArray[Float],
+  gamma : FixedArray[Float],
+  out : FixedArray[Float],
+  d_gamma : FixedArray[Float],
+  d_beta : FixedArray[Float],
+  outer : Int,
+  last_dim : Int,
+) -> Unit = "tensor_layer_norm_bwd_add"
+
+///|
 #borrow(src, dst)
 extern "C" fn native_reshape_for_heads(
   src : FixedArray[Float],

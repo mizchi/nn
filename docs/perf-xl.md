@@ -310,6 +310,27 @@ Transformer LM 学習ループの継続チューニング用に、比較条件�
 - B: `avg_tok/s >= 6020`（`+20%`）
 - 品質ガード: `avg_loss` は baseline 比 `+0.05` 以内
 
+### Iteration: LayerNorm Backward + Residual Add Fusion
+
+実装:
+
+- `tensor_layer_norm_bwd_add` を追加し、
+  `dx = layer_norm_backward(...)` と `residual + dx` を 1 kernel に融合
+- `transformer_block_backward` の LN2/LN1 経路を fused 版へ置換
+- whitebox test `layer_norm_backward_add_matches_reference` を追加
+
+再計測（同一条件）:
+
+| Case | Baseline tok/s | New tok/s | Delta |
+|------|----------------|-----------|-------|
+| A (`seq=128, layers=6`) | `11140.0488` | `11467.2480` | `+2.94%` |
+| B (`seq=256, layers=12`) | `5016.9336` | `5207.0078` | `+3.79%` |
+
+評価:
+
+- 目標 `+20%` には未達だが、alloc/加算ループ削減で改善を確認
+- 次優先は `AdamW step` か `LayerNorm backward` の scratch 再利用（step 間再利用）
+
 ## PyTorch Comparison
 
 ```

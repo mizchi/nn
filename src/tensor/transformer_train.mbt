@@ -348,6 +348,47 @@ pub fn layer_norm_backward(
 }
 
 ///|
+/// Layer norm backward and residual add in one kernel call.
+/// Returns residual + dx_layer_norm, and accumulates into d_gamma/d_beta.
+fn layer_norm_backward_add(
+  dy : Tensor,
+  residual : Tensor,
+  x : Tensor,
+  mean : FixedArray[Float],
+  rstd : FixedArray[Float],
+  gamma : Tensor,
+  d_gamma : Tensor,
+  d_beta : Tensor,
+) -> Tensor {
+  let last_dim = x.dim(-1)
+  let outer = x.numel() / last_dim
+  let dyc = dy.contiguous()
+  let residual_c = residual.contiguous()
+  let xc = x.contiguous()
+  let gc = gamma.contiguous()
+  let out_data = FixedArray::make(xc.numel(), Float::from_int(0))
+  native_layer_norm_bwd_add(
+    dyc.data,
+    residual_c.data,
+    xc.data,
+    mean,
+    rstd,
+    gc.data,
+    out_data,
+    d_gamma.data,
+    d_beta.data,
+    outer,
+    last_dim,
+  )
+  Tensor::{
+    data: out_data,
+    shape: x.shape,
+    offset: 0,
+    strides: x.shape.strides(),
+  }
+}
+
+///|
 /// GELU backward: dx = dy * gelu'(x)
 /// gelu'(x) = 0.5 * (1 + tanh(inner)) + 0.5 * x * sech^2(inner) * inner'
 /// where inner = sqrt(2/pi) * (x + 0.044715 * x^3), inner' = sqrt(2/pi) * (1 + 3 * 0.044715 * x^2)
@@ -644,8 +685,6 @@ fn transformer_block_backward(
   config : TransformerConfig,
   grads : TransformerBlockGrads,
 ) -> Tensor {
-  let n = dy.numel()
-
   // Forward: x -> LN1 -> MHA -> +residual1 -> LN2 -> FFN -> +residual2
   // Backward:
   // dy comes from after residual2
@@ -655,8 +694,9 @@ fn transformer_block_backward(
   let d_ln2 = feed_forward_backward(dy, cache, params, grads)
 
   // LN2 backward
-  let d_res1_from_ffn = layer_norm_backward(
+  let d_res1 = layer_norm_backward_add(
     d_ln2,
+    dy,
     cache.x_after_res1,
     cache.ln2_mean,
     cache.ln2_rstd,
@@ -665,26 +705,15 @@ fn transformer_block_backward(
     grads.d_ln2_beta,
   )
 
-  // Add residual2: dy + d_res1_from_ffn
-  let d_res1_data = FixedArray::make(n, Float::from_int(0))
-  for i = 0; i < n; i = i + 1 {
-    d_res1_data[i] = dy.data[i] + d_res1_from_ffn.data[i]
-  }
-  let d_res1 = Tensor::{
-    data: d_res1_data,
-    shape: dy.shape,
-    offset: 0,
-    strides: dy.shape.strides(),
-  }
-
   // MHA backward
   let d_ln1 = multi_head_attention_backward(
     d_res1, cache, params, config, grads,
   )
 
-  // LN1 backward
-  let d_input_from_mha = layer_norm_backward(
+  // LN1 backward + residual1 add
+  layer_norm_backward_add(
     d_ln1,
+    d_res1,
     cache.x_input,
     cache.ln1_mean,
     cache.ln1_rstd,
@@ -692,18 +721,6 @@ fn transformer_block_backward(
     grads.d_ln1_gamma,
     grads.d_ln1_beta,
   )
-
-  // Add residual1: d_res1 + d_input_from_mha
-  let dx_data = FixedArray::make(n, Float::from_int(0))
-  for i = 0; i < n; i = i + 1 {
-    dx_data[i] = d_res1.data[i] + d_input_from_mha.data[i]
-  }
-  Tensor::{
-    data: dx_data,
-    shape: dy.shape,
-    offset: 0,
-    strides: dy.shape.strides(),
-  }
 }
 
 ///|

@@ -402,6 +402,42 @@ void tensor_layer_norm_bwd(
   }
 }
 
+// LayerNorm backward + residual add:
+// out = add + dx, where dx is LayerNorm backward result.
+// Also accumulates d_gamma and d_beta.
+void tensor_layer_norm_bwd_add(
+  const float* dy, const float* add, const float* x, const float* mean, const float* rstd,
+  const float* gamma, float* out, float* d_gamma, float* d_beta,
+  int outer, int last_dim
+) {
+  float inv_dim = 1.0f / (float)last_dim;
+  for (int i = 0; i < outer; i++) {
+    const float* dy_row = dy + i * last_dim;
+    const float* add_row = add + i * last_dim;
+    const float* x_row = x + i * last_dim;
+    float* out_row = out + i * last_dim;
+    float m = mean[i];
+    float rs = rstd[i];
+    float sum1 = 0.0f, sum2 = 0.0f;
+    for (int j = 0; j < last_dim; j++) {
+      float x_hat = (x_row[j] - m) * rs;
+      d_gamma[j] += dy_row[j] * x_hat;
+      d_beta[j] += dy_row[j];
+      float dy_gamma = dy_row[j] * gamma[j];
+      sum1 += dy_gamma;
+      sum2 += dy_gamma * x_hat;
+    }
+    sum1 *= inv_dim;
+    sum2 *= inv_dim;
+    for (int j = 0; j < last_dim; j++) {
+      float x_hat = (x_row[j] - m) * rs;
+      float dy_gamma = dy_row[j] * gamma[j];
+      float dx = rs * (dy_gamma - sum1 - x_hat * sum2);
+      out_row[j] = add_row[j] + dx;
+    }
+  }
+}
+
 // Reshape [batch, seq, num_heads*d_k] -> [batch, num_heads, seq, d_k]
 void tensor_reshape_for_heads(
   const float* src, float* dst,

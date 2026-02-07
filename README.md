@@ -21,8 +21,8 @@ Neural network training library for MoonBit.
 - `mizchi/nn/nn` : minimal 2-layer MLP planning + CPU reference
 - `mizchi/nn/browser` : browser entry sample (WebGPU readback)
 - `mizchi/nn/examples/mnist` : MNIST loader (native)
-- `mizchi/nn/train` : MNIST training entry (native)
-- `mizchi/nn/infer` : MNIST inference entry (native)
+- `mizchi/nn/examples/mnist-train` : MNIST training entry (native)
+- `mizchi/nn/examples/mnist-infer` : MNIST inference entry (native)
 
 ## Web I/O note
 
@@ -77,19 +77,19 @@ MoonBit (this repo):
 
 ```
 # CPU
-moon run --target native src/train -- --backend cpu --epochs 5 --limit 1024 --bench
+moon run --target native src/examples/mnist-train -- --backend cpu --epochs 5 --limit 1024 --bench
 bench: backend=cpu train_ms=11000
 epoch 5 loss=1.0267586708068848 acc=0.7705078125
 result: backend=cpu split=test loss=1.0727334022521973 acc=0.729200005531311
 
 # GPU
-moon run --target native src/train -- --backend gpu --epochs 5 --limit 1024 --bench
+moon run --target native src/examples/mnist-train -- --backend gpu --epochs 5 --limit 1024 --bench
 bench: backend=gpu train_ms=1000
 epoch 5 loss=1.0264246463775635 acc=0.767578125
 result: backend=gpu split=test loss=1.0608453750610352 acc=0.7218000292778015
 
 # GPU (no readback)
-moon run --target native src/train -- --backend gpu --epochs 5 --limit 1024 --bench --bench-no-readback
+moon run --target native src/examples/mnist-train -- --backend gpu --epochs 5 --limit 1024 --bench --bench-no-readback
 bench: backend=gpu train_ms=1000
 result: backend=gpu split=test loss=1.0608453750610352 acc=0.7218000292778015
 ```
@@ -120,12 +120,12 @@ GPU uses dataset segmentation (`segment_samples=42752`) because of the
 
 ```
 # GPU
-moon run --target native src/train -- --backend gpu --bench
+moon run --target native src/examples/mnist-train -- --backend gpu --bench
 bench: backend=gpu train_ms=121000
 result: backend=gpu split=test loss=0.15878579020500183 acc=0.953000009059906
 
 # GPU (no readback)
-moon run --target native src/train -- --backend gpu --bench --bench-no-readback
+moon run --target native src/examples/mnist-train -- --backend gpu --bench --bench-no-readback
 bench: backend=gpu train_ms=114000
 result: backend=gpu split=test loss=0.15878579020500183 acc=0.953000009059906
 ```

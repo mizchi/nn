@@ -55,10 +55,10 @@ mnist-download:
     gunzip -f data/mnist/*.gz
 
 mnist-train:
-    moon run --target native src/train
+    moon run --target native src/examples/mnist-train
 
 mnist-infer *ARGS:
-    moon run --target native src/infer -- {{ARGS}}
+    moon run --target native src/examples/mnist-infer -- {{ARGS}}
 
 # Update snapshot tests
 test-update:
@@ -86,12 +86,12 @@ golden-check:
 
 # GPU profiling
 profile-gpu *ARGS:
-    moon run --target native src/train -- --gpu --profile --bench {{ARGS}}
+    moon run --target native src/examples/mnist-train -- --gpu --profile --bench {{ARGS}}
 
-# Benchmark comparison (wgpu.mbt vs PyTorch)
+# Benchmark comparison
 bench-compare:
-    @echo "=== wgpu.mbt GPU ==="
-    moon run --target native src/train -- --gpu --epochs 5 --limit 1024 --bench --profile
+    @echo "=== MoonBit GPU ==="
+    moon run --target native src/examples/mnist-train -- --gpu --epochs 5 --limit 1024 --bench --profile
     @echo "=== PyTorch MPS ==="
     cd ~/sandbox/torch-mnist && uv run python main.py --epochs 5 --limit 1024 --device mps --profile
 

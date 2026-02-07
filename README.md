@@ -169,6 +169,29 @@ Optimization history:
 | + GELU/Softmax C FFI | 3s | Replaced @math.exp/tanh with C expf/tanhf |
 | + LayerNorm/Reshape C FFI | ~1s | Eliminated Float→Double→sqrt overhead |
 
+## Benchmarks (Autograd MLP)
+
+Measured on 2026-02-07, Apple M3 Max.
+MLP training step benchmark: forward + backward + SGD.
+
+```bash
+moon run src/autograd-bench --target native
+python3 scripts/bench_pytorch.py
+```
+
+| Size | MoonBit (ms) | PyTorch (ms) | vs PyTorch |
+|------|-------------|-------------|------------|
+| [32, 784] -> 128 -> 10 | 0.039 | 0.130 | **0.30x (3x faster)** |
+| [64, 784] -> 256 -> 10 | 0.133 | 0.168 | **0.79x (faster)** |
+| [128, 784] -> 512 -> 10 | 0.519 | 0.343 | 1.5x |
+| [256, 784] -> 1024 -> 10 | 1.973 | 0.821 | 2.4x |
+
+Optimizations applied:
+- BLAS sgemm with trans flags (no transpose copies)
+- C FFI for SGD (cblas_saxpy), ReLU, bias add, gradient accumulate
+- Inline bias in Linear forward (fused sgemm + bias)
+- LinearWorkspace for buffer reuse across iterations
+
 ## numbt - NumPy-like library for MoonBit
 
 This project uses [`mizchi/numbt`](https://github.com/mizchi/numbt) for NumPy-like vector/matrix operations with BLAS/LAPACK acceleration via Apple Accelerate framework.

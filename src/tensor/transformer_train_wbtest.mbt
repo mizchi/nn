@@ -128,6 +128,37 @@ test "batched_linear_backward_numerical" {
 }
 
 ///|
+test "add_bias_backward_accumulates" {
+  let dy = tensor_new(
+    shape_new_unchecked([2, 3]),
+    [
+      Float::from_double(1.0),
+      Float::from_double(2.0),
+      Float::from_double(3.0),
+      Float::from_double(4.0),
+      Float::from_double(5.0),
+      Float::from_double(6.0),
+    ],
+  ).unwrap()
+  let d_bias = tensor_new(
+    shape_new_unchecked([3]),
+    [
+      Float::from_double(0.5),
+      Float::from_double(-0.5),
+      Float::from_double(1.0),
+    ],
+  ).unwrap()
+  add_bias_backward(dy, d_bias)
+  add_bias_backward(dy, d_bias)
+  let e0 = Float::from_double(10.5)
+  let e1 = Float::from_double(13.5)
+  let e2 = Float::from_double(19.0)
+  assert_true((d_bias.data[0] - e0).to_double().abs() < 1.0e-6)
+  assert_true((d_bias.data[1] - e1).to_double().abs() < 1.0e-6)
+  assert_true((d_bias.data[2] - e2).to_double().abs() < 1.0e-6)
+}
+
+///|
 test "ffn_backward_fused_matches_reference" {
   let config = transformer_config(8, 8, 1, 1, 16, 4).unwrap()
   let params = transformer_init_params(config, 123)

@@ -223,13 +223,7 @@ fn batched_linear_backward(
 fn add_bias_backward(dy : Tensor, d_bias : Tensor) -> Unit {
   let dyc = dy.contiguous()
   let last_dim = dy.dim(-1)
-  let outer = dy.numel() / last_dim
-  for i = 0; i < outer; i = i + 1 {
-    let base = i * last_dim
-    for j = 0; j < last_dim; j = j + 1 {
-      d_bias.data[j] = d_bias.data[j] + dyc.data[base + j]
-    }
-  }
+  native_bias_add_bwd(dyc.data, d_bias.data, dyc.numel(), last_dim)
 }
 
 ///|

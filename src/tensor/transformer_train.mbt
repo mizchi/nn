@@ -523,95 +523,30 @@ fn multi_head_attention_backward(
   let qc = q_heads.contiguous()
   let kc = k_heads.contiguous()
   let vc = v_heads.contiguous()
-  let d_attn_weights = FixedArray::make(seq * seq, Float::from_int(0))
-  let d_scores = FixedArray::make(seq * seq, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for h = 0; h < num_heads; h = h + 1 {
       let head_idx = b * num_heads + h
       let attn_w = cache.attn_weights[head_idx]
       let head_base = (b * num_heads + h) * seq * d_k
-
-      // d_attn_weights = d_out @ V^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
-      native_sgemm_offset(
-        0,
-        1,
-        seq,
-        seq,
-        d_k,
-        Float::from_int(1),
+      attention_head_backward(
         dc.data,
         head_base,
-        d_k,
-        vc.data,
-        head_base,
-        d_k,
-        Float::from_int(0),
-        d_attn_weights,
-        0,
-        seq,
-      )
-
-      // dV += attn_weights^T @ d_out : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
-      native_sgemm_offset(
-        1,
-        0,
-        seq,
-        d_k,
-        seq,
-        Float::from_int(1),
-        attn_w,
-        0,
-        seq,
-        dc.data,
-        head_base,
-        d_k,
-        Float::from_int(1),
-        dv_heads_data,
-        head_base,
-        d_k,
-      )
-
-      // Softmax backward then scale backward
-      softmax_backward_rows(d_attn_weights, attn_w, d_scores, seq, seq)
-      scale_inplace(d_scores, scale, seq * seq)
-
-      // dQ = d_scores @ K : [seq, seq] @ [seq, d_k] -> [seq, d_k]
-      native_sgemm_offset(
-        0,
-        0,
-        seq,
-        d_k,
-        seq,
-        Float::from_int(1),
-        d_scores,
-        0,
-        seq,
-        kc.data,
-        head_base,
-        d_k,
-        Float::from_int(0),
-        dq_heads_data,
-        head_base,
-        d_k,
-      )
-      // dK = d_scores^T @ Q : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
-      native_sgemm_offset(
-        1,
-        0,
-        seq,
-        d_k,
-        seq,
-        Float::from_int(1),
-        d_scores,
-        0,
-        seq,
         qc.data,
         head_base,
-        d_k,
-        Float::from_int(0),
+        kc.data,
+        head_base,
+        vc.data,
+        head_base,
+        attn_w,
+        dq_heads_data,
+        head_base,
         dk_heads_data,
         head_base,
+        dv_heads_data,
+        head_base,
+        seq,
         d_k,
+        scale,
       )
     }
   }

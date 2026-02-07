@@ -220,6 +220,25 @@ just bench-transformer-lm
 
 この値を次の最適化（MHA backward 融合、mask さらなる融合、学習器改善）の比較基準にする。
 
+### Additional progress (MHA backward per-head fusion)
+
+`multi_head_attention_backward` の per-head ループで行っていた:
+
+- `d_attn = d_out @ V^T`
+- `dV = attn^T @ d_out`
+- `softmax backward`
+- `scale backward`
+- `dQ = d_scores @ K`
+- `dK = d_scores^T @ Q`
+
+を `tensor_attention_head_backward`（C）として 1 呼び出しに融合。
+MoonBit 側の 6 回以上の FFI 呼び出しを head ごとに 1 回へ削減した。
+
+whitebox test `attention_head_backward_matches_reference` で参照式との一致を検証済み。
+
+ベースライン設定（`src/transformer-bench` default）では全体 step time はほぼ同等
+（`~4.3419ms`）で、今後は `num_heads` と `seq_len` を上げた条件で差分を追う。
+
 ## PyTorch Comparison
 
 ```

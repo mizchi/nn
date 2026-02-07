@@ -105,6 +105,93 @@ void tensor_softmax_backward_rows(
   }
 }
 
+// Temporary workspace for fused attention head backward.
+static float* g_attn_tmp_base = NULL;
+static float* g_attn_tmp = NULL;
+static int g_attn_tmp_cap = 0;
+#define ATTN_TMP_OFFSET_BYTES 320
+
+static void ensure_attn_tmp(int n) {
+  if (g_attn_tmp_cap >= n) return;
+  free(g_attn_tmp_base);
+  size_t alloc_size = sizeof(float) * n + ATTN_TMP_OFFSET_BYTES;
+  posix_memalign((void**)&g_attn_tmp_base, 4096, alloc_size);
+  g_attn_tmp = (float*)((char*)g_attn_tmp_base + ATTN_TMP_OFFSET_BYTES);
+  g_attn_tmp_cap = n;
+}
+
+// Fused backward for one attention head:
+// d_out, q, k, v are [seq, d_k], attn_w is [seq, seq]
+// outputs dq, dk, dv are [seq, d_k]
+void tensor_attention_head_backward(
+  const float* d_out, int d_out_off,
+  const float* q, int q_off,
+  const float* k, int k_off,
+  const float* v, int v_off,
+  const float* attn_w,
+  float* dq, int dq_off,
+  float* dk, int dk_off,
+  float* dv, int dv_off,
+  int seq,
+  int d_k,
+  float scale
+) {
+  int scores_size = seq * seq;
+  ensure_attn_tmp(scores_size * 2);
+  float* d_attn = g_attn_tmp;
+  float* d_scores = g_attn_tmp + scores_size;
+
+  // d_attn = d_out @ v^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasTrans,
+    seq, seq, d_k,
+    1.0f,
+    d_out + d_out_off, d_k,
+    v + v_off, d_k,
+    0.0f,
+    d_attn, seq
+  );
+
+  // dv = attn_w^T @ d_out : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
+  cblas_sgemm(
+    CblasRowMajor, CblasTrans, CblasNoTrans,
+    seq, d_k, seq,
+    1.0f,
+    attn_w, seq,
+    d_out + d_out_off, d_k,
+    0.0f,
+    dv + dv_off, d_k
+  );
+
+  // d_scores = softmax_backward(d_attn, attn_w)
+  tensor_softmax_backward_rows(d_attn, attn_w, d_scores, seq, seq);
+
+  // scale backward
+  cblas_sscal(scores_size, scale, d_scores, 1);
+
+  // dq = d_scores @ k : [seq, seq] @ [seq, d_k] -> [seq, d_k]
+  cblas_sgemm(
+    CblasRowMajor, CblasNoTrans, CblasNoTrans,
+    seq, d_k, seq,
+    1.0f,
+    d_scores, seq,
+    k + k_off, d_k,
+    0.0f,
+    dq + dq_off, d_k
+  );
+
+  // dk = d_scores^T @ q : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
+  cblas_sgemm(
+    CblasRowMajor, CblasTrans, CblasNoTrans,
+    seq, d_k, seq,
+    1.0f,
+    d_scores, seq,
+    q + q_off, d_k,
+    0.0f,
+    dk + dk_off, d_k
+  );
+}
+
 // Row-wise matrix add:
 // dst[row, col] += add[row, col]
 void tensor_add_matrix_inplace(float* dst, const float* add, int rows, int cols) {

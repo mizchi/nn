@@ -211,6 +211,123 @@ test "add_matrix_inplace_matches_reference" {
 }
 
 ///|
+test "attention_head_backward_matches_reference" {
+  let seq = 2
+  let d_k = 3
+  let scale = Float::from_double(1.0 / d_k.to_double().sqrt())
+  let off = 5
+  let n = seq * d_k
+  let total = off + n
+  let d_out_all = FixedArray::make(total, Float::from_int(0))
+  let q_all = FixedArray::make(total, Float::from_int(0))
+  let k_all = FixedArray::make(total, Float::from_int(0))
+  let v_all = FixedArray::make(total, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    d_out_all[off + i] = Float::from_int(i - 2) / Float::from_int(5)
+    q_all[off + i] = Float::from_int(i * 2 % 7 - 3) / Float::from_int(6)
+    k_all[off + i] = Float::from_int(i * 3 % 11 - 5) / Float::from_int(7)
+    v_all[off + i] = Float::from_int(i * 5 % 13 - 6) / Float::from_int(8)
+  }
+  let attn_w = FixedArray::make(seq * seq, Float::from_int(0))
+  attn_w[0] = Float::from_double(0.7)
+  attn_w[1] = Float::from_double(0.3)
+  attn_w[2] = Float::from_double(0.4)
+  attn_w[3] = Float::from_double(0.6)
+  let d_out = FixedArray::make(n, Float::from_int(0))
+  let q = FixedArray::make(n, Float::from_int(0))
+  let k = FixedArray::make(n, Float::from_int(0))
+  let v = FixedArray::make(n, Float::from_int(0))
+  for i = 0; i < n; i = i + 1 {
+    d_out[i] = d_out_all[off + i]
+    q[i] = q_all[off + i]
+    k[i] = k_all[off + i]
+    v[i] = v_all[off + i]
+  }
+  let d_attn = FixedArray::make(seq * seq, Float::from_int(0))
+  let d_scores = FixedArray::make(seq * seq, Float::from_int(0))
+  let dq_ref = FixedArray::make(n, Float::from_int(0))
+  let dk_ref = FixedArray::make(n, Float::from_int(0))
+  let dv_ref = FixedArray::make(n, Float::from_int(0))
+  sgemm(
+    0,
+    1,
+    seq,
+    seq,
+    d_k,
+    Float::from_int(1),
+    d_out,
+    d_k,
+    v,
+    d_k,
+    Float::from_int(0),
+    d_attn,
+    seq,
+  )
+  sgemm(
+    1,
+    0,
+    seq,
+    d_k,
+    seq,
+    Float::from_int(1),
+    attn_w,
+    seq,
+    d_out,
+    d_k,
+    Float::from_int(0),
+    dv_ref,
+    d_k,
+  )
+  softmax_backward_rows(d_attn, attn_w, d_scores, seq, seq)
+  scale_inplace(d_scores, scale, seq * seq)
+  sgemm(
+    0,
+    0,
+    seq,
+    d_k,
+    seq,
+    Float::from_int(1),
+    d_scores,
+    seq,
+    k,
+    d_k,
+    Float::from_int(0),
+    dq_ref,
+    d_k,
+  )
+  sgemm(
+    1,
+    0,
+    seq,
+    d_k,
+    seq,
+    Float::from_int(1),
+    d_scores,
+    seq,
+    q,
+    d_k,
+    Float::from_int(0),
+    dk_ref,
+    d_k,
+  )
+  let dq_all = FixedArray::make(total, Float::from_int(0))
+  let dk_all = FixedArray::make(total, Float::from_int(0))
+  let dv_all = FixedArray::make(total, Float::from_int(0))
+  attention_head_backward(
+    d_out_all, off, q_all, off, k_all, off, v_all, off, attn_w, dq_all, off, dk_all,
+    off, dv_all, off, seq, d_k, scale,
+  )
+  for i = 0; i < n; i = i + 1 {
+    let dq_diff = (dq_all[off + i] - dq_ref[i]).to_double().abs()
+    let dk_diff = (dk_all[off + i] - dk_ref[i]).to_double().abs()
+    let dv_diff = (dv_all[off + i] - dv_ref[i]).to_double().abs()
+    assert_true(dq_diff < 1.0e-6)
+    assert_true(dk_diff < 1.0e-6)
+    assert_true(dv_diff < 1.0e-6)
+  }
+}
+
+///|
 test "ffn_backward_fused_matches_reference" {
   let config = transformer_config(8, 8, 1, 1, 16, 4).unwrap()
   let params = transformer_init_params(config, 123)

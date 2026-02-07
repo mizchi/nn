@@ -60,6 +60,29 @@ extern "C" fn native_softmax_backward_rows(
 ) -> Unit = "tensor_softmax_backward_rows"
 
 ///|
+#borrow(d_out, q, k, v, attn_w, dq, dk, dv)
+extern "C" fn native_attention_head_backward(
+  d_out : FixedArray[Float],
+  d_out_off : Int,
+  q : FixedArray[Float],
+  q_off : Int,
+  k : FixedArray[Float],
+  k_off : Int,
+  v : FixedArray[Float],
+  v_off : Int,
+  attn_w : FixedArray[Float],
+  dq : FixedArray[Float],
+  dq_off : Int,
+  dk : FixedArray[Float],
+  dk_off : Int,
+  dv : FixedArray[Float],
+  dv_off : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit = "tensor_attention_head_backward"
+
+///|
 #borrow(dst, add)
 extern "C" fn native_add_matrix_inplace(
   dst : FixedArray[Float],
@@ -314,6 +337,36 @@ pub fn softmax_backward_rows(
   cols : Int,
 ) -> Unit {
   native_softmax_backward_rows(d_attn, attn, out, rows, cols)
+}
+
+///|
+/// Fused backward for one attention head.
+/// Inputs: d_out/q/k/v [seq, d_k], attn_w [seq, seq].
+/// Outputs: dq/dk/dv [seq, d_k].
+pub fn attention_head_backward(
+  d_out : FixedArray[Float],
+  d_out_off : Int,
+  q : FixedArray[Float],
+  q_off : Int,
+  k : FixedArray[Float],
+  k_off : Int,
+  v : FixedArray[Float],
+  v_off : Int,
+  attn_w : FixedArray[Float],
+  dq : FixedArray[Float],
+  dq_off : Int,
+  dk : FixedArray[Float],
+  dk_off : Int,
+  dv : FixedArray[Float],
+  dv_off : Int,
+  seq : Int,
+  d_k : Int,
+  scale : Float,
+) -> Unit {
+  native_attention_head_backward(
+    d_out, d_out_off, q, q_off, k, k_off, v, v_off, attn_w, dq, dq_off, dk, dk_off,
+    dv, dv_off, seq, d_k, scale,
+  )
 }
 
 ///|

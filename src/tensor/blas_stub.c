@@ -102,6 +102,106 @@ void tensor_log_softmax(const float* input, float* output, int rows, int cols) {
   }
 }
 
+// LayerNorm forward: output = gamma * (x - mean) * rstd + beta
+// Stores mean/rstd per row for backward pass
+void tensor_layer_norm_fwd(
+  const float* input, const float* gamma, const float* beta,
+  float* output, float* mean_out, float* rstd_out,
+  int outer, int last_dim, float eps
+) {
+  float inv_dim = 1.0f / (float)last_dim;
+  for (int i = 0; i < outer; i++) {
+    const float* row = input + i * last_dim;
+    float* out_row = output + i * last_dim;
+    float mean = 0.0f;
+    for (int j = 0; j < last_dim; j++) mean += row[j];
+    mean *= inv_dim;
+    float var = 0.0f;
+    for (int j = 0; j < last_dim; j++) {
+      float d = row[j] - mean;
+      var += d * d;
+    }
+    var *= inv_dim;
+    float rstd = 1.0f / sqrtf(var + eps);
+    mean_out[i] = mean;
+    rstd_out[i] = rstd;
+    for (int j = 0; j < last_dim; j++) {
+      out_row[j] = gamma[j] * (row[j] - mean) * rstd + beta[j];
+    }
+  }
+}
+
+// LayerNorm backward: computes dx, accumulates d_gamma, d_beta
+void tensor_layer_norm_bwd(
+  const float* dy, const float* x, const float* mean, const float* rstd,
+  const float* gamma, float* dx, float* d_gamma, float* d_beta,
+  int outer, int last_dim
+) {
+  float inv_dim = 1.0f / (float)last_dim;
+  for (int i = 0; i < outer; i++) {
+    const float* dy_row = dy + i * last_dim;
+    const float* x_row = x + i * last_dim;
+    float* dx_row = dx + i * last_dim;
+    float m = mean[i];
+    float rs = rstd[i];
+    // Accumulate d_gamma, d_beta and compute sums
+    float sum1 = 0.0f, sum2 = 0.0f;
+    for (int j = 0; j < last_dim; j++) {
+      float x_hat = (x_row[j] - m) * rs;
+      d_gamma[j] += dy_row[j] * x_hat;
+      d_beta[j] += dy_row[j];
+      float dy_gamma = dy_row[j] * gamma[j];
+      sum1 += dy_gamma;
+      sum2 += dy_gamma * x_hat;
+    }
+    sum1 *= inv_dim;
+    sum2 *= inv_dim;
+    for (int j = 0; j < last_dim; j++) {
+      float x_hat = (x_row[j] - m) * rs;
+      float dy_gamma = dy_row[j] * gamma[j];
+      dx_row[j] = rs * (dy_gamma - sum1 - x_hat * sum2);
+    }
+  }
+}
+
+// Reshape [batch, seq, num_heads*d_k] -> [batch, num_heads, seq, d_k]
+void tensor_reshape_for_heads(
+  const float* src, float* dst,
+  int batch, int seq, int num_heads, int d_k
+) {
+  int d_model = num_heads * d_k;
+  for (int b = 0; b < batch; b++) {
+    for (int s = 0; s < seq; s++) {
+      for (int h = 0; h < num_heads; h++) {
+        const float* in_ptr = src + b * seq * d_model + s * d_model + h * d_k;
+        float* out_ptr = dst + b * num_heads * seq * d_k + h * seq * d_k + s * d_k;
+        for (int d = 0; d < d_k; d++) {
+          out_ptr[d] = in_ptr[d];
+        }
+      }
+    }
+  }
+}
+
+// Reshape [batch, num_heads, seq, d_k] -> [batch, seq, num_heads*d_k]
+void tensor_reshape_from_heads(
+  const float* src, float* dst,
+  int batch, int seq, int num_heads, int d_k
+) {
+  int d_model = num_heads * d_k;
+  for (int b = 0; b < batch; b++) {
+    for (int s = 0; s < seq; s++) {
+      for (int h = 0; h < num_heads; h++) {
+        const float* in_ptr = src + b * num_heads * seq * d_k + h * seq * d_k + s * d_k;
+        float* out_ptr = dst + b * seq * d_model + s * d_model + h * d_k;
+        for (int d = 0; d < d_k; d++) {
+          out_ptr[d] = in_ptr[d];
+        }
+      }
+    }
+  }
+}
+
 uint64_t timer_clock_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

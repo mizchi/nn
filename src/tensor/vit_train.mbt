@@ -21,8 +21,8 @@ pub struct VitCache {
   x_with_pos : Tensor // [batch, seq_len, d_model]
   block_caches : Array[TransformerBlockCache]
   hidden_before_final_ln : Tensor // [batch, seq_len, d_model]
-  ln_final_mean : Array[Float]
-  ln_final_rstd : Array[Float]
+  ln_final_mean : FixedArray[Float]
+  ln_final_rstd : FixedArray[Float]
   ln_final_out : Tensor // [batch, seq_len, d_model]
   cls_features : Tensor // [batch, 1, d_model] (reshaped for batched_linear)
   logits : Tensor // [batch, num_classes]

@@ -31,8 +31,8 @@ pub struct TransformerGrads {
 pub struct TransformerBlockCache {
   x_input : Tensor // input to this block [batch, seq, d_model]
   ln1_out : Tensor // output of LN1
-  ln1_mean : Array[Float] // per-position mean for LN1
-  ln1_rstd : Array[Float] // per-position reciprocal std for LN1
+  ln1_mean : FixedArray[Float] // per-position mean for LN1
+  ln1_rstd : FixedArray[Float] // per-position reciprocal std for LN1
   q_proj : Tensor // [batch, seq, d_model]
   k_proj : Tensor // [batch, seq, d_model]
   v_proj : Tensor // [batch, seq, d_model]
@@ -40,8 +40,8 @@ pub struct TransformerBlockCache {
   attn_out_pre_wo : Tensor // [batch, seq, d_model] before W_o
   x_after_res1 : Tensor // after first residual
   ln2_out : Tensor // output of LN2
-  ln2_mean : Array[Float]
-  ln2_rstd : Array[Float]
+  ln2_mean : FixedArray[Float]
+  ln2_rstd : FixedArray[Float]
   ff_pre_gelu : Tensor // W1*x + b1, before GELU [batch, seq, d_ff]
   ff_post_gelu : Tensor // after GELU [batch, seq, d_ff]
 }
@@ -53,8 +53,8 @@ pub struct TransformerCache {
   x_with_pos : Tensor // after token + positional embedding
   block_caches : Array[TransformerBlockCache]
   hidden_before_final_ln : Tensor
-  ln_final_mean : Array[Float]
-  ln_final_rstd : Array[Float]
+  ln_final_mean : FixedArray[Float]
+  ln_final_rstd : FixedArray[Float]
   ln_final_out : Tensor
   logits : Tensor // [batch, seq, vocab_size]
 }
@@ -98,36 +98,18 @@ fn layer_norm_with_cache(
   gamma : Tensor,
   beta : Tensor,
   eps : Float,
-) -> (Tensor, Array[Float], Array[Float]) {
+) -> (Tensor, FixedArray[Float], FixedArray[Float]) {
   let last_dim = t.dim(-1)
   let tc = t.contiguous()
   let gc = gamma.contiguous()
   let bc = beta.contiguous()
-  let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let outer = t.numel() / last_dim
-  let means = Array::make(outer, Float::from_int(0))
-  let rstds = Array::make(outer, Float::from_int(0))
-  for i = 0; i < outer; i = i + 1 {
-    let base = i * last_dim
-    let mut mean = Float::from_int(0)
-    for j = 0; j < last_dim; j = j + 1 {
-      mean = mean + tc.data[base + j]
-    }
-    mean = mean / Float::from_int(last_dim)
-    let mut variance = Float::from_int(0)
-    for j = 0; j < last_dim; j = j + 1 {
-      let diff = tc.data[base + j] - mean
-      variance = variance + diff * diff
-    }
-    variance = variance / Float::from_int(last_dim)
-    let rstd = Float::from_double(1.0 / (variance + eps).to_double().sqrt())
-    means[i] = mean
-    rstds[i] = rstd
-    for j = 0; j < last_dim; j = j + 1 {
-      let normalized = (tc.data[base + j] - mean) * rstd
-      result[base + j] = gc.data[j] * normalized + bc.data[j]
-    }
-  }
+  let result = FixedArray::make(tc.numel(), Float::from_int(0))
+  let means = FixedArray::make(outer, Float::from_int(0))
+  let rstds = FixedArray::make(outer, Float::from_int(0))
+  native_layer_norm_fwd(
+    tc.data, gc.data, bc.data, result, means, rstds, outer, last_dim, eps,
+  )
   let out = Tensor::{
     data: result,
     shape: t.shape,
@@ -236,8 +218,8 @@ fn add_bias_backward(dy : Tensor, d_bias : Tensor) -> Unit {
 pub fn layer_norm_backward(
   dy : Tensor,
   x : Tensor,
-  mean : Array[Float],
-  rstd : Array[Float],
+  mean : FixedArray[Float],
+  rstd : FixedArray[Float],
   gamma : Tensor,
   d_gamma : Tensor,
   d_beta : Tensor,
@@ -247,36 +229,12 @@ pub fn layer_norm_backward(
   let dyc = dy.contiguous()
   let xc = x.contiguous()
   let gc = gamma.contiguous()
-  let n_f = Float::from_int(last_dim)
   let dx_data = FixedArray::make(xc.numel(), Float::from_int(0))
-  for i = 0; i < outer; i = i + 1 {
-    let base = i * last_dim
-    let m = mean[i]
-    let rs = rstd[i]
-    // Accumulate d_gamma and d_beta
-    for j = 0; j < last_dim; j = j + 1 {
-      let x_hat = (xc.data[base + j] - m) * rs
-      d_gamma.data[j] = d_gamma.data[j] + dyc.data[base + j] * x_hat
-      d_beta.data[j] = d_beta.data[j] + dyc.data[base + j]
-    }
-    // Compute dx using the standard formula
-    // dx = rstd * (dy * gamma - mean(dy * gamma) - x_hat * mean(dy * gamma * x_hat))
-    let mut sum1 = Float::from_int(0) // mean(dy * gamma)
-    let mut sum2 = Float::from_int(0) // mean(dy * gamma * x_hat)
-    for j = 0; j < last_dim; j = j + 1 {
-      let dy_gamma = dyc.data[base + j] * gc.data[j]
-      let x_hat = (xc.data[base + j] - m) * rs
-      sum1 = sum1 + dy_gamma
-      sum2 = sum2 + dy_gamma * x_hat
-    }
-    sum1 = sum1 / n_f
-    sum2 = sum2 / n_f
-    for j = 0; j < last_dim; j = j + 1 {
-      let x_hat = (xc.data[base + j] - m) * rs
-      let dy_gamma = dyc.data[base + j] * gc.data[j]
-      dx_data[base + j] = rs * (dy_gamma - sum1 - x_hat * sum2)
-    }
-  }
+  native_layer_norm_bwd(
+    dyc.data, xc.data, mean, rstd, gc.data,
+    dx_data, d_gamma.data, d_beta.data,
+    outer, last_dim,
+  )
   Tensor::{
     data: dx_data,
     shape: x.shape,

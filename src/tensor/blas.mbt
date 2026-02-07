@@ -59,6 +59,57 @@ extern "C" fn native_log_softmax(
 ) -> Unit = "tensor_log_softmax"
 
 ///|
+#borrow(input, gamma, beta, output, mean_out, rstd_out)
+extern "C" fn native_layer_norm_fwd(
+  input : FixedArray[Float],
+  gamma : FixedArray[Float],
+  beta : FixedArray[Float],
+  output : FixedArray[Float],
+  mean_out : FixedArray[Float],
+  rstd_out : FixedArray[Float],
+  outer : Int,
+  last_dim : Int,
+  eps : Float,
+) -> Unit = "tensor_layer_norm_fwd"
+
+///|
+#borrow(dy, x, mean, rstd, gamma, dx, d_gamma, d_beta)
+extern "C" fn native_layer_norm_bwd(
+  dy : FixedArray[Float],
+  x : FixedArray[Float],
+  mean : FixedArray[Float],
+  rstd : FixedArray[Float],
+  gamma : FixedArray[Float],
+  dx : FixedArray[Float],
+  d_gamma : FixedArray[Float],
+  d_beta : FixedArray[Float],
+  outer : Int,
+  last_dim : Int,
+) -> Unit = "tensor_layer_norm_bwd"
+
+///|
+#borrow(src, dst)
+extern "C" fn native_reshape_for_heads(
+  src : FixedArray[Float],
+  dst : FixedArray[Float],
+  batch : Int,
+  seq : Int,
+  num_heads : Int,
+  d_k : Int,
+) -> Unit = "tensor_reshape_for_heads"
+
+///|
+#borrow(src, dst)
+extern "C" fn native_reshape_from_heads(
+  src : FixedArray[Float],
+  dst : FixedArray[Float],
+  batch : Int,
+  seq : Int,
+  num_heads : Int,
+  d_k : Int,
+) -> Unit = "tensor_reshape_from_heads"
+
+///|
 #borrow(a, b, c)
 extern "C" fn native_sgemm_offset(
   trans_a : Int,

@@ -201,20 +201,7 @@ fn reshape_for_heads(
   let xc = x.contiguous()
   let out_shape = shape_new_unchecked([batch, num_heads, seq, d_k])
   let result = FixedArray::make(batch * num_heads * seq * d_k, Float::from_int(0))
-  for b = 0; b < batch; b = b + 1 {
-    for s = 0; s < seq; s = s + 1 {
-      for h = 0; h < num_heads; h = h + 1 {
-        for d = 0; d < d_k; d = d + 1 {
-          let src_idx = b * seq * (num_heads * d_k) +
-            s * (num_heads * d_k) +
-            h * d_k +
-            d
-          let dst_idx = b * num_heads * seq * d_k + h * seq * d_k + s * d_k + d
-          result[dst_idx] = xc.data[src_idx]
-        }
-      }
-    }
-  }
+  native_reshape_for_heads(xc.data, result, batch, seq, num_heads, d_k)
   Tensor::{
     data: result,
     shape: out_shape,
@@ -236,17 +223,7 @@ fn reshape_from_heads(
   let xc = x.contiguous()
   let out_shape = shape_new_unchecked([batch, seq, d_model])
   let result = FixedArray::make(batch * seq * d_model, Float::from_int(0))
-  for b = 0; b < batch; b = b + 1 {
-    for s = 0; s < seq; s = s + 1 {
-      for h = 0; h < num_heads; h = h + 1 {
-        for d = 0; d < d_k; d = d + 1 {
-          let src_idx = b * num_heads * seq * d_k + h * seq * d_k + s * d_k + d
-          let dst_idx = b * seq * d_model + s * d_model + h * d_k + d
-          result[dst_idx] = xc.data[src_idx]
-        }
-      }
-    }
-  }
+  native_reshape_from_heads(xc.data, result, batch, seq, num_heads, d_k)
   Tensor::{
     data: result,
     shape: out_shape,

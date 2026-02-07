@@ -87,7 +87,7 @@ pub fn var_add(a : Var, b : Var) -> Var {
 
 ///|
 /// Broadcast add bias: x [*, features] + bias [features].
-/// Adds bias to the last dimension.
+/// Adds bias to the last dimension. Uses C FFI for vectorized ops.
 pub fn var_add_bias(x : Var, bias : Var) -> Var {
   let tape = x.tape
   let xd = x.data().contiguous()
@@ -95,9 +95,7 @@ pub fn var_add_bias(x : Var, bias : Var) -> Var {
   let last_dim = xd.dim(-1)
   let total = xd.numel()
   let result_data = FixedArray::make(total, Float::from_int(0))
-  for i = 0; i < total; i = i + 1 {
-    result_data[i] = xd.data[i] + bd.data[i % last_dim]
-  }
+  @tensor.bias_add_forward(xd.data, bd.data, result_data, total, last_dim)
   let result = @tensor.tensor_new_fixed(xd.shape, result_data)
   tape.push_node(result, fn(dy) {
     // dx = dy (same shape)
@@ -105,9 +103,7 @@ pub fn var_add_bias(x : Var, bias : Var) -> Var {
     // dbias = sum over all dims except last
     let dyc = dy.contiguous()
     let db_data = FixedArray::make(last_dim, Float::from_int(0))
-    for i = 0; i < dyc.numel(); i = i + 1 {
-      db_data[i % last_dim] += dyc.data[i]
-    }
+    @tensor.bias_add_backward(dyc.data, db_data, dyc.numel(), last_dim)
     let db = @tensor.tensor_new_fixed(bd.shape, db_data)
     accumulate(tape, bias.id, db)
   })

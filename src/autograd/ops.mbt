@@ -51,9 +51,7 @@ pub fn var_cross_entropy(logits : Var, labels : Array[Int]) -> Var {
     // Scale by upstream gradient
     if dy_scalar != Float::from_int(1) {
       let d_data = d_logits.contiguous().data
-      for i = 0; i < d_data.length(); i = i + 1 {
-        d_data[i] = d_data[i] * dy_scalar
-      }
+      @tensor.scale_inplace(d_data, dy_scalar, d_data.length())
     }
     accumulate(tape, logits.id, d_logits)
   })
@@ -67,12 +65,9 @@ pub fn var_relu(x : Var) -> Var {
   let result = @tensor.tensor_relu(xd)
   tape.push_node(result, fn(dy) {
     let dyc = dy.contiguous()
-    let dx_data = FixedArray::make(xd.numel(), Float::from_int(0))
-    for i = 0; i < xd.numel(); i = i + 1 {
-      if xd.data[i] > Float::from_int(0) {
-        dx_data[i] = dyc.data[i]
-      }
-    }
+    let n = xd.numel()
+    let dx_data = FixedArray::make(n, Float::from_int(0))
+    @tensor.relu_backward_inplace(dyc.data, xd.data, dx_data, n)
     let dx = @tensor.tensor_new_fixed(xd.shape, dx_data)
     accumulate(tape, x.id, dx)
   })

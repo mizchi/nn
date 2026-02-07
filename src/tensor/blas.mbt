@@ -129,6 +129,98 @@ pub fn sgemm(
 }
 
 ///|
+#borrow(x, y)
+extern "C" fn native_saxpy(
+  n : Int,
+  alpha : Float,
+  x : FixedArray[Float],
+  y : FixedArray[Float],
+) -> Unit = "tensor_saxpy"
+
+///|
+/// y[i] += alpha * x[i] (BLAS saxpy)
+pub fn saxpy(
+  n : Int,
+  alpha : Float,
+  x : FixedArray[Float],
+  y : FixedArray[Float],
+) -> Unit {
+  native_saxpy(n, alpha, x, y)
+}
+
+///|
+#borrow(dy, x, dx)
+extern "C" fn native_relu_backward(
+  dy : FixedArray[Float],
+  x : FixedArray[Float],
+  dx : FixedArray[Float],
+  n : Int,
+) -> Unit = "tensor_relu_backward"
+
+///|
+pub fn relu_backward_inplace(
+  dy : FixedArray[Float],
+  x : FixedArray[Float],
+  dx : FixedArray[Float],
+  n : Int,
+) -> Unit {
+  native_relu_backward(dy, x, dx, n)
+}
+
+///|
+#borrow(x, bias, out)
+extern "C" fn native_bias_add_fwd(
+  x : FixedArray[Float],
+  bias : FixedArray[Float],
+  out : FixedArray[Float],
+  total : Int,
+  last_dim : Int,
+) -> Unit = "tensor_bias_add_fwd"
+
+///|
+pub fn bias_add_forward(
+  x : FixedArray[Float],
+  bias : FixedArray[Float],
+  out : FixedArray[Float],
+  total : Int,
+  last_dim : Int,
+) -> Unit {
+  native_bias_add_fwd(x, bias, out, total, last_dim)
+}
+
+///|
+#borrow(dy, db)
+extern "C" fn native_bias_add_bwd(
+  dy : FixedArray[Float],
+  db : FixedArray[Float],
+  total : Int,
+  last_dim : Int,
+) -> Unit = "tensor_bias_add_bwd"
+
+///|
+pub fn bias_add_backward(
+  dy : FixedArray[Float],
+  db : FixedArray[Float],
+  total : Int,
+  last_dim : Int,
+) -> Unit {
+  native_bias_add_bwd(dy, db, total, last_dim)
+}
+
+///|
+#borrow(x)
+extern "C" fn native_scale_inplace(
+  x : FixedArray[Float],
+  s : Float,
+  n : Int,
+) -> Unit = "tensor_scale_inplace"
+
+///|
+pub fn scale_inplace(x : FixedArray[Float], s : Float, n : Int) -> Unit {
+  native_scale_inplace(x, s, n)
+}
+
+///|
 #borrow(a, b, c)
 extern "C" fn native_sgemm_offset(
   trans_a : Int,

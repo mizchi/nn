@@ -202,6 +202,37 @@ void tensor_reshape_from_heads(
   }
 }
 
+// SGD update: param[i] -= lr * grad[i]  (uses cblas_saxpy: y += alpha*x)
+void tensor_saxpy(int n, float alpha, const float* x, float* y) {
+  cblas_saxpy(n, alpha, x, 1, y, 1);
+}
+
+// ReLU backward: dx[i] = x[i] > 0 ? dy[i] : 0
+void tensor_relu_backward(const float* dy, const float* x, float* dx, int n) {
+  for (int i = 0; i < n; i++) {
+    dx[i] = x[i] > 0.0f ? dy[i] : 0.0f;
+  }
+}
+
+// Bias add forward: result[i] = x[i] + bias[i % last_dim]
+void tensor_bias_add_fwd(const float* x, const float* bias, float* out, int total, int last_dim) {
+  for (int i = 0; i < total; i++) {
+    out[i] = x[i] + bias[i % last_dim];
+  }
+}
+
+// Bias add backward (dbias): db[j] += dy[i] for j = i % last_dim
+void tensor_bias_add_bwd(const float* dy, float* db, int total, int last_dim) {
+  for (int i = 0; i < total; i++) {
+    db[i % last_dim] += dy[i];
+  }
+}
+
+// Scale: x[i] *= s
+void tensor_scale_inplace(float* x, float s, int n) {
+  cblas_sscal(n, s, x, 1);
+}
+
 uint64_t timer_clock_ns(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

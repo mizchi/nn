@@ -160,25 +160,7 @@ pub fn vit_forward_with_cache(
           scores, 0, seq_len,
         )
         // Softmax
-        for i = 0; i < seq_len; i = i + 1 {
-          let sbase = i * seq_len
-          let mut max_val = scores[sbase]
-          for j = 1; j < seq_len; j = j + 1 {
-            if scores[sbase + j] > max_val {
-              max_val = scores[sbase + j]
-            }
-          }
-          let mut sum = Float::from_int(0)
-          for j = 0; j < seq_len; j = j + 1 {
-            let e = @math.exp((scores[sbase + j] - max_val).to_double())
-              |> Float::from_double
-            scores[sbase + j] = e
-            sum = sum + e
-          }
-          for j = 0; j < seq_len; j = j + 1 {
-            scores[sbase + j] = scores[sbase + j] / sum
-          }
-        }
+        native_softmax_inplace(scores, seq_len, seq_len)
         let scores_copy = Array::make(scores_size, Float::from_int(0))
         for idx = 0; idx < scores_size; idx = idx + 1 {
           scores_copy[idx] = scores[idx]

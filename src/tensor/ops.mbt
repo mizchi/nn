@@ -195,28 +195,11 @@ pub fn tensor_softmax(t : Tensor) -> Result[Tensor, String] {
   let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let last_dim = t.dim(-1)
   let outer = t.numel() / last_dim
-  for i = 0; i < outer; i = i + 1 {
-    let base = i * last_dim
-    // Find max for numerical stability
-    let mut max_val = tc.data[base]
-    for j = 1; j < last_dim; j = j + 1 {
-      if tc.data[base + j] > max_val {
-        max_val = tc.data[base + j]
-      }
-    }
-    // Compute exp and sum
-    let mut sum = Float::from_int(0)
-    for j = 0; j < last_dim; j = j + 1 {
-      let e = @math.exp((tc.data[base + j] - max_val).to_double())
-        |> Float::from_double
-      result[base + j] = e
-      sum = sum + e
-    }
-    // Normalize
-    for j = 0; j < last_dim; j = j + 1 {
-      result[base + j] = result[base + j] / sum
-    }
+  // Copy data into result, then softmax inplace
+  for i = 0; i < tc.numel(); i = i + 1 {
+    result[i] = tc.data[i]
   }
+  native_softmax_inplace(result, outer, last_dim)
   Ok(tensor_new_fixed(t.shape, result))
 }
 
@@ -243,14 +226,7 @@ pub fn tensor_relu(t : Tensor) -> Tensor {
 pub fn tensor_gelu(t : Tensor) -> Tensor {
   let tc = t.contiguous()
   let result = FixedArray::make(tc.numel(), Float::from_int(0))
-  let sqrt_2_pi = 0.7978845608028654 // sqrt(2/pi)
-  let coef = 0.044715
-  for i = 0; i < result.length(); i = i + 1 {
-    let x = tc.data[i].to_double()
-    let inner = sqrt_2_pi * (x + coef * x * x * x)
-    let tanh_val = @math.tanh(inner)
-    result[i] = (0.5 * x * (1.0 + tanh_val)) |> Float::from_double
-  }
+  native_gelu_forward(tc.data, result, tc.numel())
   Tensor::{
     data: result,
     shape: t.shape,
@@ -405,28 +381,7 @@ pub fn tensor_log_softmax(t : Tensor) -> Result[Tensor, String] {
   let result = FixedArray::make(tc.numel(), Float::from_int(0))
   let last_dim = t.dim(-1)
   let outer = t.numel() / last_dim
-  for i = 0; i < outer; i = i + 1 {
-    let base = i * last_dim
-    // Find max for numerical stability
-    let mut max_val = tc.data[base]
-    for j = 1; j < last_dim; j = j + 1 {
-      if tc.data[base + j] > max_val {
-        max_val = tc.data[base + j]
-      }
-    }
-    // Compute log(sum(exp(x - max)))
-    let mut sum = Float::from_int(0)
-    for j = 0; j < last_dim; j = j + 1 {
-      let e = @math.exp((tc.data[base + j] - max_val).to_double())
-        |> Float::from_double
-      sum = sum + e
-    }
-    let log_sum = @math.ln(sum.to_double()) |> Float::from_double
-    // log_softmax = (x - max) - log(sum(exp(x - max)))
-    for j = 0; j < last_dim; j = j + 1 {
-      result[base + j] = tc.data[base + j] - max_val - log_sum
-    }
-  }
+  native_log_softmax(tc.data, result, outer, last_dim)
   Ok(tensor_new_fixed(t.shape, result))
 }
 

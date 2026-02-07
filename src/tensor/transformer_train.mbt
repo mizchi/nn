@@ -145,25 +145,13 @@ pub fn cross_entropy_backward(logits : Tensor, labels : Array[Int]) -> Tensor {
   let vocab = logits.dim(1)
   let lc = logits.contiguous()
   let result = FixedArray::make(batch * vocab, Float::from_int(0))
+  // Copy logits, compute softmax inplace
+  for i = 0; i < batch * vocab; i = i + 1 {
+    result[i] = lc.data[i]
+  }
+  native_softmax_inplace(result, batch, vocab)
   for b = 0; b < batch; b = b + 1 {
     let base = b * vocab
-    // compute softmax
-    let mut max_val = lc.data[base]
-    for v = 1; v < vocab; v = v + 1 {
-      if lc.data[base + v] > max_val {
-        max_val = lc.data[base + v]
-      }
-    }
-    let mut sum = Float::from_int(0)
-    for v = 0; v < vocab; v = v + 1 {
-      let e = @math.exp((lc.data[base + v] - max_val).to_double())
-        |> Float::from_double
-      result[base + v] = e
-      sum = sum + e
-    }
-    for v = 0; v < vocab; v = v + 1 {
-      result[base + v] = result[base + v] / sum
-    }
     // subtract one-hot
     result[base + labels[b]] = result[base + labels[b]] - Float::from_int(1)
     // average over batch
@@ -305,17 +293,7 @@ pub fn gelu_backward(dy : Tensor, x_pre_gelu : Tensor) -> Tensor {
   let dyc = dy.contiguous()
   let xc = x_pre_gelu.contiguous()
   let result = FixedArray::make(xc.numel(), Float::from_int(0))
-  let sqrt_2_pi = 0.7978845608028654
-  let coef = 0.044715
-  for i = 0; i < xc.numel(); i = i + 1 {
-    let x = xc.data[i].to_double()
-    let inner = sqrt_2_pi * (x + coef * x * x * x)
-    let tanh_val = @math.tanh(inner)
-    let sech2 = 1.0 - tanh_val * tanh_val
-    let inner_deriv = sqrt_2_pi * (1.0 + 3.0 * coef * x * x)
-    let gelu_deriv = 0.5 * (1.0 + tanh_val) + 0.5 * x * sech2 * inner_deriv
-    result[i] = dyc.data[i] * Float::from_double(gelu_deriv)
-  }
+  native_gelu_backward(dyc.data, xc.data, result, xc.numel())
   Tensor::{
     data: result,
     shape: x_pre_gelu.shape,
@@ -747,25 +725,7 @@ pub fn transformer_forward_with_cache(
           None => ()
         }
         // Softmax
-        for i = 0; i < seq; i = i + 1 {
-          let sbase = i * seq
-          let mut max_val = scores[sbase]
-          for j = 1; j < seq; j = j + 1 {
-            if scores[sbase + j] > max_val {
-              max_val = scores[sbase + j]
-            }
-          }
-          let mut sum = Float::from_int(0)
-          for j = 0; j < seq; j = j + 1 {
-            let e = @math.exp((scores[sbase + j] - max_val).to_double())
-              |> Float::from_double
-            scores[sbase + j] = e
-            sum = sum + e
-          }
-          for j = 0; j < seq; j = j + 1 {
-            scores[sbase + j] = scores[sbase + j] / sum
-          }
-        }
+        native_softmax_inplace(scores, seq, seq)
         let scores_copy = Array::make(scores_size, Float::from_int(0))
         for idx = 0; idx < scores_size; idx = idx + 1 {
           scores_copy[idx] = scores[idx]

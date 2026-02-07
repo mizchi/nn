@@ -53,6 +53,7 @@ async fn main_() -> Unit {
   let mut limit : Int? = Some(1000)
   let mut epochs = 5
   let mut batch_size = 64
+  let mut profile = false
   for i = 1; i < args.length(); i = i + 1 {
     let arg = args[i]
     if arg.has_prefix("--limit=") {
@@ -61,6 +62,8 @@ async fn main_() -> Unit {
       epochs = @strconv.parse_int(arg[9:].to_string())
     } else if arg.has_prefix("--batch-size=") {
       batch_size = @strconv.parse_int(arg[13:].to_string())
+    } else if arg == "--profile" {
+      profile = true
     }
   }
   let base = "data/mnist"
@@ -84,6 +87,10 @@ async fn main_() -> Unit {
   )
   println("ViT: image=28, patch=7, d_model=64, heads=4, layers=2, d_ff=128")
   println("")
+  if profile {
+    run_profile(train_data, train_count, train_labels, config, batch_size, lr)
+    return
+  }
   let train_images = @tensor.tensor_new(
     @tensor.shape_new_unchecked([train_count, img_dim]),
     train_data,
@@ -215,6 +222,67 @@ async fn main_() -> Unit {
   }
   let test_acc = Float::from_int(total_correct) / Float::from_int(test_count)
   println("Test accuracy: " + test_acc.to_string())
+}
+
+///|
+fn run_profile(
+  train_data : Array[Float],
+  train_count : Int,
+  train_labels : Array[Int],
+  config : @tensor.VitConfig,
+  batch_size : Int,
+  lr : Float,
+) -> Unit {
+  let img_dim = 784
+  let params = @tensor.vit_init_params(config, 42)
+  let grads = @tensor.vit_zero_grads(config)
+  let train_images = @tensor.tensor_new(
+    @tensor.shape_new_unchecked([train_count, img_dim]),
+    train_data,
+  ).unwrap()
+  let ic = train_images.contiguous()
+  // Run profiling over batches
+  let num_steps = if train_count / batch_size > 0 {
+    train_count / batch_size
+  } else {
+    1
+  }
+  let results : Array[@tensor.VitProfileResult] = []
+  let mut offset = 0
+  for step = 0; step < num_steps; step = step + 1 {
+    let bs = if offset + batch_size <= train_count {
+      batch_size
+    } else {
+      train_count - offset
+    }
+    if bs <= 0 {
+      break
+    }
+    let batch_data = Array::make(bs * img_dim, Float::from_int(0))
+    let batch_labels : Array[Int] = Array::make(bs, 0)
+    for b = 0; b < bs; b = b + 1 {
+      let src = (offset + b) * img_dim
+      let dst = b * img_dim
+      for d = 0; d < img_dim; d = d + 1 {
+        batch_data[dst + d] = ic.data[src + d]
+      }
+      batch_labels[b] = train_labels[offset + b]
+    }
+    let batch_images = @tensor.tensor_new(
+      @tensor.shape_new_unchecked([bs, img_dim]),
+      batch_data,
+    ).unwrap()
+    @tensor.vit_zero_grads_inplace(grads)
+    let r = @tensor.vit_profile_step(
+      batch_images, batch_labels, params, grads, config, lr,
+    )
+    results.push(r)
+    offset = offset + bs
+  }
+  println("Profiled " + results.length().to_string() + " steps (batch_size=" + batch_size.to_string() + ")")
+  println("")
+  let avg = @tensor.vit_profile_aggregate(results)
+  @tensor.vit_profile_result_print(avg)
 }
 
 ///|

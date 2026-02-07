@@ -309,25 +309,7 @@ fn multi_head_attention_core(
         None => ()
       }
       // Softmax over seq_k dimension
-      for i = 0; i < seq_q; i = i + 1 {
-        let base = i * seq_k
-        let mut max_val = scores[base]
-        for j = 1; j < seq_k; j = j + 1 {
-          if scores[base + j] > max_val {
-            max_val = scores[base + j]
-          }
-        }
-        let mut sum = Float::from_int(0)
-        for j = 0; j < seq_k; j = j + 1 {
-          let e = @math.exp((scores[base + j] - max_val).to_double())
-            |> Float::from_double
-          scores[base + j] = e
-          sum = sum + e
-        }
-        for j = 0; j < seq_k; j = j + 1 {
-          scores[base + j] = scores[base + j] / sum
-        }
-      }
+      native_softmax_inplace(scores, seq_q, seq_k)
       // output = attn_weights @ V : [seq_q, seq_k] @ [seq_k, d_v] -> [seq_q, d_v]
       native_sgemm_offset(
         0, 0, seq_q, d_v, seq_k,

@@ -1149,9 +1149,7 @@ fn zero_grads(grads : TransformerGrads) -> Unit {
 
 ///|
 fn zero_tensor(t : Tensor) -> Unit {
-  for i = 0; i < t.data.length(); i = i + 1 {
-    t.data[i] = Float::from_int(0)
-  }
+  zero_inplace(t.data, t.data.length())
 }
 
 ///|

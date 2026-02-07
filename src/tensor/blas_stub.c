@@ -547,6 +547,10 @@ void tensor_accumulate(float* dst, const float* src, int n) {
   cblas_saxpy(n, 1.0f, src, 1, dst, 1);
 }
 
+void tensor_zero(float* dst, int n) {
+  memset(dst, 0, (size_t)n * sizeof(float));
+}
+
 // Arena-based ReLU backward: all buffers are offsets into one contiguous arena
 void tensor_relu_backward_arena(
   float* arena, int dy_off, int x_off, int dx_off, int n

@@ -397,6 +397,10 @@ extern "C" fn native_accumulate(
 ) -> Unit = "tensor_accumulate"
 
 ///|
+#borrow(dst)
+extern "C" fn native_zero(dst : FixedArray[Float], n : Int) -> Unit = "tensor_zero"
+
+///|
 /// Softmax in-place over rows: data is [rows, cols], each row is softmaxed.
 pub fn softmax_inplace(
   data : FixedArray[Float],
@@ -522,6 +526,11 @@ pub fn accumulate_inplace(
   n : Int,
 ) -> Unit {
   native_accumulate(dst, src, n)
+}
+
+///|
+pub fn zero_inplace(dst : FixedArray[Float], n : Int) -> Unit {
+  native_zero(dst, n)
 }
 
 ///|

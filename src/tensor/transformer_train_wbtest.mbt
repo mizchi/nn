@@ -253,6 +253,19 @@ test "add_bias_backward_accumulates" {
 }
 
 ///|
+test "zero_inplace_sets_all_values_to_zero" {
+  let data = FixedArray::make(17, Float::from_int(0))
+  for i = 0; i < data.length(); i = i + 1 {
+    data[i] = Float::from_int(i * 7 % 19 - 9) / Float::from_int(5)
+  }
+  zero_inplace(data, data.length())
+  for i = 0; i < data.length(); i = i + 1 {
+    let diff = (data[i] - Float::from_int(0)).to_double().abs()
+    assert_true(diff < 1.0e-8)
+  }
+}
+
+///|
 test "softmax_backward_rows_matches_reference" {
   let rows = 2
   let cols = 3

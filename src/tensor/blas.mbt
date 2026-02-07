@@ -50,6 +50,16 @@ extern "C" fn native_softmax_inplace(
 ) -> Unit = "tensor_softmax_inplace"
 
 ///|
+#borrow(d_attn, attn, out)
+extern "C" fn native_softmax_backward_rows(
+  d_attn : FixedArray[Float],
+  attn : FixedArray[Float],
+  out : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit = "tensor_softmax_backward_rows"
+
+///|
 #borrow(input, output)
 extern "C" fn native_log_softmax(
   input : FixedArray[Float],
@@ -272,6 +282,19 @@ pub fn softmax_inplace(
   cols : Int,
 ) -> Unit {
   native_softmax_inplace(data, rows, cols)
+}
+
+///|
+/// Row-wise softmax backward:
+/// out[row, col] = attn[row, col] * (d_attn[row, col] - sum_j d_attn[row, j] * attn[row, j])
+pub fn softmax_backward_rows(
+  d_attn : FixedArray[Float],
+  attn : FixedArray[Float],
+  out : FixedArray[Float],
+  rows : Int,
+  cols : Int,
+) -> Unit {
+  native_softmax_backward_rows(d_attn, attn, out, rows, cols)
 }
 
 ///|

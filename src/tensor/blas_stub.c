@@ -86,6 +86,25 @@ void tensor_softmax_inplace(float* data, int rows, int cols) {
   }
 }
 
+// Softmax backward over rows:
+// out[row, col] = attn[row, col] * (d_attn[row, col] - dot(d_attn[row,*], attn[row,*]))
+void tensor_softmax_backward_rows(
+  const float* d_attn, const float* attn, float* out, int rows, int cols
+) {
+  for (int i = 0; i < rows; i++) {
+    const float* d_row = d_attn + i * cols;
+    const float* a_row = attn + i * cols;
+    float* out_row = out + i * cols;
+    float dot = 0.0f;
+    for (int j = 0; j < cols; j++) {
+      dot += d_row[j] * a_row[j];
+    }
+    for (int j = 0; j < cols; j++) {
+      out_row[j] = a_row[j] * (d_row[j] - dot);
+    }
+  }
+}
+
 // Log-softmax: result[i] = (x[i] - max) - log(sum(exp(x - max)))
 void tensor_log_softmax(const float* input, float* output, int rows, int cols) {
   for (int i = 0; i < rows; i++) {

@@ -137,7 +137,10 @@ pub fn vit_forward_with_cache(
     let vc = v_heads.contiguous()
     let total_heads = batch * num_heads
     let scores_size = seq_len * seq_len
-    let attn_weights_all : Array[Array[Float]] = Array::make(total_heads, [])
+    let attn_weights_all : Array[FixedArray[Float]] = Array::makei(
+      total_heads,
+      fn(_i) { FixedArray::make(scores_size, Float::from_int(0)) },
+    )
     let scores = FixedArray::make(scores_size, Float::from_int(0))
     let attn_result_data = FixedArray::make(
       batch * num_heads * seq_len * d_k,
@@ -168,11 +171,10 @@ pub fn vit_forward_with_cache(
         )
         // Softmax
         native_softmax_inplace(scores, seq_len, seq_len)
-        let scores_copy = Array::make(scores_size, Float::from_int(0))
+        let scores_copy = attn_weights_all[head_idx]
         for idx = 0; idx < scores_size; idx = idx + 1 {
           scores_copy[idx] = scores[idx]
         }
-        attn_weights_all[head_idx] = scores_copy
         // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
         native_sgemm_offset(
           0,

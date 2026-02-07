@@ -36,7 +36,7 @@ pub struct TransformerBlockCache {
   q_proj : Tensor // [batch, seq, d_model]
   k_proj : Tensor // [batch, seq, d_model]
   v_proj : Tensor // [batch, seq, d_model]
-  attn_weights : Array[Array[Float]] // [batch*num_heads][seq_q*seq_k] softmax output
+  attn_weights : Array[FixedArray[Float]] // [batch*num_heads][seq_q*seq_k] softmax output
   attn_out_pre_wo : Tensor // [batch, seq, d_model] before W_o
   x_after_res1 : Tensor // after first residual
   ln2_out : Tensor // output of LN2
@@ -475,7 +475,8 @@ fn multi_head_attention_backward(
   let qc = q_heads.contiguous()
   let kc = k_heads.contiguous()
   let vc = v_heads.contiguous()
-  let attn_w_buf = FixedArray::make(seq * seq, Float::from_int(0))
+  let d_attn_weights = FixedArray::make(seq * seq, Float::from_int(0))
+  let d_scores = FixedArray::make(seq * seq, Float::from_int(0))
   for b = 0; b < batch; b = b + 1 {
     for h = 0; h < num_heads; h = h + 1 {
       let head_idx = b * num_heads + h
@@ -483,7 +484,6 @@ fn multi_head_attention_backward(
       let head_base = (b * num_heads + h) * seq * d_k
 
       // d_attn_weights = d_out @ V^T : [seq, d_k] @ [d_k, seq] -> [seq, seq]
-      let d_attn_weights = FixedArray::make(seq * seq, Float::from_int(0))
       native_sgemm_offset(
         0,
         1,
@@ -504,10 +504,6 @@ fn multi_head_attention_backward(
       )
 
       // dV += attn_weights^T @ d_out : [seq, seq]^T @ [seq, d_k] -> [seq, d_k]
-      // Copy attn_w (Array[Float]) to FixedArray for SGEMM
-      for idx = 0; idx < seq * seq; idx = idx + 1 {
-        attn_w_buf[idx] = attn_w[idx]
-      }
       native_sgemm_offset(
         1,
         0,
@@ -515,7 +511,7 @@ fn multi_head_attention_backward(
         d_k,
         seq,
         Float::from_int(1),
-        attn_w_buf,
+        attn_w,
         0,
         seq,
         dc.data,
@@ -527,23 +523,9 @@ fn multi_head_attention_backward(
         d_k,
       )
 
-      // Softmax backward: d_scores = attn_weights * (d_attn_weights - sum(d_attn_weights * attn_weights))
-      let d_scores = FixedArray::make(seq * seq, Float::from_int(0))
-      for i = 0; i < seq; i = i + 1 {
-        let mut dot_sum = Float::from_int(0)
-        for j = 0; j < seq; j = j + 1 {
-          dot_sum = dot_sum + d_attn_weights[i * seq + j] * attn_w[i * seq + j]
-        }
-        for j = 0; j < seq; j = j + 1 {
-          d_scores[i * seq + j] = attn_w[i * seq + j] *
-            (d_attn_weights[i * seq + j] - dot_sum)
-        }
-      }
-
-      // Scale backward
-      for i = 0; i < seq * seq; i = i + 1 {
-        d_scores[i] = d_scores[i] * scale
-      }
+      // Softmax backward then scale backward
+      softmax_backward_rows(d_attn_weights, attn_w, d_scores, seq, seq)
+      scale_inplace(d_scores, scale, seq * seq)
 
       // dQ = d_scores @ K : [seq, seq] @ [seq, d_k] -> [seq, d_k]
       native_sgemm_offset(
@@ -768,7 +750,10 @@ pub fn transformer_forward_with_cache(
     }
     let total_heads = batch * num_heads
     let scores_size = seq * seq
-    let attn_weights_all : Array[Array[Float]] = Array::make(total_heads, [])
+    let attn_weights_all : Array[FixedArray[Float]] = Array::makei(
+      total_heads,
+      fn(_i) { FixedArray::make(scores_size, Float::from_int(0)) },
+    )
     let scores = FixedArray::make(scores_size, Float::from_int(0))
     let attn_result_data = FixedArray::make(
       batch * num_heads * seq * d_k,
@@ -809,11 +794,10 @@ pub fn transformer_forward_with_cache(
         }
         // Softmax
         native_softmax_inplace(scores, seq, seq)
-        let scores_copy = Array::make(scores_size, Float::from_int(0))
+        let scores_copy = attn_weights_all[head_idx]
         for idx = 0; idx < scores_size; idx = idx + 1 {
           scores_copy[idx] = scores[idx]
         }
-        attn_weights_all[head_idx] = scores_copy
         // output = attn_weights @ V : [seq, seq] @ [seq, d_k] -> [seq, d_k]
         native_sgemm_offset(
           0,

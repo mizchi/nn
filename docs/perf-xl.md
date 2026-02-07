@@ -148,6 +148,15 @@ Backward:
 
 FFN backward 単体で約 `2.7x` 改善。GPT-2 相当の学習ループでは FFN が支配的になりやすいため、次の中期ゴールに直接効く変更。
 
+### Additional progress (MHA path)
+
+Transformer/ViT の attention cache を `Array[Array[Float]]` から
+`Array[FixedArray[Float]]` に変更し、backward での per-head copy を削減。
+さらに softmax backward 行列部分を C 実装 (`tensor_softmax_backward_rows`) に移し、
+`d_attn_weights` / `d_scores` バッファは head loop 外で再利用するようにした。
+
+これにより、MHA backward の GC 圧力と MoonBit 側ループ負荷を低減。
+
 ## PyTorch Comparison
 
 ```

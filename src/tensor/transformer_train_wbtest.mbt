@@ -159,6 +159,44 @@ test "add_bias_backward_accumulates" {
 }
 
 ///|
+test "softmax_backward_rows_matches_reference" {
+  let rows = 2
+  let cols = 3
+  let attn = FixedArray::make(rows * cols, Float::from_int(0))
+  let d_attn = FixedArray::make(rows * cols, Float::from_int(0))
+  attn[0] = Float::from_double(0.2)
+  attn[1] = Float::from_double(0.3)
+  attn[2] = Float::from_double(0.5)
+  attn[3] = Float::from_double(0.1)
+  attn[4] = Float::from_double(0.2)
+  attn[5] = Float::from_double(0.7)
+  d_attn[0] = Float::from_double(1.0)
+  d_attn[1] = Float::from_double(-0.5)
+  d_attn[2] = Float::from_double(0.25)
+  d_attn[3] = Float::from_double(-1.0)
+  d_attn[4] = Float::from_double(0.4)
+  d_attn[5] = Float::from_double(0.6)
+
+  let expected = FixedArray::make(rows * cols, Float::from_int(0))
+  for i = 0; i < rows; i = i + 1 {
+    let mut dot_sum = Float::from_int(0)
+    for j = 0; j < cols; j = j + 1 {
+      dot_sum = dot_sum + d_attn[i * cols + j] * attn[i * cols + j]
+    }
+    for j = 0; j < cols; j = j + 1 {
+      expected[i * cols + j] = attn[i * cols + j] * (d_attn[i * cols + j] - dot_sum)
+    }
+  }
+
+  let actual = FixedArray::make(rows * cols, Float::from_int(0))
+  softmax_backward_rows(d_attn, attn, actual, rows, cols)
+  for i = 0; i < rows * cols; i = i + 1 {
+    let diff = (actual[i] - expected[i]).to_double().abs()
+    assert_true(diff < 1.0e-6)
+  }
+}
+
+///|
 test "ffn_backward_fused_matches_reference" {
   let config = transformer_config(8, 8, 1, 1, 16, 4).unwrap()
   let params = transformer_init_params(config, 123)
@@ -301,6 +339,17 @@ test "forward_with_cache_matches_forward" {
   }
   // Float32 ops should be identical (same computation order)
   assert_true(max_diff < 1.0e-5)
+}
+
+///|
+test "attention_cache_uses_fixedarray" {
+  let config = transformer_config(4, 8, 1, 1, 16, 8).unwrap()
+  let params = transformer_init_params(config, 123)
+  let tokens = [[0, 1, 2, 3, 1, 2, 3, 0]]
+  let mask = causal_mask(8).unwrap()
+  let (_, cache) = transformer_forward_with_cache(tokens, params, config, Some(mask))
+  let w0 : FixedArray[Float] = cache.block_caches[0].attn_weights[0]
+  inspect(w0.length(), content="64")
 }
 
 ///|

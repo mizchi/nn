@@ -14,6 +14,9 @@ struct BenchArgs {
   repeat : Int
   sweep : Bool
   adamw : Bool
+  shard_meta : String?
+  shard_max_shards : Int?
+  shard_max_tokens : Int?
 } derive(Show, Eq)
 
 ///|
@@ -33,6 +36,9 @@ fn bench_args_default() -> BenchArgs {
     repeat: 256,
     sweep: false,
     adamw: false,
+    shard_meta: None,
+    shard_max_shards: None,
+    shard_max_tokens: None,
   }
 }
 
@@ -85,6 +91,9 @@ fn print_usage(program : String) -> Unit {
   println("  --repeat N        corpus repeat count (default 256)")
   println("  --sweep           sweep seq/head/layer combinations")
   println("  --adamw           use AdamW optimizer (default SGD)")
+  println("  --shard-meta P    meta.json path for token shards")
+  println("  --shard-max-shards N limit number of shard files to load")
+  println("  --shard-max-tokens N limit number of token ids to load")
 }
 
 ///|
@@ -104,6 +113,9 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
   let mut repeat = default.repeat
   let mut sweep = default.sweep
   let mut adamw = default.adamw
+  let mut shard_meta : String? = default.shard_meta
+  let mut shard_max_shards : Int? = default.shard_max_shards
+  let mut shard_max_tokens : Int? = default.shard_max_tokens
   let mut i = 1
   while i < args.length() {
     let arg = args[i]
@@ -384,7 +396,77 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       i = i + 1
       continue
     }
+    if arg == "--shard-meta" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --shard-meta")
+      }
+      shard_meta = Some(args[i + 1])
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--shard-meta=") {
+      let view = arg.sub(start=13) catch {
+        _ => return Err("invalid --shard-meta value")
+      }
+      shard_meta = Some(view.to_string())
+      i = i + 1
+      continue
+    }
+    if arg == "--shard-max-shards" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --shard-max-shards")
+      }
+      match parse_positive_int("shard-max-shards", args[i + 1]) {
+        Ok(v) => shard_max_shards = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--shard-max-shards=") {
+      let view = arg.sub(start=19) catch {
+        _ => return Err("invalid --shard-max-shards value")
+      }
+      match parse_positive_int("shard-max-shards", view.to_string()) {
+        Ok(v) => shard_max_shards = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
+    if arg == "--shard-max-tokens" {
+      if i + 1 >= args.length() {
+        return Err("missing value for --shard-max-tokens")
+      }
+      match parse_positive_int("shard-max-tokens", args[i + 1]) {
+        Ok(v) => shard_max_tokens = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 2
+      continue
+    }
+    if arg.has_prefix("--shard-max-tokens=") {
+      let view = arg.sub(start=19) catch {
+        _ => return Err("invalid --shard-max-tokens value")
+      }
+      match parse_positive_int("shard-max-tokens", view.to_string()) {
+        Ok(v) => shard_max_tokens = Some(v)
+        Err(msg) => return Err(msg)
+      }
+      i = i + 1
+      continue
+    }
     return Err("unknown option: " + arg)
+  }
+  if shard_meta is None {
+    match shard_max_shards {
+      Some(_) => return Err("--shard-max-shards requires --shard-meta")
+      None => ()
+    }
+    match shard_max_tokens {
+      Some(_) => return Err("--shard-max-tokens requires --shard-meta")
+      None => ()
+    }
   }
   Ok({
     steps,
@@ -401,6 +483,9 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
     repeat,
     sweep,
     adamw,
+    shard_meta,
+    shard_max_shards,
+    shard_max_tokens,
   })
 }
 
@@ -415,19 +500,79 @@ fn make_default_corpus(repeat : Int) -> String {
 }
 
 ///|
+struct BenchCorpus {
+  all_ids : Array[Int]
+  vocab : Int
+  source : String
+} derive(Show, Eq)
+
+///|
+async fn load_bench_corpus(cfg : BenchArgs) -> Result[BenchCorpus, String] {
+  match cfg.shard_meta {
+    Some(meta_path) => {
+      let meta = match load_token_shards_meta(meta_path) {
+        Ok(v) => v
+        Err(msg) => return Err(msg)
+      }
+      if meta.n_vocab <= 0 {
+        return Err("invalid n_vocab in shard meta: " + meta.n_vocab.to_string())
+      }
+      let ids = match
+        load_token_ids_from_shards(
+          meta,
+          cfg.shard_max_shards,
+          cfg.shard_max_tokens,
+        ) {
+        Ok(v) => v
+        Err(msg) => return Err(msg)
+      }
+      if ids.length() == 0 {
+        return Err("no token ids loaded from shards")
+      }
+      Ok({
+        all_ids: ids,
+        vocab: meta.n_vocab,
+        source: "shards(" + meta_path + ")",
+      })
+    }
+    None => {
+      let text = make_default_corpus(cfg.repeat)
+      let tokenizer = @tensor.char_tokenizer_from_text(text)
+      let ids = tokenizer.encode(text)
+      if ids.length() == 0 {
+        return Err("default corpus produced zero tokens")
+      }
+      Ok({
+        all_ids: ids,
+        vocab: tokenizer.vocab_size(),
+        source: "default-corpus",
+      })
+    }
+  }
+}
+
+///|
 fn ns_to_ms(ns : UInt64) -> Float {
   Float::from_uint64(ns) / Float::from_int(1000000)
 }
 
 ///|
-fn run_bench(cfg : BenchArgs) -> Unit {
-  let text = make_default_corpus(cfg.repeat)
-  let tokenizer = @tensor.char_tokenizer_from_text(text)
-  let vocab = tokenizer.vocab_size()
-  let tokens = tokenizer.encode(text)
-  let windows = tokens.length() - cfg.seq_len
+async fn run_bench(cfg : BenchArgs) -> Unit {
+  let corpus = match load_bench_corpus(cfg) {
+    Ok(v) => v
+    Err(msg) => {
+      println("error: " + msg)
+      return
+    }
+  }
+  let windows = corpus.all_ids.length() - cfg.seq_len
   if windows <= 0 {
-    println("corpus is too short for seq_len=" + cfg.seq_len.to_string())
+    println(
+      "dataset is too short for seq_len=" +
+      cfg.seq_len.to_string() +
+      " tokens=" +
+      corpus.all_ids.length().to_string(),
+    )
     return
   }
   let effective_batch = if cfg.batch_size > windows {
@@ -436,7 +581,7 @@ fn run_bench(cfg : BenchArgs) -> Unit {
     cfg.batch_size
   }
   let config = @tensor.transformer_config(
-    vocab,
+    corpus.vocab,
     cfg.d_model,
     cfg.num_heads,
     cfg.num_layers,
@@ -444,8 +589,8 @@ fn run_bench(cfg : BenchArgs) -> Unit {
     cfg.seq_len,
   ).unwrap()
   let metrics = if cfg.adamw {
-    @tensor.transformer_train_lm_profile_steps_adamw(
-      text,
+    @tensor.transformer_train_lm_profile_steps_ids_adamw(
+      corpus.all_ids,
       config,
       cfg.warmup,
       cfg.steps,
@@ -454,8 +599,8 @@ fn run_bench(cfg : BenchArgs) -> Unit {
       cfg.seed,
     )
   } else {
-    @tensor.transformer_train_lm_profile_steps(
-      text,
+    @tensor.transformer_train_lm_profile_steps_ids(
+      corpus.all_ids,
       config,
       cfg.warmup,
       cfg.steps,
@@ -469,6 +614,9 @@ fn run_bench(cfg : BenchArgs) -> Unit {
     return
   }
   println("=== Transformer LM Benchmark ===")
+  println(
+    "data=" + corpus.source + " tokens=" + corpus.all_ids.length().to_string(),
+  )
   println(
     "steps=" +
     cfg.steps.to_string() +
@@ -489,7 +637,7 @@ fn run_bench(cfg : BenchArgs) -> Unit {
     " d_ff=" +
     cfg.d_ff.to_string() +
     " vocab=" +
-    vocab.to_string(),
+    corpus.vocab.to_string(),
   )
   let optim = if cfg.adamw { "adamw" } else { "sgd" }
   println(
@@ -554,15 +702,21 @@ fn run_bench(cfg : BenchArgs) -> Unit {
 }
 
 ///|
-fn run_sweep(cfg : BenchArgs) -> Unit {
-  let text = make_default_corpus(cfg.repeat)
-  let tokenizer = @tensor.char_tokenizer_from_text(text)
-  let vocab = tokenizer.vocab_size()
-  let tokens = tokenizer.encode(text)
+async fn run_sweep(cfg : BenchArgs) -> Unit {
+  let corpus = match load_bench_corpus(cfg) {
+    Ok(v) => v
+    Err(msg) => {
+      println("error: " + msg)
+      return
+    }
+  }
   let seq_opts = [16, 32, 64]
   let head_opts = [2, 4, 8]
   let layer_opts = [1, 2, 4]
   println("=== Transformer LM Sweep ===")
+  println(
+    "data=" + corpus.source + " tokens=" + corpus.all_ids.length().to_string(),
+  )
   println(
     "steps=" +
     cfg.steps.to_string() +
@@ -578,7 +732,7 @@ fn run_sweep(cfg : BenchArgs) -> Unit {
   println("seq\theads\tlayers\tavg_step_ms\tavg_loss\tavg_ppl\tavg_tok/s")
   for si = 0; si < seq_opts.length(); si = si + 1 {
     let seq = seq_opts[si]
-    let windows = tokens.length() - seq
+    let windows = corpus.all_ids.length() - seq
     if windows <= 0 {
       continue
     }
@@ -595,7 +749,7 @@ fn run_sweep(cfg : BenchArgs) -> Unit {
       for li = 0; li < layer_opts.length(); li = li + 1 {
         let layers = layer_opts[li]
         let config = @tensor.transformer_config(
-          vocab,
+          corpus.vocab,
           cfg.d_model,
           heads,
           layers,
@@ -603,8 +757,8 @@ fn run_sweep(cfg : BenchArgs) -> Unit {
           seq,
         ).unwrap()
         let metrics = if cfg.adamw {
-          @tensor.transformer_train_lm_profile_steps_adamw(
-            text,
+          @tensor.transformer_train_lm_profile_steps_ids_adamw(
+            corpus.all_ids,
             config,
             cfg.warmup,
             cfg.steps,
@@ -613,8 +767,8 @@ fn run_sweep(cfg : BenchArgs) -> Unit {
             cfg.seed,
           )
         } else {
-          @tensor.transformer_train_lm_profile_steps(
-            text,
+          @tensor.transformer_train_lm_profile_steps_ids(
+            corpus.all_ids,
             config,
             cfg.warmup,
             cfg.steps,
@@ -667,6 +821,11 @@ fn run_sweep(cfg : BenchArgs) -> Unit {
 
 ///|
 fn main {
+  @async.run_async_main(bench_main)
+}
+
+///|
+async fn bench_main() -> Unit {
   let args = @env.args()
   let program = if args.length() > 0 { args[0] } else { "transformer-bench" }
   let cfg = match parse_args(args) {

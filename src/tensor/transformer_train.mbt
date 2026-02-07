@@ -1540,8 +1540,8 @@ pub fn transformer_train_lm_steps_adamw(
 }
 
 ///|
-fn transformer_train_lm_profile_steps_impl(
-  text : String,
+fn transformer_train_lm_profile_steps_from_ids_impl(
+  all_ids : Array[Int],
   config : TransformerConfig,
   warmup_steps : Int,
   steps : Int,
@@ -1550,8 +1550,6 @@ fn transformer_train_lm_profile_steps_impl(
   seed : Int,
   use_adamw : Bool,
 ) -> Array[TransformerLmStepMetric] {
-  let tokenizer = char_tokenizer_from_text(text)
-  let all_ids = tokenizer.encode(text)
   let params = transformer_init_params(config, seed)
   let grads = transformer_zero_grads(config)
   let adamw_state = transformer_zero_adamw_state(config)
@@ -1627,6 +1625,96 @@ fn transformer_train_lm_profile_steps_impl(
     }
   }
   metrics
+}
+
+///|
+fn transformer_train_lm_profile_steps_impl(
+  text : String,
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+  use_adamw : Bool,
+) -> Array[TransformerLmStepMetric] {
+  let tokenizer = char_tokenizer_from_text(text)
+  let all_ids = tokenizer.encode(text)
+  transformer_train_lm_profile_steps_from_ids_impl(
+    all_ids, config, warmup_steps, steps, batch_size, lr, seed, use_adamw,
+  )
+}
+
+///|
+/// Train from pre-tokenized ids and return loss history.
+pub fn transformer_train_lm_steps_ids(
+  all_ids : Array[Int],
+  config : TransformerConfig,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[Float] {
+  let metrics = transformer_train_lm_profile_steps_ids(
+    all_ids, config, 0, steps, batch_size, lr, seed,
+  )
+  let loss_history : Array[Float] = []
+  for i = 0; i < metrics.length(); i = i + 1 {
+    loss_history.push(metrics[i].loss)
+  }
+  loss_history
+}
+
+///|
+/// AdamW variant of transformer_train_lm_steps_ids.
+pub fn transformer_train_lm_steps_ids_adamw(
+  all_ids : Array[Int],
+  config : TransformerConfig,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[Float] {
+  let metrics = transformer_train_lm_profile_steps_ids_adamw(
+    all_ids, config, 0, steps, batch_size, lr, seed,
+  )
+  let loss_history : Array[Float] = []
+  for i = 0; i < metrics.length(); i = i + 1 {
+    loss_history.push(metrics[i].loss)
+  }
+  loss_history
+}
+
+///|
+/// Train from pre-tokenized ids and record per-step metrics.
+pub fn transformer_train_lm_profile_steps_ids(
+  all_ids : Array[Int],
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[TransformerLmStepMetric] {
+  transformer_train_lm_profile_steps_from_ids_impl(
+    all_ids, config, warmup_steps, steps, batch_size, lr, seed, false,
+  )
+}
+
+///|
+/// AdamW variant of transformer_train_lm_profile_steps_ids.
+pub fn transformer_train_lm_profile_steps_ids_adamw(
+  all_ids : Array[Int],
+  config : TransformerConfig,
+  warmup_steps : Int,
+  steps : Int,
+  batch_size : Int,
+  lr : Float,
+  seed : Int,
+) -> Array[TransformerLmStepMetric] {
+  transformer_train_lm_profile_steps_from_ids_impl(
+    all_ids, config, warmup_steps, steps, batch_size, lr, seed, true,
+  )
 }
 
 ///|

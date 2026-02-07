@@ -1251,6 +1251,35 @@ test "training_lm_profile_records_metrics_adamw" {
 }
 
 ///|
+test "training_lm_profile_ids_matches_text_path_adamw" {
+  let text = "abcabcabcabcabcabcabcabcabcabcabcabc"
+  let tokenizer = char_tokenizer_from_text(text)
+  let all_ids = tokenizer.encode(text)
+  let vocab = tokenizer.vocab_size()
+  let config = transformer_config(vocab, 8, 1, 1, 16, 8).unwrap()
+  let steps = 6
+  let warmup = 2
+  let batch = 8
+  let lr = Float::from_double(0.01)
+  let seed = 42
+  let metrics_text = transformer_train_lm_profile_steps_adamw(
+    text, config, warmup, steps, batch, lr, seed,
+  )
+  let metrics_ids = transformer_train_lm_profile_steps_ids_adamw(
+    all_ids, config, warmup, steps, batch, lr, seed,
+  )
+  assert_true(metrics_text.length() == metrics_ids.length())
+  for i = 0; i < metrics_text.length(); i = i + 1 {
+    let loss_diff = (metrics_text[i].loss - metrics_ids[i].loss).to_double()
+    let ppl_diff = (metrics_text[i].perplexity - metrics_ids[i].perplexity).to_double()
+    let loss_abs = if loss_diff < 0.0 { -loss_diff } else { loss_diff }
+    let ppl_abs = if ppl_diff < 0.0 { -ppl_diff } else { ppl_diff }
+    assert_true(loss_abs < 1.0e-6)
+    assert_true(ppl_abs < 1.0e-6)
+  }
+}
+
+///|
 test "training_loss_decreases" {
   let text = "abcabcabcabcabcabc"
   let tokenizer = char_tokenizer_from_text(text)

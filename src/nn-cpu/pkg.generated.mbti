@@ -1,0 +1,30 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/nn/nn-cpu"
+
+import {
+  "mizchi/nn/nn",
+}
+
+// Values
+pub fn mlp_eval(@nn.MlpSpec, @nn.MlpParams, @nn.MlpDataset) -> Result[@nn.MlpTrainMetrics, @nn.MlpError]
+
+pub fn mlp_eval_from_bytes(@nn.MlpSpec, Bytes, @nn.MlpDataset) -> Result[@nn.MlpTrainMetrics, @nn.MlpError]
+
+pub fn mlp_forward(@nn.MlpSpec, @nn.MlpParams, Array[Float]) -> Result[MlpCpuResult, @nn.MlpError]
+
+pub fn mlp_train(@nn.MlpSpec, @nn.MlpParams, @nn.MlpDataset, @nn.MlpTrainConfig) -> Result[@nn.MlpTrainResult, @nn.MlpError]
+
+// Errors
+
+// Types and methods
+pub struct MlpCpuResult {
+  hidden : Array[Float]
+  output : Array[Float]
+}
+pub impl Eq for MlpCpuResult
+pub impl Show for MlpCpuResult
+
+// Type aliases
+
+// Traits
+

@@ -1,0 +1,463 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "mizchi/nn/nn"
+
+// Values
+pub fn dataset_validate_for_spec(MlpSpec, MlpDataset) -> Result[Unit, MlpError]
+
+pub fn elements_hidden(MlpSpec) -> Int
+
+pub fn elements_output(MlpSpec) -> Int
+
+pub fn mlp_dataset_new(Int, Array[Float], Array[Int]) -> Result[MlpDataset, MlpError]
+
+pub fn mlp_dataset_shader_plan(MlpSpec, Int, Int) -> Result[MlpDatasetShaderPlan, MlpError]
+
+pub fn mlp_dispatch_plan(MlpSpec, Int) -> Result[MlpDispatchPlan, MlpError]
+
+pub fn mlp_error_invalid_shape(String) -> MlpError
+
+pub fn mlp_error_invalid_spec(String) -> MlpError
+
+pub fn mlp_init_params(MlpSpec, Int) -> Result[MlpParams, MlpError]
+
+pub fn mlp_init_params_with_policy(MlpSpec, Int, MlpInitPolicy) -> Result[MlpParams, MlpError]
+
+pub let mlp_init_policy_deterministic : MlpInitPolicy
+
+pub let mlp_init_policy_he_uniform : MlpInitPolicy
+
+pub let mlp_init_policy_xavier_uniform : MlpInitPolicy
+
+pub let mlp_init_policy_zeros : MlpInitPolicy
+
+pub fn mlp_input_bytes_to_array(MlpSpec, Bytes) -> Result[Array[Float], MlpError]
+
+pub fn mlp_input_to_bytes(MlpSpec, Array[Float]) -> Result[Bytes, MlpError]
+
+pub fn mlp_loss_dispatch_x(MlpSpec, Int) -> Result[Int, MlpError]
+
+pub fn mlp_loss_reduce_dispatch_x(MlpSpec, Int) -> Result[Int, MlpError]
+
+pub fn mlp_loss_shader_plan(MlpSpec, Int) -> Result[MlpLossShaderPlan, MlpError]
+
+pub fn mlp_loss_shader_plan_default() -> MlpLossShaderPlan
+
+pub fn mlp_output_bytes_to_array(MlpSpec, Bytes) -> Result[Array[Float], MlpError]
+
+pub fn mlp_output_from_bytes(MlpSpec, Array[Float]) -> Result[Bytes, MlpError]
+
+pub fn mlp_params_bytes_length(MlpSpec) -> Result[Int, MlpError]
+
+pub fn mlp_params_from_bytes(MlpSpec, Bytes) -> Result[MlpParams, MlpError]
+
+pub fn mlp_params_new(MlpSpec, Array[Float], Array[Float], Array[Float], Array[Float]) -> Result[MlpParams, MlpError]
+
+pub fn mlp_params_to_bytes(MlpSpec, MlpParams) -> Result[Bytes, MlpError]
+
+pub fn mlp_plan_buffers(MlpSpec) -> Result[MlpBufferPlan, MlpError]
+
+pub fn mlp_plan_dataset_buffers(MlpSpec, Int) -> Result[MlpDatasetBufferPlan, MlpError]
+
+pub fn mlp_plan_loss_buffers(MlpSpec) -> Result[MlpLossBufferPlan, MlpError]
+
+pub fn mlp_plan_loss_buffers_for_dataset(MlpSpec, Int) -> Result[MlpLossBufferPlan, MlpError]
+
+pub fn mlp_plan_loss_resources(MlpSpec) -> Result[MlpLossResourcePlan, MlpError]
+
+pub fn mlp_plan_loss_resources_for_dataset(MlpSpec, Int) -> Result[MlpLossResourcePlan, MlpError]
+
+pub fn mlp_plan_resources(MlpSpec) -> Result[MlpResourcePlan, MlpError]
+
+pub fn mlp_shader_plan(MlpSpec, Int) -> Result[MlpShaderPlan, MlpError]
+
+pub fn mlp_shader_plan_default() -> MlpShaderPlan
+
+pub fn mlp_spec_new(Int, Int, Int, Int) -> Result[MlpSpec, MlpError]
+
+pub fn mlp_train_config(Int, Int, Float, Bool, Int) -> MlpTrainConfig
+
+pub fn mlp_train_config_default() -> MlpTrainConfig
+
+pub fn mlp_train_dispatch_plan(MlpSpec, Int) -> Result[MlpTrainDispatchPlan, MlpError]
+
+pub fn mlp_train_metrics(Float, Float) -> MlpTrainMetrics
+
+pub fn mlp_train_result(MlpParams, Array[MlpTrainMetrics]) -> MlpTrainResult
+
+pub fn mlp_train_shader_plan(MlpSpec, Int) -> Result[MlpTrainShaderPlan, MlpError]
+
+pub fn mlp_validate_input(MlpSpec, Array[Float]) -> Result[Unit, MlpError]
+
+pub fn mlp_validate_params(MlpSpec, MlpParams) -> Result[Unit, MlpError]
+
+pub fn mlp_validate_spec(MlpSpec) -> Result[Unit, MlpError]
+
+pub fn mnist_error_invalid_dataset(String) -> MnistError
+
+pub fn mnist_error_invalid_label(String) -> MnistError
+
+pub fn mnist_error_invalid_length(String) -> MnistError
+
+pub fn mnist_error_invalid_magic(String) -> MnistError
+
+pub fn mnist_error_io(String) -> MnistError
+
+pub fn mnist_image_size(MnistImages) -> Int
+
+pub fn mnist_images_to_floats(MnistImages, Int?) -> Array[Float]
+
+pub fn mnist_labels_to_array(MnistLabels, Int?) -> Result[Array[Int], MnistError]
+
+pub fn mnist_read_images(Bytes) -> Result[MnistImages, MnistError]
+
+pub fn mnist_read_labels(Bytes) -> Result[MnistLabels, MnistError]
+
+pub fn mnist_to_mlp_dataset(MnistImages, MnistLabels, Int?) -> Result[MlpDataset, MnistError]
+
+pub fn transformer_dispatch_plan(TransformerSpec, Int) -> Result[TransformerGpuDispatchPlan, MlpError]
+
+pub fn transformer_plan_buffers(TransformerSpec) -> TransformerGpuBufferPlan
+
+pub fn transformer_plan_resources(TransformerSpec) -> TransformerGpuResourcePlan
+
+pub fn transformer_shader_plan(TransformerSpec, Int) -> Result[TransformerGpuShaderPlan, MlpError]
+
+pub fn transformer_spec_new(Int, Int, Int, Int, Int, Int, Int, Int) -> Result[TransformerSpec, MlpError]
+
+// Errors
+
+// Types and methods
+pub struct MlpBufferPlan {
+  input_bytes : Int
+  hidden_bytes : Int
+  output_bytes : Int
+  weight1_bytes : Int
+  bias1_bytes : Int
+  weight2_bytes : Int
+  bias2_bytes : Int
+}
+pub impl Eq for MlpBufferPlan
+pub impl Show for MlpBufferPlan
+
+pub struct MlpDataset {
+  input_size : Int
+  count : Int
+  inputs : Array[Float]
+  labels : Array[Int]
+}
+pub impl Eq for MlpDataset
+pub impl Show for MlpDataset
+
+pub struct MlpDatasetBufferPlan {
+  dataset_input_bytes : Int
+  dataset_label_bytes : Int
+  indices_bytes : Int
+  shuffle_params_bytes : Int
+}
+pub impl Eq for MlpDatasetBufferPlan
+pub impl Show for MlpDatasetBufferPlan
+
+pub struct MlpDatasetShaderPlan {
+  workgroup_size : Int
+  indices_wgsl : String
+}
+pub impl Eq for MlpDatasetShaderPlan
+pub impl Show for MlpDatasetShaderPlan
+
+pub struct MlpDispatchPlan {
+  workgroup_size : Int
+  layer1_dispatch_x : Int
+  layer2_dispatch_x : Int
+}
+pub impl Eq for MlpDispatchPlan
+pub impl Show for MlpDispatchPlan
+
+pub enum MlpError {
+  InvalidSpec(String)
+  InvalidShape(String)
+}
+pub impl Eq for MlpError
+pub impl Show for MlpError
+
+pub enum MlpInitPolicy {
+  Zeros
+  Deterministic
+  XavierUniform
+  HeUniform
+}
+pub impl Eq for MlpInitPolicy
+pub impl Show for MlpInitPolicy
+
+pub struct MlpLossBufferPlan {
+  labels_bytes : Int
+  loss_bytes : Int
+  probs_bytes : Int
+  loss_sum_bytes : Int
+  correct_bytes : Int
+  correct_sum_bytes : Int
+  epoch_loss_bytes : Int
+  epoch_correct_bytes : Int
+  epoch_seen_bytes : Int
+}
+pub impl Eq for MlpLossBufferPlan
+pub impl Show for MlpLossBufferPlan
+
+pub struct MlpLossResourcePlan {
+  labels : @mizchi/nn.BufferDescriptor
+  loss : @mizchi/nn.BufferDescriptor
+  probs : @mizchi/nn.BufferDescriptor
+  loss_sum : @mizchi/nn.BufferDescriptor
+  correct : @mizchi/nn.BufferDescriptor
+  correct_sum : @mizchi/nn.BufferDescriptor
+  epoch_loss : @mizchi/nn.BufferDescriptor
+  epoch_correct : @mizchi/nn.BufferDescriptor
+  epoch_seen : @mizchi/nn.BufferDescriptor
+}
+pub impl Eq for MlpLossResourcePlan
+pub impl Show for MlpLossResourcePlan
+
+pub struct MlpLossShaderPlan {
+  workgroup_size : Int
+  loss_wgsl : String
+  layer2_loss_wgsl : String
+  loss_reduce_wgsl : String
+  loss_epoch_reduce_wgsl : String
+}
+pub impl Eq for MlpLossShaderPlan
+pub impl Show for MlpLossShaderPlan
+
+pub struct MlpParams {
+  weight1 : Array[Float]
+  bias1 : Array[Float]
+  weight2 : Array[Float]
+  bias2 : Array[Float]
+}
+pub impl Eq for MlpParams
+pub impl Show for MlpParams
+
+pub struct MlpResourcePlan {
+  input : @mizchi/nn.BufferDescriptor
+  hidden : @mizchi/nn.BufferDescriptor
+  output : @mizchi/nn.BufferDescriptor
+  weight1 : @mizchi/nn.BufferDescriptor
+  bias1 : @mizchi/nn.BufferDescriptor
+  weight2 : @mizchi/nn.BufferDescriptor
+  bias2 : @mizchi/nn.BufferDescriptor
+}
+pub impl Eq for MlpResourcePlan
+pub impl Show for MlpResourcePlan
+
+pub struct MlpShaderPlan {
+  workgroup_size : Int
+  layer1_wgsl : String
+  layer2_wgsl : String
+}
+pub impl Eq for MlpShaderPlan
+pub impl Show for MlpShaderPlan
+
+pub struct MlpSpec {
+  input_size : Int
+  hidden_size : Int
+  output_size : Int
+  batch_size : Int
+}
+pub impl Eq for MlpSpec
+pub impl Show for MlpSpec
+
+pub struct MlpTrainConfig {
+  epochs : Int
+  batch_size : Int
+  learning_rate : Float
+  shuffle : Bool
+  seed : Int
+}
+pub impl Eq for MlpTrainConfig
+pub impl Show for MlpTrainConfig
+
+pub struct MlpTrainDispatchPlan {
+  workgroup_size : Int
+  compute_dh_dispatch_x : Int
+  grad_update_w1_dispatch_x : Int
+  grad_update_b1_dispatch_x : Int
+  grad_update_w2_dispatch_x : Int
+  grad_update_b2_dispatch_x : Int
+}
+pub impl Eq for MlpTrainDispatchPlan
+pub impl Show for MlpTrainDispatchPlan
+
+pub struct MlpTrainMetrics {
+  loss : Float
+  accuracy : Float
+}
+pub impl Eq for MlpTrainMetrics
+pub impl Show for MlpTrainMetrics
+
+pub struct MlpTrainResult {
+  params : MlpParams
+  metrics : Array[MlpTrainMetrics]
+}
+pub impl Eq for MlpTrainResult
+pub impl Show for MlpTrainResult
+
+pub struct MlpTrainShaderPlan {
+  workgroup_size : Int
+  compute_dh_wgsl : String
+  grad_update_w1_wgsl : String
+  grad_update_b1_wgsl : String
+  grad_update_w2_wgsl : String
+  grad_update_b2_wgsl : String
+  epoch_accum_wgsl : String
+}
+pub impl Eq for MlpTrainShaderPlan
+pub impl Show for MlpTrainShaderPlan
+
+pub enum MnistError {
+  InvalidMagic(String)
+  InvalidLength(String)
+  InvalidLabel(String)
+  Io(String)
+  InvalidDataset(String)
+}
+pub impl Eq for MnistError
+pub impl Show for MnistError
+
+pub struct MnistImages {
+  count : Int
+  rows : Int
+  cols : Int
+  data : Bytes
+}
+pub impl Eq for MnistImages
+pub impl Show for MnistImages
+
+pub struct MnistLabels {
+  count : Int
+  data : Bytes
+}
+pub impl Eq for MnistLabels
+pub impl Show for MnistLabels
+
+pub struct TransformerGpuBufferPlan {
+  token_embedding_bytes : Int
+  pos_embedding_bytes : Int
+  causal_mask_bytes : Int
+  ln1_gamma_bytes : Int
+  ln1_beta_bytes : Int
+  w_q_bytes : Int
+  w_k_bytes : Int
+  w_v_bytes : Int
+  w_o_bytes : Int
+  ln2_gamma_bytes : Int
+  ln2_beta_bytes : Int
+  ff_w1_bytes : Int
+  ff_b1_bytes : Int
+  ff_w2_bytes : Int
+  ff_b2_bytes : Int
+  ln_final_gamma_bytes : Int
+  ln_final_beta_bytes : Int
+  lm_head_bytes : Int
+  tokens_in_bytes : Int
+  x_bytes : Int
+  x_tmp_bytes : Int
+  x_residual_bytes : Int
+  q_bytes : Int
+  k_bytes : Int
+  v_bytes : Int
+  attn_out_bytes : Int
+  attn_proj_bytes : Int
+  ff_h_bytes : Int
+  logits_bytes : Int
+}
+pub impl Eq for TransformerGpuBufferPlan
+pub impl Show for TransformerGpuBufferPlan
+
+pub struct TransformerGpuDispatchPlan {
+  workgroup_size : Int
+  embedding_dispatch_x : Int
+  add_pos_dispatch_x : Int
+  x_elementwise_dispatch_x : Int
+  layer_norm_dispatch_x : Int
+  attn_proj_dispatch_x : Int
+  out_proj_dispatch_x : Int
+  ffn_up_dispatch_x : Int
+  ffn_down_dispatch_x : Int
+  reshape_dispatch_x : Int
+  attention_dispatch_x : Int
+  lm_head_dispatch_x : Int
+  ff_h_elementwise_dispatch_x : Int
+}
+pub impl Eq for TransformerGpuDispatchPlan
+pub impl Show for TransformerGpuDispatchPlan
+
+pub struct TransformerGpuResourcePlan {
+  token_embedding : @mizchi/nn.BufferDescriptor
+  pos_embedding : @mizchi/nn.BufferDescriptor
+  causal_mask : @mizchi/nn.BufferDescriptor
+  layer_params : Array[TransformerLayerResourcePlan]
+  ln_final_gamma : @mizchi/nn.BufferDescriptor
+  ln_final_beta : @mizchi/nn.BufferDescriptor
+  lm_head : @mizchi/nn.BufferDescriptor
+  tokens_in : @mizchi/nn.BufferDescriptor
+  x : @mizchi/nn.BufferDescriptor
+  x_tmp : @mizchi/nn.BufferDescriptor
+  x_residual : @mizchi/nn.BufferDescriptor
+  q : @mizchi/nn.BufferDescriptor
+  k : @mizchi/nn.BufferDescriptor
+  v : @mizchi/nn.BufferDescriptor
+  attn_out : @mizchi/nn.BufferDescriptor
+  attn_proj : @mizchi/nn.BufferDescriptor
+  ff_h : @mizchi/nn.BufferDescriptor
+  logits : @mizchi/nn.BufferDescriptor
+}
+
+pub struct TransformerGpuShaderPlan {
+  embedding_lookup_wgsl : String
+  add_vectors_wgsl : String
+  layer_norm_wgsl : String
+  batched_matmul_attn_wgsl : String
+  batched_matmul_ffn_up_wgsl : String
+  batched_matmul_ffn_down_wgsl : String
+  batched_matmul_lm_head_wgsl : String
+  add_bias_ffn_up_wgsl : String
+  add_bias_ffn_down_wgsl : String
+  gelu_wgsl : String
+  reshape_for_heads_wgsl : String
+  reshape_from_heads_wgsl : String
+  attention_core_wgsl : String
+  copy_wgsl : String
+}
+pub impl Eq for TransformerGpuShaderPlan
+pub impl Show for TransformerGpuShaderPlan
+
+pub struct TransformerLayerResourcePlan {
+  ln1_gamma : @mizchi/nn.BufferDescriptor
+  ln1_beta : @mizchi/nn.BufferDescriptor
+  w_q : @mizchi/nn.BufferDescriptor
+  w_k : @mizchi/nn.BufferDescriptor
+  w_v : @mizchi/nn.BufferDescriptor
+  w_o : @mizchi/nn.BufferDescriptor
+  ln2_gamma : @mizchi/nn.BufferDescriptor
+  ln2_beta : @mizchi/nn.BufferDescriptor
+  ff_w1 : @mizchi/nn.BufferDescriptor
+  ff_b1 : @mizchi/nn.BufferDescriptor
+  ff_w2 : @mizchi/nn.BufferDescriptor
+  ff_b2 : @mizchi/nn.BufferDescriptor
+}
+
+pub struct TransformerSpec {
+  vocab_size : Int
+  d_model : Int
+  num_heads : Int
+  num_layers : Int
+  d_ff : Int
+  max_seq_len : Int
+  batch_size : Int
+  seq_len : Int
+}
+pub impl Eq for TransformerSpec
+pub impl Show for TransformerSpec
+
+// Type aliases
+
+// Traits
+

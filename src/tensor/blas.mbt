@@ -208,6 +208,25 @@ pub fn bias_add_backward(
 }
 
 ///|
+#borrow(y, bias)
+extern "C" fn native_bias_add_inplace(
+  y : FixedArray[Float],
+  bias : FixedArray[Float],
+  total : Int,
+  last_dim : Int,
+) -> Unit = "tensor_bias_add_inplace"
+
+///|
+pub fn bias_add_inplace(
+  y : FixedArray[Float],
+  bias : FixedArray[Float],
+  total : Int,
+  last_dim : Int,
+) -> Unit {
+  native_bias_add_inplace(y, bias, total, last_dim)
+}
+
+///|
 #borrow(x)
 extern "C" fn native_scale_inplace(
   x : FixedArray[Float],

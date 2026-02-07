@@ -8,6 +8,31 @@ pub struct Linear {
 }
 
 ///|
+/// Pre-allocated workspace buffers for Linear forward/backward.
+/// Reuse across iterations to avoid repeated allocation.
+pub struct LinearWorkspace {
+  y_data : FixedArray[Float] // [n_rows * out_features]
+  dx_data : FixedArray[Float] // [n_rows * in_features]
+  dw_data : FixedArray[Float] // [out_features * in_features]
+  db_data : FixedArray[Float] // [out_features]
+}
+
+///|
+pub fn LinearWorkspace::new(
+  n_rows : Int,
+  in_features : Int,
+  out_features : Int,
+) -> LinearWorkspace {
+  let zero = Float::from_int(0)
+  LinearWorkspace::{
+    y_data: FixedArray::make(n_rows * out_features, zero),
+    dx_data: FixedArray::make(n_rows * in_features, zero),
+    dw_data: FixedArray::make(out_features * in_features, zero),
+    db_data: FixedArray::make(out_features, zero),
+  }
+}
+
+///|
 /// Create a Linear layer from existing Var tensors.
 pub fn Linear::from_vars(weight : Var, bias : Var) -> Linear {
   Linear::{ weight, bias }
@@ -41,53 +66,114 @@ pub fn Linear::new(
 }
 
 ///|
-/// Forward pass: x @ W^T + bias
+/// Forward pass: x @ W^T + bias (allocates fresh buffers)
 /// x: [*, in_features] -> [*, out_features]
-/// Uses BLAS sgemm with trans flags to avoid transpose copies.
 pub fn Linear::forward(self : Linear, x : Var) -> Var {
   let tape = x.tape
   let xd = x.data().contiguous()
   let wd = self.weight.data().contiguous()
+  let bd = self.bias.data().contiguous()
   let in_features = wd.dim(1)
   let out_features = wd.dim(0)
-  // n_rows = total rows (batch*seq for 3D, batch for 2D)
   let n_rows = xd.numel() / in_features
-  // y = x @ W^T: sgemm(NoTrans, Trans, n_rows, out, in, 1, x, in, w, in, 0, y, out)
+  let one = Float::from_int(1)
+  let zero = Float::from_int(0)
+  let total = n_rows * out_features
   let y_shape = if xd.ndim() == 2 {
     @tensor.shape_new([n_rows, out_features]).unwrap()
   } else {
     @tensor.shape_new([xd.dim(0), xd.dim(1), out_features]).unwrap()
   }
-  let y_data = FixedArray::make(n_rows * out_features, Float::from_int(0))
+  // y = x @ W^T + bias (sgemm then in-place bias add)
+  let y_data = FixedArray::make(total, zero)
   @tensor.sgemm(
-    0, 1, n_rows, out_features, in_features, Float::from_int(1), xd.data,
-    in_features, wd.data, in_features, Float::from_int(0), y_data, out_features,
+    0, 1, n_rows, out_features, in_features, one, xd.data, in_features,
+    wd.data, in_features, zero, y_data, out_features,
   )
+  @tensor.bias_add_inplace(y_data, bd.data, total, out_features)
   let result = @tensor.tensor_new_fixed(y_shape, y_data)
   let w_id = self.weight.id
   let x_id = x.id
-  let y = tape.push_node(result, fn(dy) {
+  let bias_id = self.bias.id
+  tape.push_node(result, fn(dy) {
     let dyc = dy.contiguous()
-    // dx = dy @ W: sgemm(NoTrans, NoTrans, n_rows, in, out, 1, dy, out, w, in, 0, dx, in)
-    let dx_data = FixedArray::make(n_rows * in_features, Float::from_int(0))
+    // dx = dy @ W
+    let dx_data = FixedArray::make(n_rows * in_features, zero)
     @tensor.sgemm(
-      0, 0, n_rows, in_features, out_features, Float::from_int(1), dyc.data,
-      out_features, wd.data, in_features, Float::from_int(0), dx_data,
-      in_features,
+      0, 0, n_rows, in_features, out_features, one, dyc.data, out_features,
+      wd.data, in_features, zero, dx_data, in_features,
     )
-    let dx = @tensor.tensor_new_fixed(xd.shape, dx_data)
-    accumulate(tape, x_id, dx)
-    // dW = dy^T @ x: sgemm(Trans, NoTrans, out, in, n_rows, 1, dy, out, x, in, 0, dw, in)
-    let dw_data = FixedArray::make(out_features * in_features, Float::from_int(0))
+    accumulate(tape, x_id, @tensor.tensor_new_fixed(xd.shape, dx_data))
+    // dW = dy^T @ x
+    let dw_data = FixedArray::make(out_features * in_features, zero)
     @tensor.sgemm(
-      1, 0, out_features, in_features, n_rows, Float::from_int(1), dyc.data,
-      out_features, xd.data, in_features, Float::from_int(0), dw_data,
-      in_features,
+      1, 0, out_features, in_features, n_rows, one, dyc.data, out_features,
+      xd.data, in_features, zero, dw_data, in_features,
     )
-    let dw = @tensor.tensor_new_fixed(wd.shape, dw_data)
-    accumulate(tape, w_id, dw)
+    accumulate(tape, w_id, @tensor.tensor_new_fixed(wd.shape, dw_data))
+    // dbias = sum(dy, axis=0)
+    let db_data = FixedArray::make(out_features, zero)
+    @tensor.bias_add_backward(dyc.data, db_data, dyc.numel(), out_features)
+    accumulate(tape, bias_id, @tensor.tensor_new_fixed(bd.shape, db_data))
   })
-  var_add_bias(y, self.bias)
+}
+
+///|
+/// Forward pass with pre-allocated workspace (avoids allocation).
+/// x: [*, in_features] -> [*, out_features]
+pub fn Linear::forward_ws(
+  self : Linear,
+  x : Var,
+  ws : LinearWorkspace,
+) -> Var {
+  let tape = x.tape
+  let xd = x.data().contiguous()
+  let wd = self.weight.data().contiguous()
+  let bd = self.bias.data().contiguous()
+  let in_features = wd.dim(1)
+  let out_features = wd.dim(0)
+  let n_rows = xd.numel() / in_features
+  let one = Float::from_int(1)
+  let zero = Float::from_int(0)
+  let total = n_rows * out_features
+  let y_shape = if xd.ndim() == 2 {
+    @tensor.shape_new([n_rows, out_features]).unwrap()
+  } else {
+    @tensor.shape_new([xd.dim(0), xd.dim(1), out_features]).unwrap()
+  }
+  // y = x @ W^T + bias (reuse workspace, sgemm beta=0 overwrites fully)
+  @tensor.sgemm(
+    0, 1, n_rows, out_features, in_features, one, xd.data, in_features,
+    wd.data, in_features, zero, ws.y_data, out_features,
+  )
+  @tensor.bias_add_inplace(ws.y_data, bd.data, total, out_features)
+  let result = @tensor.tensor_new_fixed(y_shape, ws.y_data)
+  let w_id = self.weight.id
+  let x_id = x.id
+  let bias_id = self.bias.id
+  tape.push_node(result, fn(dy) {
+    let dyc = dy.contiguous()
+    // dx = dy @ W (reuse ws.dx_data, sgemm beta=0 overwrites)
+    @tensor.sgemm(
+      0, 0, n_rows, in_features, out_features, one, dyc.data, out_features,
+      wd.data, in_features, zero, ws.dx_data, in_features,
+    )
+    accumulate(tape, x_id, @tensor.tensor_new_fixed(xd.shape, ws.dx_data))
+    // dW = dy^T @ x (reuse ws.dw_data)
+    @tensor.sgemm(
+      1, 0, out_features, in_features, n_rows, one, dyc.data, out_features,
+      xd.data, in_features, zero, ws.dw_data, in_features,
+    )
+    accumulate(tape, w_id, @tensor.tensor_new_fixed(wd.shape, ws.dw_data))
+    // dbias = sum(dy, axis=0) (must zero db_data first since backward accumulates)
+    for i = 0; i < ws.db_data.length(); i = i + 1 {
+      ws.db_data[i] = zero
+    }
+    @tensor.bias_add_backward(dyc.data, ws.db_data, dyc.numel(), out_features)
+    accumulate(
+      tape, bias_id, @tensor.tensor_new_fixed(bd.shape, ws.db_data),
+    )
+  })
 }
 
 ///|

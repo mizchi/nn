@@ -53,8 +53,8 @@ fn avg_u64(arr : Array[UInt64]) -> UInt64 {
 }
 
 ///|
-/// Run one training step using Linear layers. Returns (forward_ns, backward_ns, step_ns).
-/// Creates a fresh tape each iteration, with weight data persisted across calls.
+/// Run one training step using Linear layers with workspace.
+/// Returns (forward_ns, backward_ns, step_ns).
 fn run_step(
   w1_data : @tensor.Tensor,
   b1_data : @tensor.Tensor,
@@ -63,6 +63,8 @@ fn run_step(
   input_data : @tensor.Tensor,
   labels : Array[Int],
   lr : Float,
+  ws1 : @autograd.LinearWorkspace,
+  ws2 : @autograd.LinearWorkspace,
 ) -> (UInt64, UInt64, UInt64, Float) {
   let t0 = @tensor.clock_ns()
   // --- Forward ---
@@ -74,9 +76,9 @@ fn run_step(
   let b2 = tape.create_var(b2_data, true)
   let linear2 = @autograd.Linear::from_vars(w2, b2)
   let x = tape.create_var(input_data, false)
-  let h = linear1.forward(x)
+  let h = linear1.forward_ws(x, ws1)
   let ha = @autograd.var_relu(h)
-  let logits = linear2.forward(ha)
+  let logits = linear2.forward_ws(ha, ws2)
   let loss = @autograd.var_cross_entropy(logits, labels)
   let t1 = @tensor.clock_ns()
   // --- Backward ---
@@ -116,10 +118,15 @@ fn bench_mlp(
     200,
   )
   let b2_data = @tensor.tensor_zeros(@tensor.shape_new([output_dim]).unwrap())
+  // Pre-allocate workspaces (reused across iterations)
+  let ws1 = @autograd.LinearWorkspace::new(batch, input_dim, hidden_dim)
+  let ws2 = @autograd.LinearWorkspace::new(batch, hidden_dim, output_dim)
   // Warmup
   for _i = 0; _i < warmup; _i = _i + 1 {
     ignore(
-      run_step(w1_data, b1_data, w2_data, b2_data, input_data, labels, lr),
+      run_step(
+        w1_data, b1_data, w2_data, b2_data, input_data, labels, lr, ws1, ws2,
+      ),
     )
   }
   // Benchmark
@@ -130,7 +137,7 @@ fn bench_mlp(
   let mut last_loss = Float::from_int(0)
   for i = 0; i < iters; i = i + 1 {
     let (fwd, bwd, step, loss_val) = run_step(
-      w1_data, b1_data, w2_data, b2_data, input_data, labels, lr,
+      w1_data, b1_data, w2_data, b2_data, input_data, labels, lr, ws1, ws2,
     )
     fwd_times[i] = fwd
     bwd_times[i] = bwd

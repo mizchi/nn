@@ -215,16 +215,32 @@ void tensor_relu_backward(const float* dy, const float* x, float* dx, int n) {
 }
 
 // Bias add forward: result[i] = x[i] + bias[i % last_dim]
+// Row-wise loop avoids modulo overhead
 void tensor_bias_add_fwd(const float* x, const float* bias, float* out, int total, int last_dim) {
-  for (int i = 0; i < total; i++) {
-    out[i] = x[i] + bias[i % last_dim];
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    const float* xr = x + r * last_dim;
+    float* outr = out + r * last_dim;
+    for (int j = 0; j < last_dim; j++) {
+      outr[j] = xr[j] + bias[j];
+    }
   }
 }
 
-// Bias add backward (dbias): db[j] += dy[i] for j = i % last_dim
+// Bias add backward (dbias): db[j] += sum_rows dy[r, j]
+// Row-wise loop avoids modulo overhead
 void tensor_bias_add_bwd(const float* dy, float* db, int total, int last_dim) {
-  for (int i = 0; i < total; i++) {
-    db[i % last_dim] += dy[i];
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(last_dim, 1.0f, dy + r * last_dim, 1, db, 1);
+  }
+}
+
+// Bias add in-place: y[i] += bias[i % last_dim]
+void tensor_bias_add_inplace(float* y, const float* bias, int total, int last_dim) {
+  int rows = total / last_dim;
+  for (int r = 0; r < rows; r++) {
+    cblas_saxpy(last_dim, 1.0f, bias, 1, y + r * last_dim, 1);
   }
 }
 

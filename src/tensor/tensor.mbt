@@ -182,7 +182,6 @@ fn copy_tensor_data(src : Tensor, dst : FixedArray[Float]) -> Unit {
   } else {
     // Generic N-D copy using recursive indexing
     let _ = copy_nd(src, dst, [], 0)
-
   }
 }
 

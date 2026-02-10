@@ -1,8 +1,8 @@
 import {
-  "mizchi/nn/nn" as @nn,
+  "mizchi/nn/nn" @nn,
   "moonbitlang/async",
-  "moonbitlang/async/fs" as @afs,
-  "moonbitlang/async/js_async" as @js_async,
+  "moonbitlang/async/fs" @afs,
+  "moonbitlang/async/js_async" @js_async,
 }
 
 options(

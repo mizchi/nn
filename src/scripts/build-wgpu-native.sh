@@ -15,7 +15,7 @@ if [[ "$OUTPUT_PATH" != /* ]]; then
   OUTPUT_PATH="$PKG_DIR/$OUTPUT_PATH"
 fi
 
-if [[ -d "$REPO_DIR/.git" ]]; then
+if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$REPO_DIR" submodule update --init --recursive deps/wgpu-native
 fi
 

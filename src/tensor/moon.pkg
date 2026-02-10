@@ -1,5 +1,5 @@
 import {
-  "moonbitlang/core/math" as @math,
+  "moonbitlang/core/math" @math,
 }
 
 options(

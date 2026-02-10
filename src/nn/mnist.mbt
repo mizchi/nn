@@ -52,7 +52,7 @@ fn read_u32_be(bytes : Bytes, offset : Int) -> UInt {
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << ((3 - j) * 8)) {
 
-  } else {
+  } nobreak {
     acc
   }
 }

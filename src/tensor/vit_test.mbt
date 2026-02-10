@@ -78,7 +78,6 @@ test "prepend_cls_token_shape" {
   // Patches at position 1 should be 0.5
   inspect(out.at3(0, 1, 0), content="0.5")
   let _ = config
-
 }
 
 ///|

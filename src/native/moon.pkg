@@ -1,5 +1,5 @@
 import {
-  "mizchi/nn" as @wgpu,
+  "mizchi/nn" @wgpu,
 }
 
 options(

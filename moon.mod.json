@@ -1,10 +1,10 @@
 {
   "name": "mizchi/nn",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "deps": {
-    "moonbitlang/async": "0.16.4",
-    "mizchi/blas": "0.1.0",
-    "mizchi/numbt": "0.2.0"
+    "moonbitlang/async": "0.16.6",
+    "mizchi/blas": "0.1.1",
+    "mizchi/numbt": "0.2.1"
   },
   "readme": "README.md",
   "repository": "https://github.com/mizchi/nn",

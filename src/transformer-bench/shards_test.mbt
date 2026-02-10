@@ -24,7 +24,7 @@ test "load_token_shards_meta_and_ids_uint16" {
   let meta_path = dir + "/meta.json"
   let mut err = ""
   let mut ids : Array[Int] = []
-  @async.run_async_main(fn() {
+  @async.run_async_main(() => {
     let mkdir_result = try? @afs.mkdir(dir, permission=0o755, recursive=true)
     match mkdir_result {
       Ok(_) => ()
@@ -95,7 +95,7 @@ test "load_token_ids_from_shards_honors_limits" {
   let meta_path = dir + "/meta.json"
   let mut err = ""
   let mut ids : Array[Int] = []
-  @async.run_async_main(fn() {
+  @async.run_async_main(() => {
     let _ = try? @afs.mkdir(dir, permission=0o755, recursive=true)
     let _ = try? @afs.write_file(
       dir + "/shard-000000.bin",

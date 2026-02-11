@@ -18,7 +18,7 @@ jobs:
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
       - name: Moon update
         run: moon update
-      - name: Moon check (numbt)
-        run: moon check --target native src/numbt
-      - name: Moon test (numbt)
-        run: moon test --target native src/numbt
+      - name: Moon check (src)
+        run: moon check --target native src
+      - name: Moon test (src)
+        run: moon test --target native src

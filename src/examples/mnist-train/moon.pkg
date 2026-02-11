@@ -1,15 +1,14 @@
 import {
-  "mizchi/blas" as @blas,
-  "mizchi/nn/nn" as @nn,
-  "mizchi/nn/nn-cpu" as @nn_cpu,
-  "mizchi/nn/examples/mnist" as @mnist,
-  "mizchi/nn/tensor" as @tensor,
-  "mizchi/nn" as @wgpu,
+  "mizchi/blas" @blas,
+  "mizchi/nn/nn" @nn,
+  "mizchi/nn/nn-cpu" @nn_cpu,
+  "mizchi/nn/examples/mnist" @mnist,
+  "mizchi/nn/tensor" @tensor,
+  "mizchi/nn" @wgpu,
   "moonbitlang/async",
-  "moonbitlang/async/fs" as @afs,
-  "moonbitlang/core/env" as @env,
-  "moonbitlang/core/math" as @math,
-  "moonbitlang/core/strconv" as @strconv,
+  "moonbitlang/async/fs" @afs,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/strconv" @strconv,
 }
 
 options(

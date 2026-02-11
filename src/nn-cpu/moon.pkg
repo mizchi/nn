@@ -1,8 +1,11 @@
 import {
-  "mizchi/numbt" as @numbt,
-  "mizchi/nn" as @wgpu,
-  "mizchi/nn/nn" as @nn,
+  "mizchi/numbt" @numbt,
+  "mizchi/nn/nn" @nn,
 }
+
+import {
+  "mizchi/nn" @wgpu,
+} for "test"
 
 options(
   link: { "native": { "cc-link-flags": "-framework Accelerate" } },

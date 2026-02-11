@@ -14,7 +14,7 @@ test "transformer_spec_new_valid" {
 ///|
 test "transformer_spec_new_d_model_not_divisible_by_heads" {
   let result = transformer_spec_new(8, 7, 2, 1, 32, 16, 2, 4)
-  inspect(result.is_err(), content="true")
+  inspect(result is Err(_), content="true")
 }
 
 ///|

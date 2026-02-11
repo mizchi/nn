@@ -584,7 +584,7 @@ fn read_u32_le(bytes : Bytes, offset : Int) -> UInt {
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << (j * 8)) {
 
-  } else {
+  } nobreak {
     acc
   }
 }
@@ -881,7 +881,7 @@ async fn gpu_train(
     Ok(b) => b
     Err(err) => return Err(wgpu_error_to_string(err))
   }
-  let output_buf = match @wgpu.device_create_buffer(device, resources.output) {
+  let _output_buf = match @wgpu.device_create_buffer(device, resources.output) {
     Ok(b) => b
     Err(err) => return Err(wgpu_error_to_string(err))
   }

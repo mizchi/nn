@@ -1,10 +1,10 @@
 import {
-  "mizchi/nn/tensor" as @tensor,
+  "mizchi/nn/tensor" @tensor,
   "moonbitlang/async",
-  "moonbitlang/async/fs" as @afs,
-  "moonbitlang/core/env" as @env,
-  "moonbitlang/core/json" as @json,
-  "moonbitlang/core/strconv" as @strconv,
+  "moonbitlang/async/fs" @afs,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/json" @json,
+  "moonbitlang/core/strconv" @strconv,
 }
 
 options(

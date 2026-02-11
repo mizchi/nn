@@ -52,7 +52,7 @@ fn read_u32_be(bytes : Bytes, offset : Int) -> UInt {
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << ((3 - j) * 8)) {
 
-  } else {
+  } nobreak {
     acc
   }
 }
@@ -104,7 +104,7 @@ pub fn mnist_read_images(bytes : Bytes) -> Result[MnistImages, MnistError] {
       let total = count * rows * cols
       let expected = 16 + total
       expect_exact_length("images", bytes.length(), expected).map(fn(_) {
-        let data = bytes.sub(start=16, end=expected).to_bytes()
+        let data = bytes[16:expected].to_bytes()
         { count, rows, cols, data }
       })
     }
@@ -129,7 +129,7 @@ pub fn mnist_read_labels(bytes : Bytes) -> Result[MnistLabels, MnistError] {
     } else {
       let expected = 8 + count
       expect_exact_length("labels", bytes.length(), expected).map(fn(_) {
-        let data = bytes.sub(start=8, end=expected).to_bytes()
+        let data = bytes[8:expected].to_bytes()
         { count, data }
       })
     }

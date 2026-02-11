@@ -518,7 +518,7 @@ fn read_u32_le(bytes : Bytes, offset : Int) -> UInt {
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << (j * 8)) {
 
-  } else {
+  } nobreak {
     acc
   }
 }
@@ -1423,6 +1423,7 @@ fn wgsl_indices(
   dataset_count : Int,
   workgroup_size : Int,
 ) -> String {
+  let _ = spec
   let dataset = u32_lit(dataset_count)
   let workgroup = workgroup_size.to_string()
   let s0 = "// MLP indices init\n"

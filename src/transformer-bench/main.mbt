@@ -1099,8 +1099,7 @@ async fn append_jsonl(path : String, line : String) -> Result[Unit, String] {
   let write_result = try? @afs.write_file(
     path,
     data,
-    create=0o644,
-    truncate=true,
+    permission=0o644,
   )
   match write_result {
     Ok(_) => Ok(())
@@ -1113,8 +1112,7 @@ async fn write_bytes_file(path : String, data : Bytes) -> Result[Unit, String] {
   let write_result = try? @afs.write_file(
     path,
     data,
-    create=0o644,
-    truncate=true,
+    permission=0o644,
   )
   match write_result {
     Ok(_) => Ok(())

@@ -36,8 +36,7 @@ test "load_token_shards_meta_and_ids_uint16" {
     let w0 = try? @afs.write_file(
       dir + "/shard-000000.bin",
       u16_bytes([1, 2, 3]),
-      create=0o644,
-      truncate=true,
+      permission=0o644,
     )
     match w0 {
       Ok(_) => ()
@@ -49,8 +48,7 @@ test "load_token_shards_meta_and_ids_uint16" {
     let w1 = try? @afs.write_file(
       dir + "/shard-000001.bin",
       u16_bytes([4, 5]),
-      create=0o644,
-      truncate=true,
+      permission=0o644,
     )
     match w1 {
       Ok(_) => ()
@@ -63,8 +61,7 @@ test "load_token_shards_meta_and_ids_uint16" {
     let wm = try? @afs.write_file(
       meta_path,
       ascii_bytes(meta),
-      create=0o644,
-      truncate=true,
+      permission=0o644,
     )
     match wm {
       Ok(_) => ()
@@ -100,21 +97,18 @@ test "load_token_ids_from_shards_honors_limits" {
     let _ = try? @afs.write_file(
       dir + "/shard-000000.bin",
       u16_bytes([10, 11, 12]),
-      create=0o644,
-      truncate=true,
+      permission=0o644,
     )
     let _ = try? @afs.write_file(
       dir + "/shard-000001.bin",
       u16_bytes([13, 14, 15]),
-      create=0o644,
-      truncate=true,
+      permission=0o644,
     )
     let meta = "{\"dtype\":\"uint16\",\"n_vocab\":50257,\"total_tokens\":6,\"shards\":[{\"file\":\"shard-000000.bin\",\"tokens\":3},{\"file\":\"shard-000001.bin\",\"tokens\":3}]}"
     let _ = try? @afs.write_file(
       meta_path,
       ascii_bytes(meta),
-      create=0o644,
-      truncate=true,
+      permission=0o644,
     )
     let meta_loaded = match load_token_shards_meta(meta_path) {
       Ok(v) => v

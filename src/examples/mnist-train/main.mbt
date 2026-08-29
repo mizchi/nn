@@ -2823,8 +2823,7 @@ async fn train_main() -> Unit {
       let write_result : Result[Unit, Error] = try? @afs.write_file(
         mnist_path(base, "mlp_784_128_10.bin"),
         data,
-        create=0o644,
-        truncate=true,
+        permission=0o644,
       )
       match write_result {
         Ok(_) => print_save(args, "data/mnist/mlp_784_128_10.bin")

@@ -55,7 +55,7 @@ pub fn CharTokenizer::encode(self : CharTokenizer, text : String) -> Array[Int] 
 
 ///|
 pub fn CharTokenizer::decode(self : CharTokenizer, ids : Array[Int]) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for i = 0; i < ids.length(); i = i + 1 {
     let id = ids[i]
     if id >= 0 && id < self.chars.length() {

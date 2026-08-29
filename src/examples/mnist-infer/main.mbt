@@ -76,7 +76,7 @@ fn print_usage(program : String) -> Unit {
 
 ///|
 fn parse_limit(value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err("limit must be > 0") }
     Err(err) => Err("invalid limit: " + err.to_string())
@@ -85,7 +85,7 @@ fn parse_limit(value : String) -> Result[Int, String] {
 
 ///|
 fn parse_batch(value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err("batch must be > 0") }
     Err(err) => Err("invalid batch: " + err.to_string())
@@ -119,7 +119,7 @@ fn parse_args(args : Array[String]) -> Result[InferArgs, String] {
       let view = arg.sub(start=10) catch {
         _ => return Err("invalid --weights value")
       }
-      weights_path = view.to_string()
+      weights_path = view.to_owned()
       i = i + 1
       continue
     }
@@ -138,7 +138,7 @@ fn parse_args(args : Array[String]) -> Result[InferArgs, String] {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --limit value")
       }
-      let value = view.to_string()
+      let value = view.to_owned()
       match parse_limit(value) {
         Ok(v) => limit = Some(v)
         Err(msg) => return Err(msg)
@@ -161,7 +161,7 @@ fn parse_args(args : Array[String]) -> Result[InferArgs, String] {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --batch value")
       }
-      let value = view.to_string()
+      let value = view.to_owned()
       match parse_batch(value) {
         Ok(v) => batch_size = v
         Err(msg) => return Err(msg)
@@ -184,7 +184,7 @@ fn parse_args(args : Array[String]) -> Result[InferArgs, String] {
       let view = arg.sub(start=10) catch {
         _ => return Err("invalid --backend value")
       }
-      match parse_backend(view.to_string()) {
+      match parse_backend(view.to_owned()) {
         Ok(v) => backend = v
         Err(msg) => return Err(msg)
       }
@@ -227,7 +227,7 @@ fn wgpu_error_to_string(err : @wgpu.WgpuError) -> String {
 
 ///|
 fn read_u32_le(bytes : Bytes, offset : Int) -> UInt {
-  for j = 0, acc = UInt::default()
+  for j = 0, acc = Default::default()
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << (j * 8)) {
 
@@ -912,7 +912,7 @@ struct EvalReport {
 
 ///|
 fn json_escape(value : String) -> String {
-  let sb = StringBuilder::new(size_hint=value.length())
+  let sb = StringBuilder(size_hint=value.length())
   let len = value.length()
   for i = 0; i < len; i = i + 1 {
     let ch = value.unsafe_get(i)
@@ -945,7 +945,7 @@ fn json_field(key : String, value : String) -> String {
 
 ///|
 fn json_object(fields : Array[String]) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   sb.write_char('{')
   for i = 0; i < fields.length(); i = i + 1 {
     if i > 0 {

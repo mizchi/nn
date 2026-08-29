@@ -514,7 +514,7 @@ fn expect_bytes_length(
 
 ///|
 fn read_u32_le(bytes : Bytes, offset : Int) -> UInt {
-  for j = 0, acc = UInt::default()
+  for j = 0, acc = Default::default()
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << (j * 8)) {
 

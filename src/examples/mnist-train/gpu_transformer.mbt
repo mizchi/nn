@@ -1203,7 +1203,7 @@ async fn gpu_transformer_test() -> Unit {
 
 ///|
 fn format_floats(data : Array[Float], n : Int) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   sb.write_char('[')
   let count = if n < data.length() { n } else { data.length() }
   for i = 0; i < count; i = i + 1 {

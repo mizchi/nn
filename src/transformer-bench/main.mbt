@@ -68,7 +68,7 @@ fn bench_args_default() -> BenchArgs {
 
 ///|
 fn parse_positive_int(name : String, value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err(name + " must be > 0") }
     Err(err) => Err("invalid " + name + ": " + err.to_string())
@@ -77,7 +77,7 @@ fn parse_positive_int(name : String, value : String) -> Result[Int, String] {
 
 ///|
 fn parse_nonnegative_int(name : String, value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v >= 0 { Ok(v) } else { Err(name + " must be >= 0") }
     Err(err) => Err("invalid " + name + ": " + err.to_string())
@@ -86,7 +86,7 @@ fn parse_nonnegative_int(name : String, value : String) -> Result[Int, String] {
 
 ///|
 fn parse_positive_float(name : String, value : String) -> Result[Float, String] {
-  let parsed = try? @strconv.parse_double(value)
+  let parsed = try? @string.parse_double(value)
   match parsed {
     Ok(v) =>
       if v > 0.0 {
@@ -102,7 +102,7 @@ fn parse_positive_float(name : String, value : String) -> Result[Float, String] 
 fn parse_prompt_ids_csv(value : String) -> Result[Array[Int], String] {
   let ids : Array[Int] = []
   for part in value.split(",") {
-    let token = part.to_string().trim().to_string()
+    let token = part.to_owned().trim().to_owned()
     if token.length() == 0 {
       return Err("invalid preview-prompt-ids: empty token")
     }
@@ -228,7 +228,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --steps value")
       }
-      match parse_positive_int("steps", view.to_string()) {
+      match parse_positive_int("steps", view.to_owned()) {
         Ok(v) => steps = v
         Err(msg) => return Err(msg)
       }
@@ -239,7 +239,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=13) catch {
         _ => return Err("invalid --long-steps value")
       }
-      match parse_positive_int("long-steps", view.to_string()) {
+      match parse_positive_int("long-steps", view.to_owned()) {
         Ok(v) => long_steps = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -261,7 +261,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=9) catch {
         _ => return Err("invalid --warmup value")
       }
-      match parse_nonnegative_int("warmup", view.to_string()) {
+      match parse_nonnegative_int("warmup", view.to_owned()) {
         Ok(v) => warmup = v
         Err(msg) => return Err(msg)
       }
@@ -283,7 +283,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=13) catch {
         _ => return Err("invalid --batch-size value")
       }
-      match parse_positive_int("batch-size", view.to_string()) {
+      match parse_positive_int("batch-size", view.to_owned()) {
         Ok(v) => batch_size = v
         Err(msg) => return Err(msg)
       }
@@ -305,7 +305,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=10) catch {
         _ => return Err("invalid --seq-len value")
       }
-      match parse_positive_int("seq-len", view.to_string()) {
+      match parse_positive_int("seq-len", view.to_owned()) {
         Ok(v) => seq_len = v
         Err(msg) => return Err(msg)
       }
@@ -327,7 +327,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=10) catch {
         _ => return Err("invalid --d-model value")
       }
-      match parse_positive_int("d-model", view.to_string()) {
+      match parse_positive_int("d-model", view.to_owned()) {
         Ok(v) => d_model = v
         Err(msg) => return Err(msg)
       }
@@ -349,7 +349,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --heads value")
       }
-      match parse_positive_int("heads", view.to_string()) {
+      match parse_positive_int("heads", view.to_owned()) {
         Ok(v) => num_heads = v
         Err(msg) => return Err(msg)
       }
@@ -371,7 +371,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=9) catch {
         _ => return Err("invalid --layers value")
       }
-      match parse_positive_int("layers", view.to_string()) {
+      match parse_positive_int("layers", view.to_owned()) {
         Ok(v) => num_layers = v
         Err(msg) => return Err(msg)
       }
@@ -393,7 +393,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=7) catch {
         _ => return Err("invalid --d-ff value")
       }
-      match parse_positive_int("d-ff", view.to_string()) {
+      match parse_positive_int("d-ff", view.to_owned()) {
         Ok(v) => d_ff = v
         Err(msg) => return Err(msg)
       }
@@ -415,7 +415,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=5) catch {
         _ => return Err("invalid --lr value")
       }
-      match parse_positive_float("lr", view.to_string()) {
+      match parse_positive_float("lr", view.to_owned()) {
         Ok(v) => lr = v
         Err(msg) => return Err(msg)
       }
@@ -437,7 +437,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=7) catch {
         _ => return Err("invalid --seed value")
       }
-      match parse_nonnegative_int("seed", view.to_string()) {
+      match parse_nonnegative_int("seed", view.to_owned()) {
         Ok(v) => seed = v
         Err(msg) => return Err(msg)
       }
@@ -459,7 +459,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=14) catch {
         _ => return Err("invalid --print-every value")
       }
-      match parse_positive_int("print-every", view.to_string()) {
+      match parse_positive_int("print-every", view.to_owned()) {
         Ok(v) => print_every = v
         Err(msg) => return Err(msg)
       }
@@ -481,7 +481,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=9) catch {
         _ => return Err("invalid --repeat value")
       }
-      match parse_positive_int("repeat", view.to_string()) {
+      match parse_positive_int("repeat", view.to_owned()) {
         Ok(v) => repeat = v
         Err(msg) => return Err(msg)
       }
@@ -500,7 +500,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=13) catch {
         _ => return Err("invalid --shard-meta value")
       }
-      shard_meta = Some(view.to_string())
+      shard_meta = Some(view.to_owned())
       i = i + 1
       continue
     }
@@ -519,7 +519,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=19) catch {
         _ => return Err("invalid --shard-max-shards value")
       }
-      match parse_positive_int("shard-max-shards", view.to_string()) {
+      match parse_positive_int("shard-max-shards", view.to_owned()) {
         Ok(v) => shard_max_shards = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -541,7 +541,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=19) catch {
         _ => return Err("invalid --shard-max-tokens value")
       }
-      match parse_positive_int("shard-max-tokens", view.to_string()) {
+      match parse_positive_int("shard-max-tokens", view.to_owned()) {
         Ok(v) => shard_max_tokens = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -563,7 +563,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=13) catch {
         _ => return Err("invalid --eval-every value")
       }
-      match parse_nonnegative_int("eval-every", view.to_string()) {
+      match parse_nonnegative_int("eval-every", view.to_owned()) {
         Ok(v) => eval_every = v
         Err(msg) => return Err(msg)
       }
@@ -585,7 +585,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=13) catch {
         _ => return Err("invalid --eval-steps value")
       }
-      match parse_positive_int("eval-steps", view.to_string()) {
+      match parse_positive_int("eval-steps", view.to_owned()) {
         Ok(v) => eval_steps = v
         Err(msg) => return Err(msg)
       }
@@ -607,7 +607,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=19) catch {
         _ => return Err("invalid --checkpoint-every value")
       }
-      match parse_nonnegative_int("checkpoint-every", view.to_string()) {
+      match parse_nonnegative_int("checkpoint-every", view.to_owned()) {
         Ok(v) => checkpoint_every = v
         Err(msg) => return Err(msg)
       }
@@ -626,7 +626,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=18) catch {
         _ => return Err("invalid --checkpoint-path value")
       }
-      checkpoint_path = Some(view.to_string())
+      checkpoint_path = Some(view.to_owned())
       i = i + 1
       continue
     }
@@ -642,7 +642,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=20) catch {
         _ => return Err("invalid --resume-checkpoint value")
       }
-      resume_checkpoint = Some(view.to_string())
+      resume_checkpoint = Some(view.to_owned())
       i = i + 1
       continue
     }
@@ -658,7 +658,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=12) catch {
         _ => return Err("invalid --log-jsonl value")
       }
-      log_jsonl = Some(view.to_string())
+      log_jsonl = Some(view.to_owned())
       i = i + 1
       continue
     }
@@ -677,7 +677,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=21) catch {
         _ => return Err("invalid --preview-prompt-ids value")
       }
-      match parse_prompt_ids_csv(view.to_string()) {
+      match parse_prompt_ids_csv(view.to_owned()) {
         Ok(v) => preview_prompt_ids = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -696,7 +696,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=22) catch {
         _ => return Err("invalid --preview-prompt-text value")
       }
-      preview_prompt_text = Some(view.to_string())
+      preview_prompt_text = Some(view.to_owned())
       i = i + 1
       continue
     }
@@ -715,7 +715,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=21) catch {
         _ => return Err("invalid --preview-new-tokens value")
       }
-      match parse_positive_int("preview-new-tokens", view.to_string()) {
+      match parse_positive_int("preview-new-tokens", view.to_owned()) {
         Ok(v) => preview_new_tokens = v
         Err(msg) => return Err(msg)
       }
@@ -737,7 +737,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=22) catch {
         _ => return Err("invalid --preview-temperature value")
       }
-      match parse_positive_float("preview-temperature", view.to_string()) {
+      match parse_positive_float("preview-temperature", view.to_owned()) {
         Ok(v) => preview_temperature = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -759,7 +759,7 @@ fn parse_args(args : Array[String]) -> Result[BenchArgs, String] {
       let view = arg.sub(start=15) catch {
         _ => return Err("invalid --preview-seed value")
       }
-      match parse_nonnegative_int("preview-seed", view.to_string()) {
+      match parse_nonnegative_int("preview-seed", view.to_owned()) {
         Ok(v) => preview_seed = v
         Err(msg) => return Err(msg)
       }
@@ -1099,8 +1099,7 @@ async fn append_jsonl(path : String, line : String) -> Result[Unit, String] {
   let write_result = try? @afs.write_file(
     path,
     data,
-    create=0o644,
-    truncate=true,
+    permission=0o644,
   )
   match write_result {
     Ok(_) => Ok(())
@@ -1113,8 +1112,7 @@ async fn write_bytes_file(path : String, data : Bytes) -> Result[Unit, String] {
   let write_result = try? @afs.write_file(
     path,
     data,
-    create=0o644,
-    truncate=true,
+    permission=0o644,
   )
   match write_result {
     Ok(_) => Ok(())
@@ -1303,9 +1301,9 @@ async fn run_preview(cfg : BenchArgs) -> Unit {
   println("=== Transformer Preview ===")
   println("checkpoint=" + checkpoint_path)
   println("source=" + source)
-  println("prompt_ids=" + prompt_ids.to_string())
-  println("output_ids=" + output_ids.to_string())
-  println("new_ids=" + new_ids.to_string())
+  println("prompt_ids=" + @debug.to_string(prompt_ids))
+  println("output_ids=" + @debug.to_string(output_ids))
+  println("new_ids=" + @debug.to_string(new_ids))
   match tokenizer {
     Some(tokenizer) => {
       println("prompt_text=" + tokenizer.decode(prompt_ids))

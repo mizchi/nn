@@ -90,7 +90,7 @@ fn print_usage(program : String) -> Unit {
 
 ///|
 fn parse_limit(value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err("limit must be > 0") }
     Err(err) => Err("invalid limit: " + err.to_string())
@@ -99,7 +99,7 @@ fn parse_limit(value : String) -> Result[Int, String] {
 
 ///|
 fn parse_epochs(value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err("epochs must be > 0") }
     Err(err) => Err("invalid epochs: " + err.to_string())
@@ -108,7 +108,7 @@ fn parse_epochs(value : String) -> Result[Int, String] {
 
 ///|
 fn parse_batch(value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err("batch must be > 0") }
     Err(err) => Err("invalid batch: " + err.to_string())
@@ -117,7 +117,7 @@ fn parse_batch(value : String) -> Result[Int, String] {
 
 ///|
 fn parse_workgroup(value : String) -> Result[Int, String] {
-  let parsed = try? @strconv.parse_int(value)
+  let parsed = try? @string.parse_int(value)
   match parsed {
     Ok(v) => if v > 0 { Ok(v) } else { Err("workgroup must be > 0") }
     Err(err) => Err("invalid workgroup: " + err.to_string())
@@ -158,7 +158,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
       let view = arg.sub(start=10) catch {
         _ => return Err("invalid --backend value")
       }
-      match parse_backend(view.to_string()) {
+      match parse_backend(view.to_owned()) {
         Ok(v) => backend = v
         Err(msg) => return Err(msg)
       }
@@ -215,7 +215,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --batch value")
       }
-      match parse_batch(view.to_string()) {
+      match parse_batch(view.to_owned()) {
         Ok(v) => batch_size = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -237,7 +237,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
       let view = arg.sub(start=12) catch {
         _ => return Err("invalid --workgroup value")
       }
-      match parse_workgroup(view.to_string()) {
+      match parse_workgroup(view.to_owned()) {
         Ok(v) => workgroup_size = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -264,7 +264,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
       let view = arg.sub(start=8) catch {
         _ => return Err("invalid --limit value")
       }
-      match parse_limit(view.to_string()) {
+      match parse_limit(view.to_owned()) {
         Ok(v) => limit = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -286,7 +286,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
       let view = arg.sub(start=9) catch {
         _ => return Err("invalid --epochs value")
       }
-      match parse_epochs(view.to_string()) {
+      match parse_epochs(view.to_owned()) {
         Ok(v) => epochs = Some(v)
         Err(msg) => return Err(msg)
       }
@@ -316,7 +316,7 @@ fn parse_args(args : Array[String]) -> Result[TrainArgs, String] {
 
 ///|
 fn json_escape(value : String) -> String {
-  let sb = StringBuilder::new(size_hint=value.length())
+  let sb = StringBuilder(size_hint=value.length())
   let len = value.length()
   for i = 0; i < len; i = i + 1 {
     let ch = value.unsafe_get(i)
@@ -349,7 +349,7 @@ fn json_field(key : String, value : String) -> String {
 
 ///|
 fn json_object(fields : Array[String]) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   sb.write_char('{')
   for i = 0; i < fields.length(); i = i + 1 {
     if i > 0 {
@@ -580,7 +580,7 @@ fn wgpu_error_to_string(err : @wgpu.WgpuError) -> String {
 
 ///|
 fn read_u32_le(bytes : Bytes, offset : Int) -> UInt {
-  for j = 0, acc = UInt::default()
+  for j = 0, acc = Default::default()
       j < 4
       j = j + 1, acc = acc | (bytes[offset + j].to_uint() << (j * 8)) {
 
@@ -2823,8 +2823,7 @@ async fn train_main() -> Unit {
       let write_result : Result[Unit, Error] = try? @afs.write_file(
         mnist_path(base, "mlp_784_128_10.bin"),
         data,
-        create=0o644,
-        truncate=true,
+        permission=0o644,
       )
       match write_result {
         Ok(_) => print_save(args, "data/mnist/mlp_784_128_10.bin")

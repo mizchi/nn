@@ -38,7 +38,7 @@ priv struct NativeLayoutEntry {
 fn to_native_layout_entry(
   entry : BindGroupLayoutEntry,
 ) -> Result[NativeLayoutEntry, WgpuError] {
-  if not(is_buffer_binding(entry.ty)) {
+  if !(is_buffer_binding(entry.ty)) {
     log_native_error(
       "bind group layout entry not supported (binding=" +
       entry.binding.to_string() +
@@ -712,7 +712,7 @@ pub async fn request_device(
   desc : DeviceDescriptor,
 ) -> Result[Device, WgpuError] {
   if desc.required_features.length() > 0 ||
-    not(limits_is_default(desc.required_limits)) {
+    !(limits_is_default(desc.required_limits)) {
     log_native_error("request_device rejected non-default features/limits")
     return Err(NotSupported)
   }

@@ -6,7 +6,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/fs" @afs,
   "moonbitlang/core/env" @env,
-  "moonbitlang/core/strconv" @strconv,
+  "moonbitlang/core/string" @string,
 }
 
 options(

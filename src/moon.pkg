@@ -16,6 +16,7 @@ options(
       "output": "build-stamps/wgpu_native_build.stamp",
     },
   ],
-  "supported-targets": [ "native" ],
   targets: { "wgpu_native.mbt": [ "native" ] },
 )
+
+supported_targets = "native"

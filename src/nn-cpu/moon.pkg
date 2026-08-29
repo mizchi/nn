@@ -9,5 +9,6 @@ import {
 
 options(
   link: { "native": { "cc-link-flags": "-framework Accelerate" } },
-  "supported-targets": [ "native" ],
 )
+
+supported_targets = "native"
